@@ -107,7 +107,7 @@ struct BSidePaletteTests {
         let ayuMirage = try #require(GhosttyThemeCatalog.theme(named: "Ayu Mirage"))
         #expect(ayuMirage.palette[8] == "686868")
 
-        let palette = DashPalette.themed(from: ayuMirage)
+        let palette = BSidePalette.themed(from: ayuMirage)
         let secondary = try #require(NSColor(palette.textSecondary).usingColorSpace(.deviceRGB))
         let bright8 = try #require(NSColor(Color(hex: "686868")).usingColorSpace(.deviceRGB))
 
@@ -128,7 +128,7 @@ struct BSidePaletteTests {
             foreground: "f0f0f0",
             palette: [8: "1f1f1f"]
         )
-        let palette = DashPalette.themed(from: hostile)
+        let palette = BSidePalette.themed(from: hostile)
         let background = RGBColor(hex: hostile.background)
         let secondary = rgbColor(from: palette.textSecondary)
         let disabled = rgbColor(from: palette.textDisabled)
@@ -186,9 +186,9 @@ private func componentsAreClose(_ a: NSColor, _ b: NSColor, tolerance: CGFloat) 
 /// Recovers an `RGBColor` (this module's internal blend/contrast type) from a
 /// resolved `Color`, for asserting on palette output without exposing test
 /// plumbing in the palette's own API.
-private func rgbColor(from color: Color) -> DashNativeKit.RGBColor {
+private func rgbColor(from color: Color) -> BSideKit.RGBColor {
     let ns = NSColor(color).usingColorSpace(.deviceRGB) ?? NSColor(color)
-    return DashNativeKit.RGBColor(r: Double(ns.redComponent), g: Double(ns.greenComponent), b: Double(ns.blueComponent))
+    return BSideKit.RGBColor(r: Double(ns.redComponent), g: Double(ns.greenComponent), b: Double(ns.blueComponent))
 }
 
 private extension Color {

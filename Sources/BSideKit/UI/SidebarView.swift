@@ -227,7 +227,7 @@ struct SidebarView: View {
     /// the bare (and, for some themes, near-black) row background instead.
     /// Painting the fill ourselves keeps the pairing intact regardless of
     /// `List`'s internal rendering.
-    private func selectionFill(isSelected: Bool, in palette: DashPalette) -> some View {
+    private func selectionFill(isSelected: Bool, in palette: BSidePalette) -> some View {
         RoundedRectangle(cornerRadius: 5, style: .continuous)
             .fill(isSelected ? palette.selectionBackground : Color.clear)
     }
