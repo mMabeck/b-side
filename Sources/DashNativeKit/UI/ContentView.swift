@@ -27,6 +27,10 @@ public struct ContentView: View {
     public var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(store: store)
+                // The default sidebar column is narrow enough to truncate most
+                // task names to a few characters, which defeats the point of
+                // the list. Give it room, and a floor it cannot be dragged below.
+                .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         } detail: {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
