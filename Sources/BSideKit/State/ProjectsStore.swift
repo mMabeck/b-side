@@ -11,6 +11,21 @@ public enum MainSelection: Equatable {
     case none
     case project(Project)
     case task(TaskRecord, Project)
+
+    /// The project a bare "new task" action (Cmd+N, File › New Task) should
+    /// target: the selected task's own project when a task is selected —
+    /// since a task is always the more specific selection — else the selected
+    /// project itself, else `nil` so the action can no-op instead of guessing.
+    /// Pure and derived from the same selection `mainSelection` already
+    /// resolves, so Cmd+N can never target a different project than the one
+    /// the sidebar/dashboard currently show as selected.
+    public var taskCreationTarget: Project? {
+        switch self {
+        case .none: return nil
+        case .project(let project): return project
+        case .task(_, let project): return project
+        }
+    }
 }
 
 /// Drives the sidebar's project (and nested task) list live from the database,
@@ -41,6 +56,16 @@ public final class ProjectsStore {
     /// state) rather than a task terminal — a project alone is never a
     /// terminal.
     public var selectedTaskID: Int64?
+
+    /// The project a task-creation sheet should be presented for, or `nil`
+    /// when no sheet should be showing. Every trigger — the sidebar's
+    /// per-project "+", its context menu, the dashboard's "New Task" button,
+    /// Cmd+N, and the File menu — sets this instead of keeping its own
+    /// `@State` sheet flag. A single `ProjectsStore`-owned optional, presented
+    /// once (in `ContentView`), means it is structurally impossible for two
+    /// of those triggers to end up presenting the sheet twice or leaving it
+    /// stuck open pointed at a stale project.
+    public var pendingTaskCreationProject: Project?
 
     public var selectedTask: TaskRecord? {
         guard let selectedTaskID else { return nil }
