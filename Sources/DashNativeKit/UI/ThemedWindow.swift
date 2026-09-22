@@ -21,15 +21,21 @@ struct ThemedWindowModifier: ViewModifier {
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
 
-        // `NavigationSplitView`'s sidebar columns are backed by a system
-        // `NSVisualEffectView` (macOS's "sidebar" vibrancy material). That
-        // material follows the window's key/active state and, while
-        // inactive, blends toward a near-white tint regardless of the
-        // window's appearance or any SwiftUI colour drawn on top — the exact
-        // "dark terminal in a white app" seam this change exists to close.
-        // Forcing every such view to an opaque, always-"active" content
-        // material makes the sidebar render the flat themed colour SwiftUI
-        // asked for, in every window-focus state, not just when key.
+        // `NavigationSplitView`'s sidebar columns are backed by translucent
+        // system chrome: on older AppKit this is an `NSVisualEffectView`
+        // (macOS's "sidebar" vibrancy material), on the newer "Liquid Glass"
+        // AppKit it's a private `BackdropView` sibling instead. Both follow
+        // the window's key/active state and sample what's behind the window,
+        // blending toward a near-white tint regardless of the window's
+        // appearance or any SwiftUI colour drawn on top — the exact "dark
+        // terminal in a white app" seam this change exists to close.
+        // `neutralizeVibrancy` handles both: the `NSVisualEffectView` case is
+        // forced to an opaque, always-"active" content material; `BackdropView`,
+        // which has no such material to switch to, is hidden outright.
+        // `NSContainerConcentricGlassEffectView` looks like the same family
+        // by name but is not touched: on this SDK it's the container that
+        // actually hosts the sidebar's real SwiftUI content, not a
+        // decorative overlay, so hiding it would hide the content with it.
         if let contentView = window.contentView {
             neutralizeVibrancy(in: contentView)
         }
@@ -48,6 +54,24 @@ private func neutralizeVibrancy(in view: NSView) {
         effectView.state = .active
         effectView.material = .contentBackground
     }
+
+    // On the newer "Liquid Glass" AppKit chrome, the sidebar column's
+    // translucent backing is a private `BackdropView` that samples whatever
+    // is behind the window to render its blur. There is no public API to
+    // retint it, and unlike `NSVisualEffectView` it has no "opaque content
+    // material" to switch to. It is a purely decorative leaf — a sibling of
+    // this app's own SwiftUI-drawn content, never an ancestor of it — so
+    // hiding it removes only the vibrancy layer and leaves this app's themed
+    // background exactly where it was drawn. `NSContainerConcentricGlassEffectView`
+    // is deliberately *not* matched here even though its name suggests the
+    // same family: on this SDK it is the actual container that hosts the
+    // sidebar's real SwiftUI content (confirmed by walking the live view
+    // hierarchy), so hiding it would hide the content along with the glass.
+    let className = NSStringFromClass(type(of: view))
+    if className.hasSuffix("BackdropView") {
+        view.isHidden = true
+    }
+
     for subview in view.subviews {
         neutralizeVibrancy(in: subview)
     }
