@@ -87,7 +87,9 @@ struct MainAreaLogicTests {
             return (project, task)
         }
         store.start()
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil {
+            store.projects.contains { $0.id == project.id }
+        }
 
         #expect(MainAreaView.resolvedDirectory(for: store).path == FileManager.default.homeDirectoryForCurrentUser.path)
 
