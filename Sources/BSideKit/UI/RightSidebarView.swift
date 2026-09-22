@@ -55,7 +55,7 @@ struct RightSidebarView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 260, maxWidth: 320, maxHeight: .infinity, alignment: .top)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(theme.palette.surfaceBackground)
     }
 }
