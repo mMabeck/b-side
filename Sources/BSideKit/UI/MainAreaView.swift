@@ -60,7 +60,7 @@ struct MainAreaView: View {
         .background(theme.palette.windowBackground)
         .task(id: store.selectedTaskID) {
             if case .task(let task, let project) = store.mainSelection {
-                ensureHost(for: task, project: project)
+                await ensureHost(for: task, project: project)
             }
             syncVisibility()
             syncFocus()
@@ -103,9 +103,56 @@ struct MainAreaView: View {
         }
     }
 
-    private func ensureHost(for task: TaskRecord, project: Project) {
+    /// Launches (or reattaches to) a task's agent terminal: reuses its
+    /// active `Conversation` if one already exists, else starts a new one
+    /// under a fresh pi session id, then spawns `pi` with
+    /// `PiSessionService.launchCommand` so reopening the task or restarting
+    /// the app resumes the same pi session instead of a fresh one.
+    @MainActor
+    private func ensureHost(for task: TaskRecord, project: Project) async {
         guard let id = task.id, hostsByTaskID[id] == nil else { return }
-        hostsByTaskID[id] = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(forTask: task, project: project))
+
+        let conversation: Conversation
+        if let existing = await store.activeConversation(forTaskId: id) {
+            conversation = existing
+        } else {
+            let sessionID = PiSessionService.newSessionID()
+            conversation = (try? await store.startConversation(for: task, sessionID: sessionID))
+                ?? Conversation(taskId: id, sessionId: sessionID, transcriptPath: "")
+        }
+
+        let locations = PiSessionService.Locations.standard()
+        let command = PiSessionService.launchCommand(
+            locations: locations,
+            sessionID: conversation.sessionId,
+            transcriptPath: conversation.transcriptPath.isEmpty ? nil : conversation.transcriptPath,
+            taskName: task.name
+        )
+        hostsByTaskID[id] = TerminalSurfaceHost(
+            workingDirectory: MainAreaView.resolvedDirectory(forTask: task, project: project),
+            command: command
+        )
+
+        guard conversation.transcriptPath.isEmpty else { return }
+        Task { await Self.resolveTranscriptPath(for: conversation, locations: locations, store: store) }
+    }
+
+    /// Polls the sessions directory for the transcript pi creates shortly
+    /// after launch, then persists it once found. Bounded so a `pi` that
+    /// never starts (missing binary, launch failure) doesn't poll forever.
+    @MainActor
+    private static func resolveTranscriptPath(
+        for conversation: Conversation,
+        locations: PiSessionService.Locations,
+        store: ProjectsStore
+    ) async {
+        for _ in 0..<40 {
+            if let url = PiSessionService.locateTranscript(sessionID: conversation.sessionId, locations: locations) {
+                try? await store.recordTranscriptPath(url.path, for: conversation)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
     }
 
     /// Marks the active task's host visible and every other cached host not
