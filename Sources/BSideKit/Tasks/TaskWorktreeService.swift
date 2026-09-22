@@ -102,6 +102,20 @@ public enum TaskWorktreeService {
         return siblingRoot.appendingPathComponent(slug).path
     }
 
+    /// A variant of `baseSlug` whose worktree directory doesn't already exist,
+    /// suffixing with `-2`, `-3`, … so repeated task names — notably the
+    /// blank-name placeholder "New Task" — get distinct worktrees instead of
+    /// colliding with an existing task's directory.
+    static func uniqueSlug(forProjectAt projectPath: String, baseSlug: String) -> String {
+        var candidate = baseSlug
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: worktreePath(forProjectAt: projectPath, slug: candidate)) {
+            candidate = "\(baseSlug)-\(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
     /// Creates a task's branch and worktree, in the order the plan specifies:
     /// resolve base ref, create branch, create worktree, copy ignored files, run
     /// setup. If `existingBranch` is given, no branch is created — a worktree is
@@ -132,8 +146,9 @@ public enum TaskWorktreeService {
             )
         }
 
-        let slug = slug(forTaskName: taskName)
-        let worktreePathString = worktreePath(forProjectAt: project.path, slug: slug)
+        let baseSlug = slug(forTaskName: taskName)
+        let taskSlug = uniqueSlug(forProjectAt: project.path, baseSlug: baseSlug)
+        let worktreePathString = worktreePath(forProjectAt: project.path, slug: taskSlug)
         let worktreeURL = URL(fileURLWithPath: worktreePathString)
 
         let branchName: String
@@ -149,7 +164,7 @@ public enum TaskWorktreeService {
             try await GitCLI.addWorktree(at: worktreeURL, existingBranch: existingBranch, in: projectURL)
         } else {
             let resolvedBaseRef = baseRef ?? project.baseRef
-            branchName = "task/\(slug)"
+            branchName = "task/\(taskSlug)"
             branchCreatedByApp = true
             try await GitCLI.addWorktree(at: worktreeURL, newBranch: branchName, from: resolvedBaseRef, in: projectURL)
         }
