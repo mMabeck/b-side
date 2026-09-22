@@ -17,7 +17,9 @@ struct SubagentEventServerTests {
         let port = try #require(server.port)
 
         try await post(path: "/subagents/1/c1/begin", body: #"{"agent":"explorer","taskLabel":"Map cache callers"}"#, port: port)
-        try await post(path: "/subagents/1/c1/events", body: #"{"type":"tool_execution_end","toolCallId":"1","toolName":"bash","result":{"command":"ls"}}"# + "\n", port: port)
+        let messageEndLine = #"{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"1","name":"bash","arguments":{"command":"ls"}}]}}"#
+        try await post(path: "/subagents/1/c1/events", body: messageEndLine + "\n", port: port)
+        try await post(path: "/subagents/1/c1/events", body: #"{"type":"tool_execution_end","toolCallId":"1","toolName":"bash"}"# + "\n", port: port)
         try await post(path: "/subagents/1/c1/done", body: #"{"exitCode":0,"stopReason":"stop"}"#, port: port)
 
         try await waitUntil {

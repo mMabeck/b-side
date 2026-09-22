@@ -57,24 +57,52 @@ public final class SubagentFeedStore {
     }
 
     /// Applies one decoded event to the named child, creating a placeholder
-    /// run if none was registered yet (events can race registration).
+    /// run if none was registered yet (events can race registration). Tool
+    /// rows are created only from a `message_end` assistant tool-call part —
+    /// `tool_execution_*`/`toolResult` events for an unrecognised
+    /// `toolCallId` update nothing and fabricate no row.
     public func ingest(taskId: Int64, childId: String, event: SubagentEvent) {
         mutate(taskId: taskId, childId: childId) { run in
             switch event {
-            case let .messageEnd(_, stopReason, errorMessage, _):
+            case let .messageEnd(role, stopReason, errorMessage, toolCalls, _):
+                if role == "assistant" {
+                    for call in toolCalls {
+                        guard let id = call.id, let name = call.name else { continue }
+                        let line = ToolCallLineFormatter.format(toolName: name, args: call.arguments)
+                        if let index = run.toolCallRows.firstIndex(where: { $0.id == id }) {
+                            run.toolCallRows[index].name = name
+                            run.toolCallRows[index].line = line
+                        } else {
+                            run.toolCallRows.append(ToolCallRow(id: id, name: name, line: line))
+                            run.statistics.turns += 1
+                        }
+                        if isQuestionTool(name) {
+                            run.state = .blocked
+                        } else if run.state == .blocked {
+                            run.state = .active
+                        }
+                    }
+                }
                 if let stopReason, stopReason == "error" {
                     run.state = .failed
                     run.errorMessage = errorMessage
                 }
-            case let .toolExecutionUpdate(_, toolName, args), let .toolExecutionEnd(_, toolName, args):
-                if isQuestionTool(toolName) {
+            case let .toolResult(toolCallId, isError):
+                guard let toolCallId, let index = run.toolCallRows.firstIndex(where: { $0.id == toolCallId }) else { return }
+                run.toolCallRows[index].state = isError ? .failed : .completed
+                if isError {
+                    run.state = .failed
+                }
+            case let .toolExecutionUpdate(toolCallId, toolName), let .toolExecutionEnd(toolCallId, toolName):
+                guard let toolCallId, let index = run.toolCallRows.firstIndex(where: { $0.id == toolCallId }) else { return }
+                if case .toolExecutionEnd = event {
+                    run.toolCallRows[index].state = .completed
+                }
+                let name = toolName ?? run.toolCallRows[index].name
+                if isQuestionTool(name) {
                     run.state = .blocked
                 } else if run.state == .blocked {
                     run.state = .active
-                }
-                if case .toolExecutionEnd = event, let toolName {
-                    run.toolLines.append(ToolCallLineFormatter.format(toolName: toolName, args: args))
-                    run.statistics.turns += 1
                 }
             }
         }

@@ -1,5 +1,12 @@
 import SwiftUI
 
+private struct TitleSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
 /// One child run rendered as a card: real text layout and truncation instead
 /// of the terminal original's box-drawing characters, matching native-
 /// rewrite.md §6. Colour is driven entirely by the user's resolved Ghostty
@@ -9,8 +16,14 @@ struct SubagentCardView: View {
     @ObservedObject var theme: GhosttyResolvedTheme
 
     @State private var isExpanded = false
+    @State private var titleSize: CGSize = .zero
 
     private static let tailLineCount = 4
+    /// Horizontal distance from the card's left edge to where the title
+    /// chip starts, clearing the rounded corner and leaving the short
+    /// `┌─` lead-in segment of stroke visible before it.
+    private static let titleLeadIn: CGFloat = 16
+    private static let titleMaxWidth: CGFloat = 220
 
     private var accentColor: Color { theme.accent ?? .accentColor }
     private var foregroundColor: Color { theme.foreground ?? .primary }
@@ -40,7 +53,7 @@ struct SubagentCardView: View {
             statusFooter
         }
         .padding(.horizontal, 14)
-        .padding(.top, 20)
+        .padding(.top, 12)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(backgroundColor)
@@ -49,7 +62,7 @@ struct SubagentCardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(borderColor, lineWidth: run.state == .blocked ? 2 : 1)
         }
-        .overlay(alignment: .top) {
+        .overlay(alignment: .topLeading) {
             titleOverlay
         }
         .contentShape(Rectangle())
@@ -60,6 +73,10 @@ struct SubagentCardView: View {
         }
     }
 
+    /// Inlaid in the top border stroke rather than floating above it: a
+    /// background-coloured patch sized to the title's own measured bounds
+    /// breaks the stroke drawn underneath, and the title is centred on that
+    /// break so the line visibly resumes past it.
     private var titleOverlay: some View {
         HStack(spacing: 4) {
             Text(run.agent)
@@ -70,13 +87,17 @@ struct SubagentCardView: View {
                 .foregroundStyle(dimColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 2)
-        .background(backgroundColor)
-        .offset(y: -10)
-        .padding(.horizontal, 10)
+        .frame(maxWidth: Self.titleMaxWidth, alignment: .leading)
+        .padding(.horizontal, 6)
+        .background(
+            GeometryReader { proxy in
+                backgroundColor.preference(key: TitleSizeKey.self, value: proxy.size)
+            }
+        )
+        .fixedSize(horizontal: false, vertical: true)
+        .onPreferenceChange(TitleSizeKey.self) { titleSize = $0 }
+        .offset(x: Self.titleLeadIn, y: -titleSize.height / 2)
     }
 
     private var toolLinesView: some View {

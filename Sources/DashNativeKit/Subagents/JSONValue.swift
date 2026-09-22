@@ -41,6 +41,11 @@ extension JSONValue {
         return nil
     }
 
+    public var boolValue: Bool? {
+        if case let .bool(value) = self { return value }
+        return nil
+    }
+
     public var intValue: Int? {
         doubleValue.map(Int.init)
     }

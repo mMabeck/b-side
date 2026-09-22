@@ -1,11 +1,17 @@
 import Foundation
 
 /// One event from a child's `events.jsonl` (or the HTTP transport carrying the
-/// same shapes), decoded per `interactive-child.ts`.
+/// same shapes), decoded per Pi's `getDisplayItems` (`extensions/subagent/index.ts`).
+///
+/// Tool names and arguments live only on `message_end`'s assistant content
+/// parts; `tool_execution_update`/`tool_execution_end` carry a `toolCallId`
+/// but no arguments, and only report liveness/completion for a call already
+/// known from that assistant message.
 public enum SubagentEvent: Sendable, Equatable {
-    case messageEnd(role: String?, stopReason: String?, errorMessage: String?, toolCalls: [SubagentToolCall])
-    case toolExecutionUpdate(toolCallId: String?, toolName: String?, args: [String: JSONValue])
-    case toolExecutionEnd(toolCallId: String?, toolName: String?, args: [String: JSONValue])
+    case messageEnd(role: String?, stopReason: String?, errorMessage: String?, toolCalls: [SubagentToolCall], text: String?)
+    case toolResult(toolCallId: String?, isError: Bool)
+    case toolExecutionUpdate(toolCallId: String?, toolName: String?)
+    case toolExecutionEnd(toolCallId: String?, toolName: String?)
 
     /// Decodes one JSON line object (`{"type": "...", ...payload}`). Returns
     /// `nil` for malformed lines or unrecognised types, which are skipped
@@ -20,56 +26,58 @@ public enum SubagentEvent: Sendable, Equatable {
         case "message_end":
             let message = object["message"]?.objectValue ?? [:]
             let role = message["role"]?.stringValue
+            if role == "toolResult" {
+                let toolCallId = message["toolCallId"]?.stringValue
+                let isError = message["isError"]?.boolValue ?? false
+                return .toolResult(toolCallId: toolCallId, isError: isError)
+            }
             let stopReason = message["stopReason"]?.stringValue
             let errorMessage = message["errorMessage"]?.stringValue
             let toolCalls = extractToolCalls(from: message)
-            return .messageEnd(role: role, stopReason: stopReason, errorMessage: errorMessage, toolCalls: toolCalls)
+            let text = extractText(from: message)
+            return .messageEnd(role: role, stopReason: stopReason, errorMessage: errorMessage, toolCalls: toolCalls, text: text)
         case "tool_execution_update":
             let toolCallId = object["toolCallId"]?.stringValue
             let toolName = object["toolName"]?.stringValue ?? object["tool"]?.stringValue
-            let args = argsDictionary(from: object["partialResult"])
-            return .toolExecutionUpdate(toolCallId: toolCallId, toolName: toolName, args: args)
+            return .toolExecutionUpdate(toolCallId: toolCallId, toolName: toolName)
         case "tool_execution_end":
             let toolCallId = object["toolCallId"]?.stringValue
             let toolName = object["toolName"]?.stringValue ?? object["tool"]?.stringValue
-            let args = argsDictionary(from: object["result"])
-            return .toolExecutionEnd(toolCallId: toolCallId, toolName: toolName, args: args)
+            return .toolExecutionEnd(toolCallId: toolCallId, toolName: toolName)
         default:
             return nil
         }
     }
 
-    /// Assistant messages may carry a `toolCalls`/`content` array with each
-    /// call's `args`, echoed back on `tool_execution_end` under `result` in
-    /// some tools but not others; both paths are merged so formatting always
-    /// has the best arguments available.
+    /// An assistant message's `content` array carries each tool call as a
+    /// part with `type == "toolCall"`, `id`, `name`, and `arguments`.
     private static func extractToolCalls(from message: [String: JSONValue]) -> [SubagentToolCall] {
-        guard case let .array(calls)? = message["toolCalls"] else { return [] }
-        return calls.compactMap { call -> SubagentToolCall? in
-            guard let object = call.objectValue else { return nil }
-            let id = object["id"]?.stringValue ?? object["toolCallId"]?.stringValue
-            let name = object["name"]?.stringValue ?? object["toolName"]?.stringValue
-            let args = argsDictionary(from: object["args"] ?? object["input"])
-            return SubagentToolCall(id: id, name: name, args: args)
+        guard case let .array(parts)? = message["content"] else { return [] }
+        return parts.compactMap { part -> SubagentToolCall? in
+            guard let object = part.objectValue, object["type"]?.stringValue == "toolCall" else { return nil }
+            let id = object["id"]?.stringValue
+            let name = object["name"]?.stringValue
+            let arguments = object["arguments"]?.objectValue ?? [:]
+            return SubagentToolCall(id: id, name: name, arguments: arguments)
         }
     }
 
-    /// A payload's `partialResult`/`result` is either the arguments directly,
-    /// or an object nesting them under an `args` key. Either shape is
-    /// accepted so callers only ever deal with a flat dictionary.
-    private static func argsDictionary(from value: JSONValue?) -> [String: JSONValue] {
-        guard let object = value?.objectValue else { return [:] }
-        if let nested = object["args"]?.objectValue {
-            return nested
+    /// An assistant message's `content` array may also carry `text` parts,
+    /// which surface the child's prose.
+    private static func extractText(from message: [String: JSONValue]) -> String? {
+        guard case let .array(parts)? = message["content"] else { return nil }
+        let texts = parts.compactMap { part -> String? in
+            guard let object = part.objectValue, object["type"]?.stringValue == "text" else { return nil }
+            return object["text"]?.stringValue
         }
-        return object
+        return texts.isEmpty ? nil : texts.joined(separator: "\n")
     }
 }
 
 public struct SubagentToolCall: Sendable, Equatable {
     public var id: String?
     public var name: String?
-    public var args: [String: JSONValue]
+    public var arguments: [String: JSONValue]
 }
 
 /// The `done.json` payload written when a child finishes.
