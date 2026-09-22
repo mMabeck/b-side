@@ -2,7 +2,10 @@ import Foundation
 import SwiftUI
 
 /// The bottom terminal drawer: a second, independent shell surface in the
-/// same directory as the main-area terminal, for the user's own use.
+/// same directory the main area's current selection resolves to (a task's
+/// worktree, its project's path with no task selected, or home with nothing
+/// selected — see `MainAreaView.resolvedDirectory(for:)`), for the user's own
+/// use.
 ///
 /// Collapsing the drawer does not tear down its surface — it marks it
 /// not-visible (`TerminalSurfaceHost.isVisible = false`) per
@@ -10,6 +13,11 @@ import SwiftUI
 /// being hidden. `ContentView` keeps this view mounted at zero height rather
 /// than conditionally removing it, so the surface is never deinitialized by
 /// the collapse toggle.
+///
+/// This one surface is replaced (not cached per task, unlike the main area's
+/// task terminals) whenever the resolved directory changes: it is the user's
+/// own scratch shell, not a per-task artifact worth keeping alive once they
+/// have moved on.
 struct TerminalDrawerView: View {
     var store: ProjectsStore
     var isCollapsed: Bool
@@ -25,7 +33,7 @@ struct TerminalDrawerView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
         .background(theme.palette.elevatedSurfaceBackground)
-        .task(id: store.selectedProject?.id) {
+        .task(id: MainAreaView.resolvedDirectory(for: store)) {
             let newHost = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(for: store))
             newHost.isVisible = !isCollapsed
             host = newHost
