@@ -96,6 +96,18 @@ struct ProjectsStoreSelectionTests {
         #expect(reconciled.selectedTaskID == 10)
     }
 
+    @Test("A live selected task whose recorded project id is stale clears selection")
+    func reconcileClearsSelectionWhenLiveTaskHasStaleProjectID() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: 999,
+            selectedTaskID: 10,
+            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
+            tasksByProject: [1: [TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")]]
+        )
+        #expect(reconciled.selectedProjectID == nil)
+        #expect(reconciled.selectedTaskID == nil)
+    }
+
     @Test("A vanished selected task falls back to its still-live parent project")
     func reconcileFallsBackToParentProjectWhenTaskVanishes() {
         let reconciled = ProjectsStore.reconcileSelection(

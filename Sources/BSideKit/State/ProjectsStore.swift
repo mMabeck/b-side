@@ -83,10 +83,10 @@ public final class ProjectsStore {
     ) -> (selectedProjectID: Int64?, selectedTaskID: Int64?) {
         if let selectedTaskID {
             let taskStillExists = tasksByProject.values.contains { $0.contains { $0.id == selectedTaskID } }
-            if taskStillExists {
+            let projectStillExists = projects.contains { $0.id == selectedProjectID }
+            if taskStillExists && projectStillExists {
                 return (selectedProjectID, selectedTaskID)
             }
-            let projectStillExists = projects.contains { $0.id == selectedProjectID }
             return (projectStillExists ? selectedProjectID : nil, nil)
         }
         if let selectedProjectID {

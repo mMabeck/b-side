@@ -103,8 +103,24 @@ struct MainAreaView: View {
     /// task A to task B would leave keystrokes still landing in A's shell
     /// (invisible, but very much still running) until the user clicked into
     /// B, which can mean running a command against the wrong worktree.
+    ///
+    /// Sets both the `@FocusState` binding *and* calls
+    /// `TerminalViewState.requestFocus()` on the newly visible host, because
+    /// neither alone is reliable here. `@FocusState`/`.terminalFocused(_:equals:)`
+    /// is what resigns the *outgoing* surface as first responder on AppKit,
+    /// but per `TerminalViewState.requestFocus()`'s own doc comment it is
+    /// only best-effort for *acquiring* focus: with several hosts competing
+    /// for one `@FocusState`, SwiftUI's focus engine can reset the state to
+    /// nil before the bridge acts on it, leaving the previous host's surface
+    /// holding first responder. `requestFocus()` is the deterministic path a
+    /// host-driven switch needs, and it self-replays if the newly created
+    /// host's view isn't attached to a window yet.
     private func syncFocus() {
-        focusedTaskID = MainAreaView.visibleTaskID(for: store.mainSelection)
+        let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
+        focusedTaskID = visibleID
+        if let visibleID, let host = hostsByTaskID[visibleID] {
+            host.state.requestFocus()
+        }
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {

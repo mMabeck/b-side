@@ -1,11 +1,11 @@
 import Foundation
 import SwiftUI
 
-/// The bottom terminal drawer: a second, independent shell surface in the
-/// same directory the main area's current selection resolves to (a task's
-/// worktree, its project's path with no task selected, or home with nothing
-/// selected — see `MainAreaView.resolvedDirectory(for:)`), for the user's own
-/// use.
+/// The bottom terminal drawer: a second, independent shell surface, for the
+/// user's own use, started in whatever directory the main area's selection
+/// resolved to the first time this view appeared (a task's worktree, its
+/// project's path with no task selected, or home with nothing selected —
+/// see `MainAreaView.resolvedDirectory(for:)`).
 ///
 /// Collapsing the drawer does not tear down its surface — it marks it
 /// not-visible (`TerminalSurfaceHost.isVisible = false`) per
