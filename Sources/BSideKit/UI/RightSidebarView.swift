@@ -23,22 +23,20 @@ struct RightSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Pinned flush to the sidebar's own top edge (no toolbar-clearing
-            // padding here): the sidebar sits in the `detail` column's own
-            // content area, below the window's unified toolbar, not behind
-            // it, so this strip never has to duck the toolbar's right-sidebar
-            // toggle button itself.
-            Picker("", selection: $selectedTab) {
-                ForEach(Tab.allCases) { tab in
-                    Label(tab.rawValue, systemImage: tab.systemImage).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .tint(theme.palette.accent)
+            // Pinned flush to the sidebar's own top edge: the sidebar lives
+            // in the `detail` column's content area, below the window's
+            // unified toolbar rather than behind it, so the strip never has
+            // to duck the toolbar's right-sidebar toggle button.
+            InspectorTabStrip(
+                items: Tab.allCases.map {
+                    .init(tab: $0, title: $0.rawValue, systemImage: $0.systemImage)
+                },
+                selection: $selectedTab,
+                accent: theme.palette.accent
+            )
+            .frame(height: 24)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
 
             Rectangle().fill(theme.palette.separator).frame(height: 1)
 
@@ -47,7 +45,7 @@ struct RightSidebarView: View {
                 case .sourceControl:
                     ContentUnavailableView(
                         "Source Control",
-                        systemImage: "arrow.triangle.branch",
+                        systemImage: Tab.sourceControl.systemImage,
                         description: Text("Changed files, staging and commit will appear here.")
                     )
                     .foregroundStyle(theme.palette.textSecondary)

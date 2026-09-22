@@ -157,3 +157,41 @@ private func isCloseToDarkThemeFamily(_ color: NSColor, background: NSColor, tol
         && abs(color.greenComponent - background.greenComponent) < tolerance
         && abs(color.blueComponent - background.blueComponent) < tolerance
 }
+
+/// Guards the exact failure mode that made the icons silently disappear
+/// twice while this strip was being built: SwiftUI's own segmented `Picker`
+/// and `TabView` both *accept* a `Label` with a system image and then render
+/// only its title, with no error and no compile-time complaint. Asserting on
+/// the real `NSSegmentedControl` catches that directly — a segment that has
+/// lost either half fails here rather than quietly shipping.
+@MainActor
+struct InspectorTabStripTests {
+    private enum Tab: Hashable { case first, second }
+
+    @Test("Every segment carries both an icon and a title")
+    func segmentsCarryIconAndTitle() {
+        var selection = Tab.first
+        let strip = InspectorTabStrip(
+            items: [
+                .init(tab: Tab.first, title: "Source Control", systemImage: "arrow.triangle.branch"),
+                .init(tab: Tab.second, title: "Subagents", systemImage: "person.2"),
+            ],
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            accent: .yellow
+        )
+
+        let control = strip.makeControl(target: nil, action: nil)
+
+        #expect(control.segmentCount == 2)
+        for index in 0..<control.segmentCount {
+            #expect(control.image(forSegment: index) != nil)
+            #expect(control.label(forSegment: index)?.isEmpty == false)
+        }
+        #expect(control.label(forSegment: 0) == "Source Control")
+        #expect(control.label(forSegment: 1) == "Subagents")
+        // Equal-width segments are what make the strip span the sidebar
+        // rather than shrink-wrap into a small centred pill.
+        #expect(control.segmentDistribution == .fillEqually)
+        #expect(control.selectedSegment == 0)
+    }
+}

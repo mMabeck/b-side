@@ -43,7 +43,11 @@ struct BSideApp: App {
             ContentView(store: store)
         }
         .defaultSize(width: 1400, height: 900)
-        .windowResizability(.contentSize)
+        // `.contentMinSize`, not `.contentSize`: the latter constrains the
+        // window to its content's size in both directions, which fights the
+        // user resizing a window whose whole point is three resizable
+        // regions. This takes only the floor from `ContentView`'s frame.
+        .windowResizability(.contentMinSize)
         .commands {
             // The `Settings` scene below is supposed to generate this item
             // (and its Cmd+, shortcut) automatically, but that only reliably
