@@ -10,6 +10,9 @@ import SwiftUI
 struct SidebarView: View {
     var store: ProjectsStore
 
+    @State private var taskCreationProject: Project?
+    @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
+
     var body: some View {
         List {
             ForEach(store.projects) { project in
@@ -20,13 +23,16 @@ struct SidebarView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(tasks) { task in
-                            Label(task.name, systemImage: "circle")
+                            taskRow(task, project: project)
                         }
                     }
                 } header: {
                     Text(project.displayName)
                 }
                 .contextMenu {
+                    Button("New Task…") {
+                        taskCreationProject = project
+                    }
                     Button("Remove Project", role: .destructive) {
                         Task { try? await store.removeProject(project) }
                     }
@@ -41,6 +47,45 @@ struct SidebarView: View {
                 }
             }
         }
+        .sheet(item: $taskCreationProject) { project in
+            TaskCreationView(project: project, store: store) {
+                taskCreationProject = nil
+            }
+        }
+        .alert(
+            "Delete Task?",
+            isPresented: Binding(
+                get: { pendingDeleteTask != nil },
+                set: { if !$0 { pendingDeleteTask = nil } }
+            ),
+            presenting: pendingDeleteTask
+        ) { pending in
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    try? await store.deleteTask(
+                        pending.task,
+                        project: pending.project,
+                        deleteLocalBranch: pending.task.branchCreatedByApp,
+                        deleteRemoteBranch: false
+                    )
+                }
+            }
+        } message: { pending in
+            Text("This removes the worktree at \(pending.task.worktreePath) and, since it was created by the app, its branch \(pending.task.branchName).")
+        }
+    }
+
+    private func taskRow(_ task: TaskRecord, project: Project) -> some View {
+        Label(task.name, systemImage: store.vanishedWorktreeTaskIds.contains(task.id ?? -1) ? "exclamationmark.triangle" : "circle")
+            .contextMenu {
+                Button("Archive") {
+                    Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
+                }
+                Button("Delete…", role: .destructive) {
+                    pendingDeleteTask = (task, project)
+                }
+            }
     }
 
     private func addProject() {
