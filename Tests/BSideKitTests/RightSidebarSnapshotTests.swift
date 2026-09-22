@@ -20,7 +20,37 @@ struct RightSidebarSnapshotTests {
         let (window, palette) = try await renderOffscreen()
         defer { window.orderOut(nil) }
 
-        let bitmap = try capture(window)
+        // Poll instead of a single fixed sleep before the one-shot capture:
+        // the window's chrome suppression (see `ThemedWindowModifier`) reacts
+        // to AppKit inserting vibrancy/backdrop layers asynchronously with no
+        // fixed completion time, so re-render and re-sample until the strip
+        // actually looks right or a timeout elapses. The timeout path falls
+        // through to the real assertions below with whatever was last
+        // captured, so a genuine regression still fails the test.
+        let deadline = Date().addingTimeInterval(3)
+        var capturedBitmap: NSBitmapImageRep?
+        var lastCaptureError: Error?
+        repeat {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            do {
+                let candidate = try capture(window)
+                capturedBitmap = candidate
+                if looksSettled(candidate, palette: palette) {
+                    break
+                }
+            } catch {
+                // WindowServer hasn't registered this window's surface yet
+                // right after `setIsVisible`; retry rather than failing on
+                // the very first, too-early capture attempt.
+                lastCaptureError = error
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+        guard let bitmap = capturedBitmap else {
+            Issue.record("Failed to capture window image")
+            throw lastCaptureError ?? CaptureError.failed
+        }
 
         // Flush to the top: the very first row of pixels should already be
         // sidebar surface or picker chrome, not the window background
@@ -53,6 +83,24 @@ struct RightSidebarSnapshotTests {
         // sidebar's themed surface background, not a hardcoded colour.
         let placeholderAreaSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 20))
         #expect(isCloseToDarkThemeFamily(placeholderAreaSample, background: NSColor(palette.surfaceBackground)))
+    }
+
+    /// Cheap, non-asserting re-check of the same conditions the real
+    /// assertions below make, used only to decide whether polling can stop.
+    private func looksSettled(_ bitmap: NSBitmapImageRep, palette: BSidePalette) -> Bool {
+        guard let topRowSample = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh - 1),
+            luminance(of: topRowSample) > 0.02
+        else { return false }
+
+        let (minLuminance, maxLuminance) = luminanceRange(
+            in: bitmap,
+            xRange: 10..<(bitmap.pixelsWide - 10),
+            yRange: 10..<(bitmap.pixelsHigh - 10)
+        )
+        guard minLuminance > 0.05, maxLuminance > 0.05 else { return false }
+
+        guard let placeholderAreaSample = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 20) else { return false }
+        return isCloseToDarkThemeFamily(placeholderAreaSample, background: NSColor(palette.surfaceBackground))
     }
 
     // MARK: - Shared offscreen render/capture plumbing
@@ -105,7 +153,6 @@ struct RightSidebarSnapshotTests {
         window.appearance = theme.palette.preferredAppearance
         window.contentView = NSHostingView(rootView: RightSidebarView(store: store))
         window.setIsVisible(true)
-        try await Task.sleep(for: .milliseconds(400))
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         return (window, theme.palette)
@@ -114,7 +161,6 @@ struct RightSidebarSnapshotTests {
     private func capture(_ window: NSWindow) throws -> NSBitmapImageRep {
         let windowID = CGWindowID(window.windowNumber)
         guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
-            Issue.record("Failed to capture window image")
             throw CaptureError.failed
         }
         return NSBitmapImageRep(cgImage: cgImage)
