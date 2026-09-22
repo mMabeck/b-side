@@ -47,11 +47,10 @@ struct BSideApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             // The `Settings` scene below already generates the App menu's
-            // "Settings…" item and its Cmd+, shortcut automatically. An
-            // explicit `CommandGroup(replacing: .appSettings)` used to sit
-            // here too, but it duplicated the item instead of replacing it
-            // (both routed through SwiftUI's internal `menuAction:`, and a
-            // menu-dump diagnostic showed neither opened a window) — removed.
+            // "Settings…" item and its Cmd+, shortcut automatically. Do not
+            // add `CommandGroup(replacing: .appSettings)` here: it duplicates
+            // that item rather than replacing it, and neither copy opens a
+            // window.
             WindowLayoutCommands()
         }
 

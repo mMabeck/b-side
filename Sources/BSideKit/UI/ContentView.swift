@@ -31,8 +31,8 @@ public struct ContentView: View {
     private var rightSidebarPresented: Binding<Bool> {
         Binding(
             get: { !layout.rightSidebarCollapsed },
-            set: { newValue in
-                guard newValue == layout.rightSidebarCollapsed else { return }
+            set: { isPresented in
+                guard isPresented == layout.rightSidebarCollapsed else { return }
                 layout.toggleRightSidebar()
             }
         )
@@ -50,9 +50,7 @@ public struct ContentView: View {
                 MainAreaView(store: store)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // The native inspector column: real resizable-by-drag
-                    // chrome with its own separator, replacing the old
-                    // hand-drawn `Rectangle()` divider and the hard
-                    // `.frame(minWidth:maxWidth:)` that fought resizing.
+                    // chrome with its own separator.
                     .inspector(isPresented: rightSidebarPresented) {
                         RightSidebarView(store: store)
                             .inspectorColumnWidth(min: 260, ideal: 300, max: 480)
