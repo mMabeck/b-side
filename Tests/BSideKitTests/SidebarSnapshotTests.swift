@@ -151,78 +151,98 @@ struct SidebarSnapshotTests {
         )
         window.contentView = NSHostingView(rootView: ContentView(store: store))
         window.setIsVisible(true)
-        try await Task.sleep(for: .milliseconds(600))
 
         guard let contentView = window.contentView else {
             Issue.record("Window has no content view to render")
             return
         }
-        contentView.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
-
-        // Captured via `CGWindowListCreateImage`, not a manual `NSView`
-        // draw pass: a manual `bitmapImageRepForCachingDisplay` +
-        // `displayIgnoringOpacity` capture (as used by
-        // `ContentViewThemeSnapshotTests`) only walks the `drawRect`-based
-        // rendering path and silently produces a blank image for `List`'s
-        // per-row `NSHostingView`s, which are only ever actually painted by
-        // WindowServer's real compositor — confirmed by dumping the row view
-        // hierarchy (frames and row counts were correct; the manual capture
-        // still came back empty). Asking WindowServer directly for this
-        // window's own composited pixels is the only capture path that
-        // reflects what real rendering actually produced. The window is
-        // still positioned off any physical display and never key/frontmost,
-        // so nothing is shown to the user; no layers are hidden before
-        // sampling — see `ContentViewThemeSnapshotTests`.
-        let windowID = CGWindowID(window.windowNumber)
-        guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
-            Issue.record("Failed to capture window image")
-            window.orderOut(nil)
-            return
-        }
-        window.orderOut(nil)
-        let bitmap = NSBitmapImageRep(cgImage: cgImage)
-
-        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            Issue.record("Failed to encode PNG")
-            return
-        }
-        try pngData.write(to: URL(fileURLWithPath: "/tmp/bside-sidebar.png"))
-
-        let windowFrame = window.frame
-        let scaleX = CGFloat(bitmap.pixelsWide) / windowFrame.width
-        let scaleY = CGFloat(bitmap.pixelsHigh) / windowFrame.height
-        func sample(atPointX x: CGFloat, appKitY y: CGFloat) -> NSColor? {
-            let pixelX = Int(x * scaleX)
-            let pixelY = bitmap.pixelsHigh - Int(y * scaleY) - 1
-            guard pixelX >= 0, pixelX < bitmap.pixelsWide, pixelY >= 0, pixelY < bitmap.pixelsHigh else { return nil }
-            return bitmap.colorAt(x: pixelX, y: pixelY)
-        }
-
-        let contentFrame = contentView.frame
-        // Sample multiple points down the sidebar column — between rows and
-        // behind row content — so a themed background that's only partially
-        // opaque (e.g. only under text) doesn't slip through.
-        let sidebarSampleX = contentFrame.minX + 30
-        let sampleYs: [CGFloat] = [0.15, 0.35, 0.55, 0.75, 0.92].map { contentFrame.minY + contentFrame.height * $0 }
-        let samples = sampleYs.compactMap { sample(atPointX: sidebarSampleX, appKitY: $0) }
-        #expect(samples.count == sampleYs.count, "Failed to sample all sidebar probe points")
 
         func report(_ label: String, _ color: NSColor) -> String {
             let c = color.usingColorSpace(.deviceRGB) ?? color
             return "\(label): r=\(c.redComponent) g=\(c.greenComponent) b=\(c.blueComponent)"
         }
         let expected = expectedSurface.usingColorSpace(.deviceRGB) ?? expectedSurface
-        print(([report("expectedSurface", expectedSurface)] + samples.enumerated().map { report("sidebar[\($0.offset)]", $0.element) }).joined(separator: " | "))
 
-        for color in samples {
+        func isCloseToThemedSurface(_ color: NSColor) -> Bool {
             let c = color.usingColorSpace(.deviceRGB) ?? color
             // Genuinely opaque and themed means close to the palette's own
             // surface colour — not white, not an unrelated system grey.
-            let isCloseToThemedSurface = abs(c.redComponent - expected.redComponent) < 0.2
+            return abs(c.redComponent - expected.redComponent) < 0.2
                 && abs(c.greenComponent - expected.greenComponent) < 0.2
                 && abs(c.blueComponent - expected.blueComponent) < 0.2
-            #expect(isCloseToThemedSurface, "Sidebar pixel \(report("", color)) is not close to the themed surface colour \(report("", expectedSurface))")
+        }
+
+        func captureSidebarSamples() -> [NSColor] {
+            contentView.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+
+            // Captured via `CGWindowListCreateImage`, not a manual `NSView`
+            // draw pass: a manual `bitmapImageRepForCachingDisplay` +
+            // `displayIgnoringOpacity` capture (as used by
+            // `ContentViewThemeSnapshotTests`) only walks the `drawRect`-based
+            // rendering path and silently produces a blank image for `List`'s
+            // per-row `NSHostingView`s, which are only ever actually painted by
+            // WindowServer's real compositor — confirmed by dumping the row view
+            // hierarchy (frames and row counts were correct; the manual capture
+            // still came back empty). Asking WindowServer directly for this
+            // window's own composited pixels is the only capture path that
+            // reflects what real rendering actually produced. The window is
+            // still positioned off any physical display and never key/frontmost,
+            // so nothing is shown to the user; no layers are hidden before
+            // sampling — see `ContentViewThemeSnapshotTests`.
+            let windowID = CGWindowID(window.windowNumber)
+            guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
+                Issue.record("Failed to capture window image")
+                return []
+            }
+            let bitmap = NSBitmapImageRep(cgImage: cgImage)
+            if let pngData = bitmap.representation(using: .png, properties: [:]) {
+                try? pngData.write(to: URL(fileURLWithPath: "/tmp/bside-sidebar.png"))
+            }
+
+            let windowFrame = window.frame
+            let scaleX = CGFloat(bitmap.pixelsWide) / windowFrame.width
+            let scaleY = CGFloat(bitmap.pixelsHigh) / windowFrame.height
+            func sample(atPointX x: CGFloat, appKitY y: CGFloat) -> NSColor? {
+                let pixelX = Int(x * scaleX)
+                let pixelY = bitmap.pixelsHigh - Int(y * scaleY) - 1
+                guard pixelX >= 0, pixelX < bitmap.pixelsWide, pixelY >= 0, pixelY < bitmap.pixelsHigh else { return nil }
+                return bitmap.colorAt(x: pixelX, y: pixelY)
+            }
+
+            let contentFrame = contentView.frame
+            // Sample multiple points down the sidebar column — between rows and
+            // behind row content — so a themed background that's only partially
+            // opaque (e.g. only under text) doesn't slip through.
+            let sidebarSampleX = contentFrame.minX + 30
+            let sampleYs: [CGFloat] = [0.15, 0.35, 0.55, 0.75, 0.92].map { contentFrame.minY + contentFrame.height * $0 }
+            return sampleYs.compactMap { sample(atPointX: sidebarSampleX, appKitY: $0) }
+        }
+
+        // Poll instead of a single fixed sleep: the window's chrome
+        // suppression (see `ThemedWindowModifier`) reacts to AppKit inserting
+        // vibrancy/backdrop layers asynchronously and has no fixed completion
+        // time, so waiting a guessed-at duration and sampling once is either
+        // too short (flaky) or too long (slow) depending on machine load.
+        // Instead, re-layout, re-display and re-sample until the sidebar
+        // settles to the themed surface colour or a timeout elapses — the
+        // timeout path falls through to the assertions below with whatever
+        // was last sampled, so a genuine product regression still fails the
+        // test rather than being waited out.
+        var samples: [NSColor] = []
+        let deadline = Date().addingTimeInterval(3)
+        repeat {
+            try await Task.sleep(for: .milliseconds(100))
+            samples = captureSidebarSamples()
+        } while (samples.count != 5 || !samples.allSatisfy(isCloseToThemedSurface)) && Date() < deadline
+
+        window.orderOut(nil)
+
+        #expect(samples.count == 5, "Failed to sample all sidebar probe points")
+        print(([report("expectedSurface", expectedSurface)] + samples.enumerated().map { report("sidebar[\($0.offset)]", $0.element) }).joined(separator: " | "))
+
+        for color in samples {
+            #expect(isCloseToThemedSurface(color), "Sidebar pixel \(report("", color)) is not close to the themed surface colour \(report("", expectedSurface))")
         }
     }
 }

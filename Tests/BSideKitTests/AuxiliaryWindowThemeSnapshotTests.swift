@@ -30,8 +30,24 @@ struct AuxiliaryWindowThemeSnapshotTests {
         })
         defer { window.orderOut(nil) }
 
-        let bitmap = try capture(window)
         let background = NSColor(expectedPalette.windowBackground)
+        // Poll instead of a single fixed sleep before capture: the window's
+        // chrome suppression (see `ThemedWindowModifier`) reacts to AppKit
+        // inserting vibrancy/backdrop layers asynchronously with no fixed
+        // completion time, so re-render and re-sample until it actually
+        // settles or a timeout elapses. The timeout path falls through to
+        // the real assertions below with whatever was last captured, so a
+        // genuine regression still fails the test.
+        let bitmap = try await captureUntilSettled(window) { candidate in
+            guard let sample = candidate.colorAt(x: candidate.pixelsWide / 2, y: candidate.pixelsHigh - 60) else { return false }
+            guard isCloseToDarkThemeFamily(sample, background: background) else { return false }
+            let (minLuminance, maxLuminance) = luminanceRange(
+                in: candidate,
+                xRange: 10..<(candidate.pixelsWide - 10),
+                yRange: 10..<(candidate.pixelsHigh - 10)
+            )
+            return minLuminance > 0.05 && maxLuminance - luminance(of: sample) > 0.3
+        }
 
         // Background: a strip clear of any text glyph, well inside the
         // window's edges.
@@ -74,8 +90,17 @@ struct AuxiliaryWindowThemeSnapshotTests {
         })
         defer { window.orderOut(nil) }
 
-        let bitmap = try capture(window)
         let background = NSColor(expectedPalette.windowBackground)
+        let bitmap = try await captureUntilSettled(window) { candidate in
+            guard let sample = candidate.colorAt(x: candidate.pixelsWide / 2, y: candidate.pixelsHigh / 2) else { return false }
+            guard isCloseToDarkThemeFamily(sample, background: background) else { return false }
+            let (minLuminance, maxLuminance) = luminanceRange(
+                in: candidate,
+                xRange: 10..<(candidate.pixelsWide - 10),
+                yRange: 10..<(candidate.pixelsHigh - 10)
+            )
+            return minLuminance > 0.05 && maxLuminance - luminance(of: sample) > 0.3
+        }
 
         let backgroundSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2))
         report("settingsBackground", backgroundSample, expected: background)
@@ -150,7 +175,6 @@ struct AuxiliaryWindowThemeSnapshotTests {
         window.appearance = theme.palette.preferredAppearance
         window.contentView = try makeView(theme.palette)
         window.setIsVisible(true)
-        try await Task.sleep(for: .milliseconds(400))
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         return (window, theme.palette)
@@ -159,10 +183,37 @@ struct AuxiliaryWindowThemeSnapshotTests {
     private func capture(_ window: NSWindow) throws -> NSBitmapImageRep {
         let windowID = CGWindowID(window.windowNumber)
         guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
-            Issue.record("Failed to capture window image")
             throw CaptureError.failed
         }
         return NSBitmapImageRep(cgImage: cgImage)
+    }
+
+    private func captureUntilSettled(_ window: NSWindow, isSettled: (NSBitmapImageRep) -> Bool) async throws -> NSBitmapImageRep {
+        let deadline = Date().addingTimeInterval(3)
+        var lastBitmap: NSBitmapImageRep?
+        var lastError: Error?
+        repeat {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            do {
+                let bitmap = try capture(window)
+                lastBitmap = bitmap
+                if isSettled(bitmap) {
+                    return bitmap
+                }
+            } catch {
+                // WindowServer hasn't registered this window's surface yet
+                // right after `setIsVisible`; retry rather than failing on
+                // the very first, too-early capture attempt.
+                lastError = error
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+        if let lastBitmap {
+            return lastBitmap
+        }
+        Issue.record("Failed to capture window image")
+        throw lastError ?? CaptureError.failed
     }
 
     private enum CaptureError: Error { case failed }

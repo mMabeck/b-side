@@ -1,4 +1,5 @@
 import AppKit
+import ObjectiveC
 import SwiftUI
 
 /// Applies a ``BSidePalette`` to the `NSWindow` hosting a SwiftUI scene: real
@@ -45,12 +46,137 @@ struct ThemedWindowModifier: ViewModifier {
         if let contentView = window.contentView {
             neutralizeVibrancy(in: contentView)
         }
-        for delay in [0.05, 0.2, 0.5] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
-                guard let contentView = window?.contentView else { return }
-                neutralizeVibrancy(in: contentView)
-            }
+        // AppKit can create or recreate the sidebar's vibrancy/backdrop layers
+        // at any point after this window is set up (confirmed under load: it
+        // is not bounded to a short window after creation), so a fixed
+        // schedule of retries races the view hierarchy instead of tracking
+        // it. `VibrancyGuardian` KVO-observes the subview tree so every
+        // insertion — whenever it happens — gets neutralized immediately,
+        // and also re-scans on the window notifications that tend to
+        // accompany chrome changes, as a cheap belt-and-suspenders measure.
+        VibrancyGuardian.install(on: window)
+    }
+}
+
+/// Watches a window's view hierarchy for newly inserted subviews (via KVO on
+/// `subviews`) and neutralizes vibrancy on each one as it appears, instead of
+/// guessing when AppKit might have finished creating the sidebar's chrome.
+/// One guardian is installed per window (idempotent — re-`apply`ing on the
+/// same window is a no-op beyond a single immediate re-neutralize pass) and
+/// tears itself down, removing all KVO and notification observers, when the
+/// window closes.
+@MainActor
+private final class VibrancyGuardian: NSObject {
+    private static var associatedKey: UInt8 = 0
+
+    private weak var window: NSWindow?
+    private var observedViews: [ObjectIdentifier: NSView] = [:]
+    private var notificationTokens: [NSObjectProtocol] = []
+
+    static func install(on window: NSWindow) {
+        if objc_getAssociatedObject(window, &associatedKey) is VibrancyGuardian {
+            return
         }
+        let guardian = VibrancyGuardian(window: window)
+        objc_setAssociatedObject(window, &associatedKey, guardian, .OBJC_ASSOCIATION_RETAIN)
+    }
+
+    private init(window: NSWindow) {
+        self.window = window
+        super.init()
+
+        if let contentView = window.contentView {
+            observeSubtree(contentView)
+        }
+
+        let center = NotificationCenter.default
+        for name in [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didResizeNotification,
+            NSWindow.didChangeScreenNotification,
+            NSWindow.didUpdateNotification,
+        ] {
+            notificationTokens.append(
+                center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.rescan() }
+                }
+            )
+        }
+        notificationTokens.append(
+            center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.tearDown() }
+            }
+        )
+    }
+
+    private func rescan() {
+        guard let contentView = window?.contentView else { return }
+        neutralizeVibrancy(in: contentView)
+        observeSubtree(contentView)
+    }
+
+    private func observeSubtree(_ view: NSView) {
+        let id = ObjectIdentifier(view)
+        if observedViews[id] == nil {
+            observedViews[id] = view
+            view.addObserver(self, forKeyPath: "subviews", options: [], context: nil)
+        }
+        for subview in view.subviews {
+            observeSubtree(subview)
+        }
+    }
+
+    // KVO delivers this synchronously on whatever thread mutated `subviews`,
+    // which for this app's own window/view hierarchy is always the main
+    // thread — `assumeIsolated` documents that instead of hopping queues.
+    override nonisolated func observeValue(
+        forKeyPath keyPath: String?,
+        of object: Any?,
+        change: [NSKeyValueChangeKey: Any]?,
+        context: UnsafeMutableRawPointer?
+    ) {
+        guard keyPath == "subviews", let view = object as? NSView else { return }
+        MainActor.assumeIsolated {
+            // A newly inserted subview is exactly how both the
+            // `NSVisualEffectView` and private `BackdropView` chrome show up,
+            // whenever AppKit decides to create them — so react to the
+            // insertion itself instead of a timer, and keep watching the new
+            // subtree for further insertions.
+            neutralizeVibrancy(in: view)
+            observeSubtree(view)
+        }
+    }
+
+    private func tearDown() {
+        removeAllObservers()
+        if let window {
+            objc_setAssociatedObject(window, &Self.associatedKey, nil, .OBJC_ASSOCIATION_RETAIN)
+        }
+    }
+
+    private func removeAllObservers() {
+        for view in observedViews.values {
+            view.removeObserver(self, forKeyPath: "subviews")
+        }
+        observedViews.removeAll()
+
+        let center = NotificationCenter.default
+        for token in notificationTokens {
+            center.removeObserver(token)
+        }
+        notificationTokens.removeAll()
+    }
+
+    // Not every caller runs a window through a full `close()` (offscreen
+    // test windows in particular are often just released), so
+    // `willCloseNotification` is not a guarantee. KVO requires every
+    // observer to be removed before its observed object deallocates, or the
+    // observed object's own deinit crashes — so this is a hard safety net,
+    // not just tidiness. `deinit` on a `@MainActor` class runs nonisolated,
+    // but the object is uniquely referenced by this point (nothing else can
+    // race a mutation), so touching its stored state directly here is safe.
+    deinit {
+        MainActor.assumeIsolated { removeAllObservers() }
     }
 }
 
