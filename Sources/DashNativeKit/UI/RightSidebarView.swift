@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// Right sidebar: Source Control and Subagents tabs. Both are placeholders at
-/// this stage.
+/// Right sidebar: Source Control and Subagents tabs. Source Control is still
+/// a placeholder; Subagents renders live cards from `SubagentFeedStore`.
 struct RightSidebarView: View {
+    var store: ProjectsStore
+
     private enum Tab: String, CaseIterable, Identifiable {
         case sourceControl = "Source Control"
         case subagents = "Subagents"
@@ -30,11 +32,7 @@ struct RightSidebarView: View {
                     description: Text("Changed files, staging and commit will appear here.")
                 )
             case .subagents:
-                ContentUnavailableView(
-                    "Subagents",
-                    systemImage: "person.2",
-                    description: Text("Child agents spawned by the current task will appear here.")
-                )
+                SubagentsTabView(store: store)
             }
             Spacer(minLength: 0)
         }

@@ -88,15 +88,36 @@ struct SidebarView: View {
     }
 
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
-        Label(task.name, systemImage: store.vanishedWorktreeTaskIds.contains(task.id ?? -1) ? "exclamationmark.triangle" : "circle")
-            .contextMenu {
-                Button("Archive") {
-                    Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
+        let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
+        return Button {
+            store.selectedTaskID = task.id
+        } label: {
+            HStack {
+                Label(task.name, systemImage: store.vanishedWorktreeTaskIds.contains(task.id ?? -1) ? "exclamationmark.triangle" : "circle")
+                Spacer()
+                if summary.hasChildren {
+                    if summary.isBlocked {
+                        Image(systemName: "exclamationmark.bubble.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    Text("\(summary.totalCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Button("Delete…", role: .destructive) {
-                    pendingDeleteTask = (task, project)
+                if store.selectedTaskID == task.id {
+                    Image(systemName: "checkmark")
                 }
             }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Archive") {
+                Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
+            }
+            Button("Delete…", role: .destructive) {
+                pendingDeleteTask = (task, project)
+            }
+        }
     }
 
     private func addProject() {

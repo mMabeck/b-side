@@ -30,7 +30,7 @@ public struct ContentView: View {
                     MainAreaView(store: store)
                     if !rightSidebarCollapsed {
                         Divider()
-                        RightSidebarView()
+                        RightSidebarView(store: store)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
