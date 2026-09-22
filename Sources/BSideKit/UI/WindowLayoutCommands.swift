@@ -42,3 +42,10 @@ public enum WindowLayoutShortcut {
     public static let rightSidebar = KeyboardShortcut("b", modifiers: [.command, .option])
     public static let terminalDrawer = KeyboardShortcut("æ", modifiers: [.command])
 }
+
+/// Cmd+, for the app's explicit `CommandGroup(replacing: .appSettings)`, kept
+/// as plain data — the same reasoning as ``WindowLayoutShortcut`` — so it can
+/// be asserted on directly without introspecting a rendered `Commands` scene.
+public enum AppCommandShortcut {
+    public static let settings = KeyboardShortcut(",", modifiers: [.command])
+}

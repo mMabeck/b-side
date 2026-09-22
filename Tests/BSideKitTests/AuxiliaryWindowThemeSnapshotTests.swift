@@ -138,7 +138,7 @@ struct AuxiliaryWindowThemeSnapshotTests {
         // window would sample that chrome's own opaque background near the
         // top edge instead of this app's themed content underneath it.
         let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 460, height: 320),
+            contentRect: NSRect(x: -20000, y: -20000, width: 520, height: 360),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
