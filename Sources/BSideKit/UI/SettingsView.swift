@@ -19,7 +19,7 @@ public struct SettingsView: View {
             NotificationsSettingsTab(theme: theme)
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
-        .frame(width: 420, height: 240)
+        .frame(width: 480, height: 300)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
     }
@@ -33,9 +33,10 @@ private struct GeneralSettingsTab: View {
         Form {
             Toggle("Launch at Login", isOn: $launchAtLogin)
         }
-        .padding(20)
+        .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -47,9 +48,10 @@ private struct AgentSettingsTab: View {
         Form {
             TextField("Default Harness", text: $defaultHarness)
         }
-        .padding(20)
+        .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -61,9 +63,10 @@ private struct GitSettingsTab: View {
         Form {
             TextField("Default Base Ref", text: $defaultBaseRef)
         }
-        .padding(20)
+        .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -75,9 +78,10 @@ private struct TerminalSettingsTab: View {
         Form {
             Stepper("Font Size: \(Int(fontSize))", value: $fontSize, in: 9...24)
         }
-        .padding(20)
+        .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -89,8 +93,9 @@ private struct NotificationsSettingsTab: View {
         Form {
             Toggle("Enable Notifications", isOn: $notificationsEnabled)
         }
-        .padding(20)
+        .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }

@@ -79,6 +79,7 @@ public struct ContentView: View {
         .task {
             store.start()
         }
+        .frame(minWidth: 900, minHeight: 600)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
     }

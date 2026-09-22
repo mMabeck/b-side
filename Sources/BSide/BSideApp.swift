@@ -19,8 +19,15 @@ struct BSideApp: App {
         // implicitly-unwrapped optional that is not guaranteed set this
         // early in the SwiftUI `App` lifecycle — `.shared` lazily creates
         // the application instance instead of force-unwrapping a possibly-nil
-        // reference to it.
-        NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
+        // reference to it. Deferred a runloop turn: forcing `NSApplication`
+        // into existence synchronously inside `App.init()` raced SwiftUI's
+        // own app-menu construction (the one that inserts the automatic
+        // "Settings…"/Cmd+, item for the `Settings` scene below) and could
+        // leave the App menu malformed. Dispatching it lets SwiftUI finish
+        // building its default menu first.
+        DispatchQueue.main.async {
+            NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
+        }
 
         do {
             let database = try AppDatabase.openStandard()
@@ -35,12 +42,25 @@ struct BSideApp: App {
         WindowGroup {
             ContentView(store: store)
         }
+        .defaultSize(width: 1400, height: 900)
+        .windowResizability(.contentSize)
+        .commands {
+            // The `Settings` scene below is supposed to generate this item
+            // (and its Cmd+, shortcut) automatically, but that only reliably
+            // happens when a `Settings` scene's automatic app-menu wiring
+            // hasn't been disturbed. Replacing `.appSettings` explicitly
+            // makes the item unconditional rather than depending on that.
+            CommandGroup(replacing: .appSettings) {
+                SettingsLink {
+                    Text("Settings…")
+                }
+                .keyboardShortcut(AppCommandShortcut.settings)
+            }
+            WindowLayoutCommands()
+        }
 
         Settings {
             SettingsView()
-        }
-        .commands {
-            WindowLayoutCommands()
         }
     }
 }
