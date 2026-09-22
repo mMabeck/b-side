@@ -2,26 +2,31 @@ import SwiftUI
 
 /// Standard macOS `Settings` scene content: General, Agent, Git, Terminal, Notifications.
 public struct SettingsView: View {
+    @ObservedObject private var theme = GhosttyResolvedTheme.shared
+
     public init() {}
 
     public var body: some View {
         TabView {
-            GeneralSettingsTab()
+            GeneralSettingsTab(theme: theme)
                 .tabItem { Label("General", systemImage: "gearshape") }
-            AgentSettingsTab()
+            AgentSettingsTab(theme: theme)
                 .tabItem { Label("Agent", systemImage: "cpu") }
-            GitSettingsTab()
+            GitSettingsTab(theme: theme)
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
-            TerminalSettingsTab()
+            TerminalSettingsTab(theme: theme)
                 .tabItem { Label("Terminal", systemImage: "terminal") }
-            NotificationsSettingsTab()
+            NotificationsSettingsTab(theme: theme)
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
         .frame(width: 420, height: 240)
+        .background(theme.palette.windowBackground)
+        .themedWindow(theme.palette)
     }
 }
 
 private struct GeneralSettingsTab: View {
+    var theme: GhosttyResolvedTheme
     @AppStorage("settings.general.launchAtLogin") private var launchAtLogin = false
 
     var body: some View {
@@ -29,10 +34,13 @@ private struct GeneralSettingsTab: View {
             Toggle("Launch at Login", isOn: $launchAtLogin)
         }
         .padding(20)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
     }
 }
 
 private struct AgentSettingsTab: View {
+    var theme: GhosttyResolvedTheme
     @AppStorage("settings.agent.defaultHarness") private var defaultHarness = "claude"
 
     var body: some View {
@@ -40,10 +48,13 @@ private struct AgentSettingsTab: View {
             TextField("Default Harness", text: $defaultHarness)
         }
         .padding(20)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
     }
 }
 
 private struct GitSettingsTab: View {
+    var theme: GhosttyResolvedTheme
     @AppStorage("settings.git.defaultBaseRef") private var defaultBaseRef = "main"
 
     var body: some View {
@@ -51,10 +62,13 @@ private struct GitSettingsTab: View {
             TextField("Default Base Ref", text: $defaultBaseRef)
         }
         .padding(20)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
     }
 }
 
 private struct TerminalSettingsTab: View {
+    var theme: GhosttyResolvedTheme
     @AppStorage("settings.terminal.fontSize") private var fontSize = 13.0
 
     var body: some View {
@@ -62,10 +76,13 @@ private struct TerminalSettingsTab: View {
             Stepper("Font Size: \(Int(fontSize))", value: $fontSize, in: 9...24)
         }
         .padding(20)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
     }
 }
 
 private struct NotificationsSettingsTab: View {
+    var theme: GhosttyResolvedTheme
     @AppStorage("settings.notifications.enabled") private var notificationsEnabled = true
 
     var body: some View {
@@ -73,5 +90,7 @@ private struct NotificationsSettingsTab: View {
             Toggle("Enable Notifications", isOn: $notificationsEnabled)
         }
         .padding(20)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
     }
 }

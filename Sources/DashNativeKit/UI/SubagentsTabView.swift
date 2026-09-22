@@ -9,6 +9,7 @@ struct SubagentsTabView: View {
 
     var body: some View {
         let runs = store.selectedTaskID.map(store.subagentFeed.runs(forTask:)) ?? []
+        let theme = GhosttyResolvedTheme.shared
 
         Group {
             if store.selectedTaskID == nil {
@@ -17,12 +18,14 @@ struct SubagentsTabView: View {
                     systemImage: "person.2",
                     description: Text("Select a task to see its subagents.")
                 )
+                .foregroundStyle(theme.palette.textSecondary)
             } else if runs.isEmpty {
                 ContentUnavailableView(
                     "Subagents",
                     systemImage: "person.2",
                     description: Text("Child agents spawned by this task will appear here.")
                 )
+                .foregroundStyle(theme.palette.textSecondary)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {

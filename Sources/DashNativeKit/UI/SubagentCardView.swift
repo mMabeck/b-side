@@ -25,21 +25,21 @@ struct SubagentCardView: View {
     private static let titleLeadIn: CGFloat = 16
     private static let titleMaxWidth: CGFloat = 220
 
-    private var accentColor: Color { theme.accent ?? .accentColor }
-    private var foregroundColor: Color { theme.foreground ?? .primary }
-    private var dimColor: Color { theme.secondaryForeground ?? .secondary }
-    private var backgroundColor: Color { (theme.background ?? Color(nsColor: .textBackgroundColor)).opacity(0.6) }
+    private var accentColor: Color { theme.palette.accent }
+    private var foregroundColor: Color { theme.palette.textPrimary }
+    private var dimColor: Color { theme.palette.textSecondary }
+    private var backgroundColor: Color { theme.palette.elevatedSurfaceBackground.opacity(0.6) }
 
     /// The title patch must be fully opaque. A translucent one lets the border
     /// stroke underneath show through the text, which reads as strikethrough.
-    private var titleMaskColor: Color { theme.background ?? Color(nsColor: .textBackgroundColor) }
+    private var titleMaskColor: Color { theme.palette.elevatedSurfaceBackground }
 
     private var isFinished: Bool { run.state == .completed || run.state == .failed }
 
     private var borderColor: Color {
         switch run.state {
-        case .blocked: return .orange
-        case .failed: return .red
+        case .blocked: return theme.palette.statusNeedsAttention
+        case .failed: return theme.palette.statusError
         case .active: return accentColor
         case .completed: return dimColor.opacity(0.5)
         }
@@ -136,7 +136,7 @@ struct SubagentCardView: View {
                 statusGlyph
                 Text(statusLabel)
                     .font(.system(.caption2, design: .monospaced, weight: run.state == .blocked ? .bold : .regular))
-                    .foregroundStyle(run.state == .blocked ? Color.orange : dimColor)
+                    .foregroundStyle(run.state == .blocked ? theme.palette.statusNeedsAttention : dimColor)
                 Text(RunStatisticsFormatter.formatDuration(elapsed(at: context.date)))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(dimColor)
@@ -163,13 +163,13 @@ struct SubagentCardView: View {
                     .controlSize(.mini)
             case .blocked:
                 Image(systemName: "exclamationmark.bubble.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.palette.statusNeedsAttention)
             case .completed:
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(dimColor)
             case .failed:
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.palette.statusError)
             }
         }
         .frame(width: 14)

@@ -37,7 +37,7 @@ struct SubagentCardSnapshotTests {
         }
         .padding(14)
         .frame(width: 300)
-        .background(theme.background ?? .black)
+        .background(theme.palette.windowBackground)
 
         let window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 320, height: 560),
@@ -74,7 +74,7 @@ struct SubagentCardSnapshotTests {
 
         // Sample the background near the top-left corner: should match the
         // theme's resolved background, not a SwiftUI system default.
-        let expectedBackground = NSColor(theme.background ?? .black)
+        let expectedBackground = NSColor(theme.palette.windowBackground)
         let sampled = try #require(bitmap.colorAt(x: 2, y: bitmap.pixelsHigh - 2))
         #expect(colorsAreClose(sampled, expectedBackground))
     }

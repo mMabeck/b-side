@@ -9,6 +9,7 @@ import SwiftUI
 /// the skeleton stage.
 struct SidebarView: View {
     var store: ProjectsStore
+    @ObservedObject var theme: GhosttyResolvedTheme = .shared
 
     @State private var taskCreationProject: Project?
     @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
@@ -20,7 +21,7 @@ struct SidebarView: View {
                     let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
                     if tasks.isEmpty {
                         Text("No tasks")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.palette.textSecondary)
                     } else {
                         ForEach(tasks) { task in
                             taskRow(task, project: project)
@@ -51,6 +52,8 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.surfaceBackground)
         .toolbar {
             ToolbarItem {
                 Button(action: addProject) {
@@ -98,11 +101,11 @@ struct SidebarView: View {
                 if summary.hasChildren {
                     if summary.isBlocked {
                         Image(systemName: "exclamationmark.bubble.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(theme.palette.statusNeedsAttention)
                     }
                     Text("\(summary.totalCount)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
                 if store.selectedTaskID == task.id {
                     Image(systemName: "checkmark")
