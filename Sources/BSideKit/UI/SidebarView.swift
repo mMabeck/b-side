@@ -22,48 +22,58 @@ struct SidebarView: View {
     @State private var gitInfo = SidebarGitInfoCache()
     @AppStorage("sidebarCollapsedProjectIDs") private var collapseState = SidebarCollapseState()
 
-    @State private var taskCreationProject: Project?
     @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
 
     var body: some View {
-        List {
-            ForEach(store.projects) { project in
-                let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
-                let isExpandedBinding = Binding<Bool>(
-                    get: { collapseState.isExpanded(project.id) },
-                    set: { expanded in
-                        guard let id = project.id else { return }
-                        collapseState.setExpanded(expanded, for: id)
-                    }
-                )
-                Section(isExpanded: isExpandedBinding) {
-                    if tasks.isEmpty {
-                        Text("No tasks")
-                            .foregroundStyle(theme.palette.textSecondary)
-                            .listRowBackground(theme.palette.surfaceBackground)
-                    } else {
-                        ForEach(tasks) { task in
-                            taskRow(task, project: project)
+        VStack(spacing: 0) {
+            if store.projects.isEmpty {
+                emptyProjectsState
+            } else {
+                List {
+                    ForEach(store.projects) { project in
+                        let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
+                        let isExpandedBinding = Binding<Bool>(
+                            get: { collapseState.isExpanded(project.id) },
+                            set: { expanded in
+                                guard let id = project.id else { return }
+                                collapseState.setExpanded(expanded, for: id)
+                            }
+                        )
+                        Section(isExpanded: isExpandedBinding) {
+                            if tasks.isEmpty {
+                                Text("No tasks")
+                                    .foregroundStyle(theme.palette.textSecondary)
+                                    .listRowBackground(theme.palette.surfaceBackground)
+                            } else {
+                                ForEach(tasks) { task in
+                                    taskRow(task, project: project)
+                                }
+                            }
+                        } header: {
+                            projectRow(project, taskCount: tasks.count)
                         }
                     }
-                } header: {
-                    projectRow(project, taskCount: tasks.count)
                 }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
             }
+
+            // A persistent footer, not another `List` row: it must stay put
+            // while the list above it scrolls, and be reachable even when
+            // `store.projects` is empty (the empty state above already offers
+            // its own "Add Project" button, but keeping this one too means the
+            // affordance is always in the same place).
+            Rectangle().fill(theme.palette.separator).frame(height: 1)
+            addProjectFooter
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
         .background(theme.palette.surfaceBackground)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button(action: addProject) {
+                Button {
+                    ProjectCreation.addProject(store: store)
+                } label: {
                     Label("Add Project", systemImage: "plus")
                 }
-            }
-        }
-        .sheet(item: $taskCreationProject) { project in
-            TaskCreationView(project: project, store: store) {
-                taskCreationProject = nil
             }
         }
         .alert(
@@ -96,36 +106,31 @@ struct SidebarView: View {
     /// filled themed row using the palette's selection colours.
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
         let info = gitInfo.info(forProject: project.id)
-        let isSelected = store.selectedProjectID == project.id
+        let isSelected = store.selectedProjectID == project.id && store.selectedTaskID == nil
         let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
         let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
-        let tertiary = isSelected ? theme.palette.selectionForeground.opacity(0.7) : theme.palette.textDisabled
 
         return Button {
-            store.selectedProjectID = project.id
+            store.selectProject(project)
         } label: {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(project.displayName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(primary)
-                    if let branch = info?.branch {
-                        Text(branch + (info?.isDirty == true ? "*" : ""))
-                            .font(.system(size: 11))
-                            .foregroundStyle(secondary)
-                    }
-                    Text(project.path)
+                    Text(projectSecondaryLine(branch: info?.branch, isDirty: info?.isDirty ?? false, path: project.path))
                         .font(.system(size: 11))
-                        .foregroundStyle(tertiary)
+                        .foregroundStyle(secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 Spacer()
+                addTaskButton(for: project)
                 Text("\(taskCount)")
                     .font(.caption)
                     .foregroundStyle(secondary)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, 5)
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
@@ -134,7 +139,7 @@ struct SidebarView: View {
         .listRowBackground(Color.clear)
         .contextMenu {
             Button("New Task…") {
-                taskCreationProject = project
+                store.pendingTaskCreationProject = project
             }
             Button("Remove Project", role: .destructive) {
                 Task { try? await store.removeProject(project) }
@@ -143,11 +148,55 @@ struct SidebarView: View {
         .task(id: project.id) { gitInfo.refresh(project) }
     }
 
+    /// A quiet, low-contrast "+" beside each project header for starting a
+    /// task in that project without opening its context menu. Sized to a
+    /// fixed small frame and drawn with `.plain` so it neither disturbs the
+    /// header row's existing height/padding nor the task-count indicator
+    /// beside it, and a nested `Button` inside `projectRow`'s own `Button`
+    /// label works fine here because SwiftUI resolves the tap to whichever
+    /// control's own hit area was actually touched.
+    private func addTaskButton(for project: Project) -> some View {
+        Button {
+            store.pendingTaskCreationProject = project
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.palette.textDisabled)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("New Task in \(project.displayName)")
+    }
+
+    /// One terse secondary line combining branch and path (`main* — ~/Claude/dotfiles`)
+    /// instead of the two lines a task-peer row would need, keeping the project
+    /// header compact relative to the tasks nested under it.
+    private func projectSecondaryLine(branch: String?, isDirty: Bool, path: String) -> String {
+        guard let branch else { return path }
+        return "\(branch)\(isDirty ? "*" : "") — \(path)"
+    }
+
+    /// The leading inset a task row sits at, aligned with where the project
+    /// title's text begins (`projectRow`'s own horizontal padding) so the
+    /// nesting reads visually, not just via `List`'s section indentation.
+    private static let taskLeadingIndent: CGFloat = 16
+
+    /// Where the vertical indent-guide line sits within that inset — drawn
+    /// manually per row (not as one tall shape spanning the section) because
+    /// `List` gives each row its own `NSHostingView`; stacking these
+    /// borderless per-row segments with no vertical gap between them is what
+    /// makes the line read as continuous down the whole task group.
+    private static let taskIndentGuideX: CGFloat = 6
+
     /// A task row nested beneath its project. The leading status-dot column
     /// is reserved at a fixed width even when no dot is shown, so every
     /// title starts at the same x (`TaskRowLayout.statusDotColumnWidth`).
     /// The trailing edge carries the subagent child count/blocked indicator
-    /// and the branch sync summary, in that order, quiet and compact.
+    /// and the branch sync summary, in that order, quiet and compact. Smaller
+    /// and lighter than the project title above it, and indented beneath it
+    /// with a low-opacity guide line, so tasks read as the project's children
+    /// rather than its peers — a project is a container, never a terminal.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
         let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
@@ -165,7 +214,7 @@ struct SidebarView: View {
         let tertiary = isSelected ? theme.palette.selectionForeground.opacity(0.7) : theme.palette.textDisabled
 
         return Button {
-            store.selectedTaskID = task.id
+            store.selectTask(task, project: project)
         } label: {
             HStack(spacing: 6) {
                 Circle()
@@ -174,6 +223,7 @@ struct SidebarView: View {
                     .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .center)
 
                 Text(task.name)
+                    .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(primary)
 
                 if isVanished {
@@ -199,10 +249,20 @@ struct SidebarView: View {
                         .foregroundStyle(tertiary)
                 }
             }
-            .padding(.leading, 4)
-            .padding(.vertical, 3)
+            .padding(.leading, Self.taskLeadingIndent)
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
+            .overlay(alignment: .leading) {
+                // The indent guide: a thin low-opacity line at a fixed x within
+                // the leading inset, independent of whether this particular
+                // row is selected, so the guide reads as one continuous line
+                // rather than flickering per-row with selection state.
+                Rectangle()
+                    .fill(theme.palette.separator.opacity(0.5))
+                    .frame(width: 1)
+                    .padding(.leading, Self.taskIndentGuideX)
+            }
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
@@ -232,29 +292,46 @@ struct SidebarView: View {
             .fill(isSelected ? palette.selectionBackground : Color.clear)
     }
 
-    private func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task {
-            if await !GitCLI.isGitRepository(at: url) {
-                guard offerToInitRepository(at: url) else { return }
+    /// The persistent "Add Project" row pinned below the list — not a `List`
+    /// row itself, so it never scrolls out of view. Same `.plain`,
+    /// palette-only styling as the rest of the sidebar; routes through
+    /// `ProjectCreation` like every other add-project entry point.
+    private var addProjectFooter: some View {
+        Button {
+            ProjectCreation.addProject(store: store)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Add Project")
+                    .font(.system(size: 12, weight: .medium))
             }
-            try? await store.addProject(at: url)
+            .foregroundStyle(theme.palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
-    /// Shows a confirmation alert asking whether to `git init` a non-repo directory.
-    /// Returns whether the user agreed.
-    private func offerToInitRepository(at url: URL) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "Not a Git Repository"
-        alert.informativeText = "\(url.lastPathComponent) isn't a git repository yet. Run \"git init\" in it?"
-        alert.addButton(withTitle: "Initialize")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+    /// Shown instead of the (otherwise empty) list when there are no
+    /// projects yet, so a brand-new install invites the first "Add Project"
+    /// rather than presenting a blank column.
+    private var emptyProjectsState: some View {
+        VStack(spacing: 8) {
+            Text("No projects yet")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+            Button {
+                ProjectCreation.addProject(store: store)
+            } label: {
+                Label("Add Project", systemImage: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.textPrimary)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

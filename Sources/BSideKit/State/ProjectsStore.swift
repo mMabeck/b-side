@@ -3,6 +3,31 @@ import GRDB
 import OSLog
 import SwiftUI
 
+/// What the main area currently shows, derived from `ProjectsStore`'s
+/// selection state. A project by itself is never a terminal — only a task
+/// is — so this collapses the two separately-nilable IDs into one thing the
+/// main area can switch on instead of scattering nil-checks across it.
+public enum MainSelection: Equatable {
+    case none
+    case project(Project)
+    case task(TaskRecord, Project)
+
+    /// The project a bare "new task" action (Cmd+N, File › New Task) should
+    /// target: the selected task's own project when a task is selected —
+    /// since a task is always the more specific selection — else the selected
+    /// project itself, else `nil` so the action can no-op instead of guessing.
+    /// Pure and derived from the same selection `mainSelection` already
+    /// resolves, so Cmd+N can never target a different project than the one
+    /// the sidebar/dashboard currently show as selected.
+    public var taskCreationTarget: Project? {
+        switch self {
+        case .none: return nil
+        case .project(let project): return project
+        case .task(_, let project): return project
+        }
+    }
+}
+
 /// Drives the sidebar's project (and nested task) list live from the database,
 /// using GRDB's `ValueObservation`.
 @MainActor
@@ -13,8 +38,11 @@ public final class ProjectsStore {
     public private(set) var syncStatusByTask: [Int64: TaskWorktreeService.BranchSyncStatus] = [:]
     public private(set) var vanishedWorktreeTaskIds: Set<Int64> = []
 
-    /// The project whose terminals the main area and terminal drawer show.
-    /// In-memory only; not persisted. `nil` until the user picks a project.
+    /// The project whose dashboard or task list the sidebar and main area
+    /// reflect. In-memory only; not persisted. `nil` until the user picks a
+    /// project. Kept in sync with `selectedTaskID` by `selectProject(_:)` /
+    /// `selectTask(_:project:)` below rather than set directly, so the two
+    /// never point at a project/task pair that disagree with each other.
     public var selectedProjectID: Int64?
 
     public var selectedProject: Project? {
@@ -22,8 +50,92 @@ public final class ProjectsStore {
     }
 
     /// The task whose subagents (and, later, split panes) the right sidebar
-    /// and left sidebar rows reflect. In-memory only; not persisted.
+    /// and left sidebar rows reflect, and whose terminal the main area shows.
+    /// In-memory only; not persisted. `nil` means the main area shows the
+    /// selected project's dashboard (or, with no project either, an empty
+    /// state) rather than a task terminal — a project alone is never a
+    /// terminal.
     public var selectedTaskID: Int64?
+
+    /// The project a task-creation sheet should be presented for, or `nil`
+    /// when no sheet should be showing. Every trigger — the sidebar's
+    /// per-project "+", its context menu, the dashboard's "New Task" button,
+    /// Cmd+N, and the File menu — sets this instead of keeping its own
+    /// `@State` sheet flag. A single `ProjectsStore`-owned optional, presented
+    /// once (in `ContentView`), means it is structurally impossible for two
+    /// of those triggers to end up presenting the sheet twice or leaving it
+    /// stuck open pointed at a stale project.
+    public var pendingTaskCreationProject: Project?
+
+    public var selectedTask: TaskRecord? {
+        guard let selectedTaskID else { return nil }
+        return tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == selectedTaskID }
+    }
+
+    /// Selects `project` for the sidebar/dashboard and clears any task
+    /// selection: a project on its own is never a terminal, so picking one
+    /// always evicts whatever task terminal was showing.
+    public func selectProject(_ project: Project) {
+        selectedProjectID = project.id
+        selectedTaskID = nil
+    }
+
+    /// Selects `task` and, since a task's terminal is meaningless without
+    /// knowing which project owns it, its project too — the two selections
+    /// are set together so they can never disagree.
+    public func selectTask(_ task: TaskRecord, project: Project) {
+        selectedProjectID = project.id
+        selectedTaskID = task.id
+    }
+
+    /// Reconciles selection against a fresh `projects`/`tasksByProject`
+    /// snapshot so a task or project that disappeared — via `archiveTask`,
+    /// `deleteTask`, `removeProject`, or any other change underneath the
+    /// database, not just this store's own mutations — never leaves the
+    /// selection pointing at something no sidebar row or dashboard reads as
+    /// selected. Falls back to the vanished task's parent project (still
+    /// valid, since `selectTask` always keeps `selectedProjectID` in sync
+    /// with it) if that project still exists, and to no selection at all
+    /// once even the project is gone. Run from the `ValueObservation`
+    /// callback in `start()`, which is why it's pure and static: it needs to
+    /// react to *any* refresh of `projects`/`tasksByProject`, and being pure
+    /// makes that reaction directly testable without a database.
+    static func reconcileSelection(
+        selectedProjectID: Int64?,
+        selectedTaskID: Int64?,
+        projects: [Project],
+        tasksByProject: [Int64: [TaskRecord]]
+    ) -> (selectedProjectID: Int64?, selectedTaskID: Int64?) {
+        if let selectedTaskID {
+            let taskStillExists = tasksByProject.values.contains { $0.contains { $0.id == selectedTaskID } }
+            let projectStillExists = projects.contains { $0.id == selectedProjectID }
+            if taskStillExists && projectStillExists {
+                return (selectedProjectID, selectedTaskID)
+            }
+            return (projectStillExists ? selectedProjectID : nil, nil)
+        }
+        if let selectedProjectID {
+            let projectStillExists = projects.contains { $0.id == selectedProjectID }
+            return (projectStillExists ? selectedProjectID : nil, nil)
+        }
+        return (nil, nil)
+    }
+
+    /// What the main area should show, derived from the selection above
+    /// rather than tracked separately, so there is exactly one place that
+    /// decides dashboard vs. terminal vs. empty state. A task selection wins
+    /// over a project selection if both happen to be set (defensive against
+    /// anything that mutates `selectedProjectID`/`selectedTaskID` directly
+    /// instead of through `selectProject`/`selectTask`).
+    public var mainSelection: MainSelection {
+        if let task = selectedTask, let project = projects.first(where: { $0.id == task.projectId }) {
+            return .task(task, project)
+        }
+        if let selectedProject {
+            return .project(selectedProject)
+        }
+        return .none
+    }
 
     /// Feed of child agent runs, keyed by task. One store for the whole app so
     /// the Subagents tab and the left sidebar's per-task indicators read the
@@ -64,6 +176,14 @@ public final class ProjectsStore {
                 for try await (projects, tasksByProject) in observation.values(in: database.dbQueue) {
                     self.projects = projects
                     self.tasksByProject = tasksByProject
+                    let reconciled = Self.reconcileSelection(
+                        selectedProjectID: self.selectedProjectID,
+                        selectedTaskID: self.selectedTaskID,
+                        projects: projects,
+                        tasksByProject: tasksByProject
+                    )
+                    self.selectedProjectID = reconciled.selectedProjectID
+                    self.selectedTaskID = reconciled.selectedTaskID
                 }
             } catch {
                 Self.logger.error("Project observation failed: \(error, privacy: .public)")

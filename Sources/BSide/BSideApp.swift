@@ -52,6 +52,7 @@ struct BSideApp: App {
             // that item rather than replacing it, and neither copy opens a
             // window.
             WindowLayoutCommands()
+            ProjectCommands(store: store)
         }
 
         Settings {

@@ -380,14 +380,30 @@ public final class TerminalSurfaceHost: ObservableObject {
 /// SwiftUI view hosting one `TerminalSurfaceHost`. Everything outside this
 /// file that wants a terminal on screen goes through this type; nothing else
 /// needs to import `GhosttyTerminal`.
+///
+/// `focusedTaskID`/`taskID` are optional and only wired up by callers that
+/// keep several hosts mounted at once and need real (not merely visual)
+/// first-responder control over which one is live — see `MainAreaView`'s doc
+/// comment for why `opacity`/`allowsHitTesting` alone cannot move keyboard
+/// focus away from a hidden host. Left `nil` for a single-host caller like
+/// `TerminalDrawerView`, where there is nothing else competing for focus.
 public struct TerminalHostView: View {
     @ObservedObject var host: TerminalSurfaceHost
+    var focusedTaskID: FocusState<Int64?>.Binding?
+    var taskID: Int64?
 
-    public init(host: TerminalSurfaceHost) {
+    public init(host: TerminalSurfaceHost, focusedTaskID: FocusState<Int64?>.Binding? = nil, taskID: Int64? = nil) {
         self.host = host
+        self.focusedTaskID = focusedTaskID
+        self.taskID = taskID
     }
 
     public var body: some View {
-        TerminalSurfaceView(context: host.state)
+        if let focusedTaskID, let taskID {
+            TerminalSurfaceView(context: host.state)
+                .terminalFocused(focusedTaskID, equals: taskID)
+        } else {
+            TerminalSurfaceView(context: host.state)
+        }
     }
 }

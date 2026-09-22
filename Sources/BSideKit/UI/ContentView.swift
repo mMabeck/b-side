@@ -95,5 +95,22 @@ public struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
+        // The one place the task-creation sheet is actually presented — every
+        // trigger (sidebar row, context menu, dashboard button, Cmd+N, File
+        // menu) just sets `store.pendingTaskCreationProject` rather than
+        // presenting its own sheet, so it can never be shown twice at once.
+        // See that property's doc comment on `ProjectsStore`.
+        .sheet(item: pendingTaskCreationProjectBinding) { project in
+            TaskCreationView(project: project, store: store) {
+                store.pendingTaskCreationProject = nil
+            }
+        }
+    }
+
+    private var pendingTaskCreationProjectBinding: Binding<Project?> {
+        Binding(
+            get: { store.pendingTaskCreationProject },
+            set: { store.pendingTaskCreationProject = $0 }
+        )
     }
 }
