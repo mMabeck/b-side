@@ -4,6 +4,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Pin the toolchain the same way scripts/test.sh does, so building the app does
+# not depend on which Xcode happens to be selected.
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Library/Developer/CommandLineTools}"
+
 APP_NAME="Dash Native"
 BUNDLE_ID="ai.syv.dash-native"
 DIST_DIR="dist"
