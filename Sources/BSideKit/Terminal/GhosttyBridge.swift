@@ -238,6 +238,23 @@ public final class GhosttyResolvedTheme: ObservableObject {
         self.definition = definition
     }
 
+    /// Resolves the user's Ghostty theme from disk and publishes it to
+    /// `target` (``shared`` by default), independent of any terminal surface
+    /// being constructed. Called at app launch so every window — including
+    /// ones that never host a terminal, like Settings or the New Task sheet
+    /// — sees the real theme on its first frame instead of
+    /// ``BSidePalette/fallback``. `TerminalSurfaceHost` still calls
+    /// ``update(_:)`` itself when it starts a surface, which is harmless: it
+    /// re-resolves the same config and republishes the same result.
+    ///
+    /// Takes an explicit `target` (rather than always writing straight to
+    /// ``shared``) so tests can exercise this against a private instance
+    /// instead of the process-global singleton other concurrently running
+    /// tests may also be reading or writing.
+    public static func resolveEagerly(into target: GhosttyResolvedTheme = shared) {
+        target.update(GhosttyBridge.resolveUserConfig().themeDefinition)
+    }
+
     /// The full semantic palette for the whole app UI, derived from the
     /// resolved theme when one exists, or ``BSidePalette/fallback`` (plain
     /// system colours) otherwise. This is the single source of colour truth

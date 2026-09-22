@@ -27,6 +27,8 @@ struct TaskCreationView: View {
     @State private var logLines: [String] = []
     @State private var errorMessage: String?
 
+    @ObservedObject private var theme = GhosttyResolvedTheme.shared
+
     @Environment(\.dismiss) private var dismiss
 
     init(project: Project, store: ProjectsStore, onFinished: @escaping () -> Void) {
@@ -54,6 +56,8 @@ struct TaskCreationView: View {
             branchesLoaded = true
             branches = (try? await TaskWorktreeService.availableBranches(for: project)) ?? []
         }
+        .background(theme.palette.windowBackground)
+        .themedWindow(theme.palette)
     }
 
     private var formView: some View {
@@ -75,7 +79,7 @@ struct TaskCreationView: View {
             case .existingBranch:
                 if branches.isEmpty {
                     Text("No local branches found.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.palette.textSecondary)
                 } else {
                     Picker("Branch", selection: $selectedBranch) {
                         Text("Choose…").tag(String?.none)
@@ -120,11 +124,11 @@ struct TaskCreationView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: 200)
-            .border(Color.secondary.opacity(0.3))
+            .border(theme.palette.separator)
 
             if let errorMessage {
                 Text(errorMessage)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.palette.statusError)
             }
 
             HStack {
@@ -132,7 +136,7 @@ struct TaskCreationView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text("Creating…")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
                 Spacer()
                 Button(isFinished || errorMessage != nil ? "Done" : "Cancel") {

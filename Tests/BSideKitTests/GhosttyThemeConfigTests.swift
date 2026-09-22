@@ -92,6 +92,41 @@ struct GhosttyThemeConfigTests {
         #expect(resolved.themeDefinition == nil)
     }
 
+    @Test("resolveEagerly publishes the resolved theme independent of any terminal surface")
+    func resolveEagerlyPublishesWithoutATerminalSurface() throws {
+        let configHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ghostty-theme-test-\(UUID().uuidString)")
+        let configDir = configHome.appendingPathComponent("ghostty")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        try "theme = Ayu Mirage\n".write(
+            to: configDir.appendingPathComponent("config"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? FileManager.default.removeItem(at: configHome) }
+
+        let previous = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+        setenv("XDG_CONFIG_HOME", configHome.path, 1)
+        defer {
+            if let previous {
+                setenv("XDG_CONFIG_HOME", previous, 1)
+            } else {
+                unsetenv("XDG_CONFIG_HOME")
+            }
+        }
+
+        // A private instance, not `.shared`: other suites (e.g.
+        // `ContentViewThemeSnapshotTests`) read/write the process-global
+        // singleton concurrently, so asserting against it here would race.
+        let target = GhosttyResolvedTheme()
+        #expect(target.definition == nil)
+
+        GhosttyResolvedTheme.resolveEagerly(into: target)
+
+        #expect(target.definition?.name == "Ayu Mirage")
+        #expect(target.palette.isDark)
+    }
+
     @Test("A config with an unresolvable theme still yields the user's other settings")
     func unresolvableThemeKeepsRestOfConfig() {
         let contents = """

@@ -16,6 +16,12 @@ struct ThemedWindowModifier: ViewModifier {
     }
 
     private func apply(_ window: NSWindow) {
+        // Applied at the `NSApp` level, not just this window: menus, popovers,
+        // and sheets/alerts spawned from *any* window (including ones this
+        // modifier is never attached to) resolve their own appearance from
+        // `NSApp.effectiveAppearance` when they have none of their own, so
+        // this is what keeps them from staying stuck in light `aqua`.
+        NSApplication.shared.appearance = palette.preferredAppearance
         window.appearance = palette.preferredAppearance
         window.backgroundColor = NSColor(palette.windowBackground)
         window.titlebarAppearsTransparent = true
