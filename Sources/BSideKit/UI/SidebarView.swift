@@ -96,27 +96,21 @@ struct SidebarView: View {
     /// filled themed row using the palette's selection colours.
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
         let info = gitInfo.info(forProject: project.id)
-        let isSelected = store.selectedProjectID == project.id
+        let isSelected = store.selectedProjectID == project.id && store.selectedTaskID == nil
         let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
         let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
-        let tertiary = isSelected ? theme.palette.selectionForeground.opacity(0.7) : theme.palette.textDisabled
 
         return Button {
-            store.selectedProjectID = project.id
+            store.selectProject(project)
         } label: {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(project.displayName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(primary)
-                    if let branch = info?.branch {
-                        Text(branch + (info?.isDirty == true ? "*" : ""))
-                            .font(.system(size: 11))
-                            .foregroundStyle(secondary)
-                    }
-                    Text(project.path)
+                    Text(projectSecondaryLine(branch: info?.branch, isDirty: info?.isDirty ?? false, path: project.path))
                         .font(.system(size: 11))
-                        .foregroundStyle(tertiary)
+                        .foregroundStyle(secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -125,7 +119,7 @@ struct SidebarView: View {
                     .font(.caption)
                     .foregroundStyle(secondary)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, 5)
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
@@ -143,11 +137,34 @@ struct SidebarView: View {
         .task(id: project.id) { gitInfo.refresh(project) }
     }
 
+    /// One terse secondary line combining branch and path (`main* — ~/Claude/dotfiles`)
+    /// instead of the two lines a task-peer row would need, keeping the project
+    /// header compact relative to the tasks nested under it.
+    private func projectSecondaryLine(branch: String?, isDirty: Bool, path: String) -> String {
+        guard let branch else { return path }
+        return "\(branch)\(isDirty ? "*" : "") — \(path)"
+    }
+
+    /// The leading inset a task row sits at, aligned with where the project
+    /// title's text begins (`projectRow`'s own horizontal padding) so the
+    /// nesting reads visually, not just via `List`'s section indentation.
+    private static let taskLeadingIndent: CGFloat = 16
+
+    /// Where the vertical indent-guide line sits within that inset — drawn
+    /// manually per row (not as one tall shape spanning the section) because
+    /// `List` gives each row its own `NSHostingView`; stacking these
+    /// borderless per-row segments with no vertical gap between them is what
+    /// makes the line read as continuous down the whole task group.
+    private static let taskIndentGuideX: CGFloat = 6
+
     /// A task row nested beneath its project. The leading status-dot column
     /// is reserved at a fixed width even when no dot is shown, so every
     /// title starts at the same x (`TaskRowLayout.statusDotColumnWidth`).
     /// The trailing edge carries the subagent child count/blocked indicator
-    /// and the branch sync summary, in that order, quiet and compact.
+    /// and the branch sync summary, in that order, quiet and compact. Smaller
+    /// and lighter than the project title above it, and indented beneath it
+    /// with a low-opacity guide line, so tasks read as the project's children
+    /// rather than its peers — a project is a container, never a terminal.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
         let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
@@ -165,7 +182,7 @@ struct SidebarView: View {
         let tertiary = isSelected ? theme.palette.selectionForeground.opacity(0.7) : theme.palette.textDisabled
 
         return Button {
-            store.selectedTaskID = task.id
+            store.selectTask(task, project: project)
         } label: {
             HStack(spacing: 6) {
                 Circle()
@@ -174,6 +191,7 @@ struct SidebarView: View {
                     .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .center)
 
                 Text(task.name)
+                    .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(primary)
 
                 if isVanished {
@@ -199,10 +217,20 @@ struct SidebarView: View {
                         .foregroundStyle(tertiary)
                 }
             }
-            .padding(.leading, 4)
-            .padding(.vertical, 3)
+            .padding(.leading, Self.taskLeadingIndent)
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
+            .overlay(alignment: .leading) {
+                // The indent guide: a thin low-opacity line at a fixed x within
+                // the leading inset, independent of whether this particular
+                // row is selected, so the guide reads as one continuous line
+                // rather than flickering per-row with selection state.
+                Rectangle()
+                    .fill(theme.palette.separator.opacity(0.5))
+                    .frame(width: 1)
+                    .padding(.leading, Self.taskIndentGuideX)
+            }
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)

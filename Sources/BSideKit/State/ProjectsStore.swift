@@ -3,6 +3,16 @@ import GRDB
 import OSLog
 import SwiftUI
 
+/// What the main area currently shows, derived from `ProjectsStore`'s
+/// selection state. A project by itself is never a terminal — only a task
+/// is — so this collapses the two separately-nilable IDs into one thing the
+/// main area can switch on instead of scattering nil-checks across it.
+public enum MainSelection: Equatable {
+    case none
+    case project(Project)
+    case task(TaskRecord, Project)
+}
+
 /// Drives the sidebar's project (and nested task) list live from the database,
 /// using GRDB's `ValueObservation`.
 @MainActor
@@ -13,8 +23,11 @@ public final class ProjectsStore {
     public private(set) var syncStatusByTask: [Int64: TaskWorktreeService.BranchSyncStatus] = [:]
     public private(set) var vanishedWorktreeTaskIds: Set<Int64> = []
 
-    /// The project whose terminals the main area and terminal drawer show.
-    /// In-memory only; not persisted. `nil` until the user picks a project.
+    /// The project whose dashboard or task list the sidebar and main area
+    /// reflect. In-memory only; not persisted. `nil` until the user picks a
+    /// project. Kept in sync with `selectedTaskID` by `selectProject(_:)` /
+    /// `selectTask(_:project:)` below rather than set directly, so the two
+    /// never point at a project/task pair that disagree with each other.
     public var selectedProjectID: Int64?
 
     public var selectedProject: Project? {
@@ -22,8 +35,49 @@ public final class ProjectsStore {
     }
 
     /// The task whose subagents (and, later, split panes) the right sidebar
-    /// and left sidebar rows reflect. In-memory only; not persisted.
+    /// and left sidebar rows reflect, and whose terminal the main area shows.
+    /// In-memory only; not persisted. `nil` means the main area shows the
+    /// selected project's dashboard (or, with no project either, an empty
+    /// state) rather than a task terminal — a project alone is never a
+    /// terminal.
     public var selectedTaskID: Int64?
+
+    public var selectedTask: TaskRecord? {
+        guard let selectedTaskID else { return nil }
+        return tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == selectedTaskID }
+    }
+
+    /// Selects `project` for the sidebar/dashboard and clears any task
+    /// selection: a project on its own is never a terminal, so picking one
+    /// always evicts whatever task terminal was showing.
+    public func selectProject(_ project: Project) {
+        selectedProjectID = project.id
+        selectedTaskID = nil
+    }
+
+    /// Selects `task` and, since a task's terminal is meaningless without
+    /// knowing which project owns it, its project too — the two selections
+    /// are set together so they can never disagree.
+    public func selectTask(_ task: TaskRecord, project: Project) {
+        selectedProjectID = project.id
+        selectedTaskID = task.id
+    }
+
+    /// What the main area should show, derived from the selection above
+    /// rather than tracked separately, so there is exactly one place that
+    /// decides dashboard vs. terminal vs. empty state. A task selection wins
+    /// over a project selection if both happen to be set (defensive against
+    /// anything that mutates `selectedProjectID`/`selectedTaskID` directly
+    /// instead of through `selectProject`/`selectTask`).
+    public var mainSelection: MainSelection {
+        if let task = selectedTask, let project = projects.first(where: { $0.id == task.projectId }) {
+            return .task(task, project)
+        }
+        if let selectedProject {
+            return .project(selectedProject)
+        }
+        return .none
+    }
 
     /// Feed of child agent runs, keyed by task. One store for the whole app so
     /// the Subagents tab and the left sidebar's per-task indicators read the
