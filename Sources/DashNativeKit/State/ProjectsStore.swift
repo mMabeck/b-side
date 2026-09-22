@@ -21,6 +21,19 @@ public final class ProjectsStore {
         projects.first { $0.id == selectedProjectID }
     }
 
+    /// The task whose subagents (and, later, split panes) the right sidebar
+    /// and left sidebar rows reflect. In-memory only; not persisted.
+    public var selectedTaskID: Int64?
+
+    /// Feed of child agent runs, keyed by task. One store for the whole app so
+    /// the Subagents tab and the left sidebar's per-task indicators read the
+    /// same data.
+    public let subagentFeed = SubagentFeedStore()
+
+    /// The local HTTP endpoint agent processes report status and subagent
+    /// events to (native-rewrite.md §5, §6). `nil` until `start()` has bound it.
+    public private(set) var subagentServer: SubagentEventServer?
+
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?
     private static let logger = Logger(subsystem: "ai.syv.dash-native", category: "projects-store")
@@ -59,6 +72,22 @@ public final class ProjectsStore {
 
         Task { [weak self] in
             await self?.pruneAndDetectVanishedWorktrees()
+        }
+
+        Task { [weak self] in
+            await self?.startSubagentServer()
+        }
+    }
+
+    private func startSubagentServer() async {
+        guard subagentServer == nil else { return }
+        do {
+            let server = try SubagentEventServer(store: subagentFeed)
+            try await server.start()
+            subagentServer = server
+            Self.logger.info("Subagent event server listening on \(server.address ?? "?", privacy: .public)")
+        } catch {
+            Self.logger.error("Failed to start subagent event server: \(error, privacy: .public)")
         }
     }
 

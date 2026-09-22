@@ -33,7 +33,10 @@ let package = Package(
         ),
         .testTarget(
             name: "DashNativeKitTests",
-            dependencies: ["DashNativeKit"]
+            dependencies: [
+                "DashNativeKit",
+                .product(name: "GhosttyTheme", package: "libghostty-spm"),
+            ]
         ),
     ]
 )
