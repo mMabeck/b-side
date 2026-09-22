@@ -1,0 +1,244 @@
+import Foundation
+import Testing
+
+@testable import BSideKit
+
+@Suite("PiSessionService")
+struct PiSessionServiceTests {
+    private func writeTranscript(id: String, cwd: String, at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let header = "{\"type\":\"session\",\"id\":\"\(id)\",\"cwd\":\"\(cwd)\"}"
+        let body = "{\"type\":\"message\",\"role\":\"user\",\"content\":\"hi\"}"
+        try "\(header)\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func makeLocations(sessionsRoot: URL, binaryPath: String? = "/usr/local/bin/pi") -> PiSessionService.Locations {
+        PiSessionService.Locations(
+            bundledBinaryPath: binaryPath,
+            sessionsRoot: sessionsRoot,
+            pathBinaryFinder: { nil }
+        )
+    }
+
+    @Test("first launch for a task with no conversation targets a fresh session id")
+    func firstLaunchUsesSessionID() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let locations = makeLocations(sessionsRoot: root.appendingPathComponent("sessions"))
+        let sessionID = PiSessionService.newSessionID()
+
+        let command = PiSessionService.launchCommand(
+            locations: locations,
+            sessionID: sessionID,
+            transcriptPath: nil,
+            taskName: "Fix the thing"
+        )
+
+        #expect(command == "'/usr/local/bin/pi' --session-id '\(sessionID)' --name 'Fix the thing'")
+    }
+
+    @Test("relaunch with a known transcript path resumes the same session via --session")
+    func relaunchResumesSameSession() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let locations = makeLocations(sessionsRoot: root.appendingPathComponent("sessions"))
+        let sessionID = PiSessionService.newSessionID()
+
+        let firstCommand = PiSessionService.launchCommand(
+            locations: locations,
+            sessionID: sessionID,
+            transcriptPath: nil,
+            taskName: "Fix the thing"
+        )
+
+        let transcriptPath = root.appendingPathComponent("sessions/proj/20260101_abc.jsonl").path
+        let secondCommand = PiSessionService.launchCommand(
+            locations: locations,
+            sessionID: sessionID,
+            transcriptPath: transcriptPath,
+            taskName: "Fix the thing"
+        )
+
+        // Same session id underlies both commands...
+        #expect(firstCommand.contains(sessionID))
+        // ...but the second, once the transcript is known, targets that exact
+        // file rather than re-deriving the session id, and is a different
+        // command shape from the first launch.
+        #expect(secondCommand == "'/usr/local/bin/pi' --session '\(transcriptPath)' --name 'Fix the thing'")
+        #expect(secondCommand != firstCommand)
+    }
+
+    @Test("transcript lookup finds the file whose header id matches among several sessions")
+    func locatesMatchingTranscriptAmongMany() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let targetID = "target-session-id"
+
+        try writeTranscript(
+            id: "other-session-1",
+            cwd: "/tmp/other1",
+            at: sessionsRoot.appendingPathComponent("proj-a/20260101_000000_aaa.jsonl")
+        )
+        try writeTranscript(
+            id: targetID,
+            cwd: "/tmp/target",
+            at: sessionsRoot.appendingPathComponent("proj-b/20260101_000001_bbb.jsonl")
+        )
+        try writeTranscript(
+            id: "other-session-2",
+            cwd: "/tmp/other2",
+            at: sessionsRoot.appendingPathComponent("proj-b/20260101_000002_ccc.jsonl")
+        )
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let found = PiSessionService.locateTranscript(sessionID: targetID, locations: locations)
+
+        #expect(
+            found?.resolvingSymlinksInPath().path
+                == sessionsRoot.appendingPathComponent("proj-b/20260101_000001_bbb.jsonl").resolvingSymlinksInPath().path
+        )
+    }
+
+    @Test("transcript lookup returns nil when no file's header matches")
+    func locateTranscriptReturnsNilWithoutAMatch() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        try writeTranscript(
+            id: "some-other-id",
+            cwd: "/tmp/x",
+            at: sessionsRoot.appendingPathComponent("proj/20260101_000000_aaa.jsonl")
+        )
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let found = PiSessionService.locateTranscript(sessionID: "missing-id", locations: locations)
+
+        #expect(found == nil)
+    }
+
+    @Test("falls back to a plain login shell when no pi binary can be found")
+    func fallsBackToLoginShellWithoutPiBinary() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let locations = PiSessionService.Locations(
+            bundledBinaryPath: nil,
+            sessionsRoot: root.appendingPathComponent("sessions"),
+            pathBinaryFinder: { nil }
+        )
+
+        let command = PiSessionService.launchCommand(
+            locations: locations,
+            sessionID: PiSessionService.newSessionID(),
+            transcriptPath: nil,
+            taskName: "Fix the thing",
+            loginShell: "/bin/zsh"
+        )
+
+        #expect(command == "/bin/zsh -l")
+    }
+
+    @Test("resolveBinary prefers the bundled binary over $PATH")
+    func resolveBinaryPrefersBundled() throws {
+        let locations = PiSessionService.Locations(
+            bundledBinaryPath: "/opt/pi/bin/pi",
+            sessionsRoot: FileManager.default.temporaryDirectory,
+            pathBinaryFinder: { "/usr/bin/pi" }
+        )
+        #expect(PiSessionService.resolveBinary(locations: locations) == "/opt/pi/bin/pi")
+    }
+
+    @Test("resolveBinary falls back to $PATH when there's no bundled binary")
+    func resolveBinaryFallsBackToPath() throws {
+        let locations = PiSessionService.Locations(
+            bundledBinaryPath: nil,
+            sessionsRoot: FileManager.default.temporaryDirectory,
+            pathBinaryFinder: { "/usr/bin/pi" }
+        )
+        #expect(PiSessionService.resolveBinary(locations: locations) == "/usr/bin/pi")
+    }
+}
+
+@Suite("PiSessionService + ProjectsStore conversation binding")
+struct PiSessionServiceConversationBindingTests {
+    private func makeStore() async throws -> (store: ProjectsStore, task: TaskRecord) {
+        let database = try AppDatabase.openInMemory()
+        let project = Project(path: "/tmp/repo", displayName: "repo", baseRef: "main")
+        let insertedProject = try await database.dbQueue.write { db -> Project in
+            var project = project
+            try project.insert(db)
+            return project
+        }
+
+        let task = TaskRecord(
+            projectId: insertedProject.id!,
+            name: "Fix bug",
+            branchName: "task/fix-bug",
+            worktreePath: "/tmp/repo-worktrees/fix-bug",
+            harness: "claude",
+            permissionLevel: "default"
+        )
+        let insertedTask = try await database.dbQueue.write { db -> TaskRecord in
+            var task = task
+            try task.insert(db)
+            return task
+        }
+
+        let store = await ProjectsStore(database: database)
+        return (store, insertedTask)
+    }
+
+    @Test("first launch for a task with no conversation persists a new active conversation")
+    func firstLaunchPersistsConversation() async throws {
+        let (store, task) = try await makeStore()
+
+        let existing = await store.activeConversation(forTaskId: task.id!)
+        #expect(existing == nil)
+
+        let sessionID = PiSessionService.newSessionID()
+        let conversation = try await store.startConversation(for: task, sessionID: sessionID)
+
+        #expect(conversation.sessionId == sessionID)
+        #expect(conversation.transcriptPath == "")
+        #expect(conversation.isActive == true)
+
+        let refetched = await store.activeConversation(forTaskId: task.id!)
+        #expect(refetched?.id == conversation.id)
+        #expect(refetched?.sessionId == sessionID)
+    }
+
+    @Test("a second launch for the same task reuses the existing conversation instead of creating another")
+    func secondLaunchReusesConversation() async throws {
+        let (store, task) = try await makeStore()
+
+        let sessionID = PiSessionService.newSessionID()
+        let first = try await store.startConversation(for: task, sessionID: sessionID)
+        try await store.recordTranscriptPath("/tmp/sessions/proj/session.jsonl", for: first)
+
+        // Simulate the app restarting / the task being reopened: the second
+        // "launch" looks up the active conversation rather than starting a
+        // fresh one.
+        let reused = await store.activeConversation(forTaskId: task.id!)
+        #expect(reused?.id == first.id)
+        #expect(reused?.sessionId == sessionID)
+        #expect(reused?.transcriptPath == "/tmp/sessions/proj/session.jsonl")
+
+        let command = PiSessionService.launchCommand(
+            locations: PiSessionService.Locations(
+                bundledBinaryPath: "/usr/local/bin/pi",
+                sessionsRoot: FileManager.default.temporaryDirectory,
+                pathBinaryFinder: { nil }
+            ),
+            sessionID: reused!.sessionId,
+            transcriptPath: reused!.transcriptPath,
+            taskName: task.name
+        )
+        #expect(command.contains("--session '/tmp/sessions/proj/session.jsonl'"))
+        #expect(command.contains(sessionID) == false)
+    }
+}

@@ -330,6 +330,48 @@ public final class ProjectsStore {
         }
     }
 
+    // MARK: - Pi conversations
+
+    /// The task's current active conversation — the most recently started
+    /// one still marked active — or `nil` if its agent terminal has never
+    /// been launched. `MainAreaView` reuses this instead of starting a new
+    /// conversation so reopening a task resumes the same pi session.
+    public func activeConversation(forTaskId taskId: Int64) async -> Conversation? {
+        try? await database.dbQueue.read { db in
+            try Conversation
+                .filter(Conversation.Columns.taskId == taskId)
+                .filter(Conversation.Columns.isActive == true)
+                .order(Conversation.Columns.startedAt.desc)
+                .fetchOne(db)
+        }
+    }
+
+    /// Starts and persists a new conversation for `task` under `sessionID`,
+    /// with no transcript path yet — pi creates the transcript file itself
+    /// shortly after launch; `recordTranscriptPath` fills it in once
+    /// `PiSessionService.locateTranscript` resolves it on disk.
+    @discardableResult
+    public func startConversation(for task: TaskRecord, sessionID: String) async throws -> Conversation {
+        let conversation = Conversation(taskId: task.id ?? 0, sessionId: sessionID, transcriptPath: "")
+        return try await database.dbQueue.write { db in
+            var conversation = conversation
+            try conversation.insert(db)
+            return conversation
+        }
+    }
+
+    /// Records the transcript path resolved for `conversation` once pi has
+    /// created the file on disk. A no-op if the conversation has since been
+    /// deleted (e.g. its task was deleted while resolution was in flight).
+    public func recordTranscriptPath(_ path: String, for conversation: Conversation) async throws {
+        guard let id = conversation.id else { return }
+        try await database.dbQueue.write { db in
+            guard var updated = try Conversation.fetchOne(db, key: id) else { return }
+            updated.transcriptPath = path
+            try updated.update(db)
+        }
+    }
+
     /// Refreshes ahead/behind/merged status for `task` against its project's base ref.
     public func refreshSyncStatus(for task: TaskRecord, project: Project) async {
         guard let id = task.id else { return }
