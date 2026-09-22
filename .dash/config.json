@@ -1,0 +1,7 @@
+{
+  "taskDefaults": {
+    "baseRef": "main",
+    "permissionMode": "default",
+    "useWorktree": false
+  }
+}
