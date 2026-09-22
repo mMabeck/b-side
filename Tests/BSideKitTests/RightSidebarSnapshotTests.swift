@@ -60,12 +60,30 @@ struct RightSidebarSnapshotTests {
 
         // Full width: sampling near the left and right edges of the strip's
         // row should both land inside picker/strip chrome, not the bare
-        // sidebar background peeking out at either side.
+        // sidebar background peeking out at either side. The old, broken
+        // layout shrink-wrapped the segmented control into a small centred
+        // pill, which left the sidebar's own (blue-tinted) surface colour
+        // showing untouched at both edges — a colour distance of exactly
+        // zero from `palette.surfaceBackground`. The control's own chrome is
+        // a neutral grey, so a genuinely full-width strip pulls the sampled
+        // colour well away from the surface colour at both edges; this
+        // asserts that distance rather than just printing it.
         let stripRowY = bitmap.pixelsHigh - 10
         let leftEdgeSample = try #require(bitmap.colorAt(x: 4, y: stripRowY))
         let rightEdgeSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide - 4, y: stripRowY))
-        report("stripLeftEdge", leftEdgeSample, expected: NSColor(palette.surfaceBackground))
-        report("stripRightEdge", rightEdgeSample, expected: NSColor(palette.surfaceBackground))
+        let surfaceBackground = NSColor(palette.surfaceBackground)
+        report("stripLeftEdge", leftEdgeSample, expected: surfaceBackground)
+        report("stripRightEdge", rightEdgeSample, expected: surfaceBackground)
+        #expect(colorDistance(leftEdgeSample, surfaceBackground) > 0.03)
+        #expect(colorDistance(rightEdgeSample, surfaceBackground) > 0.03)
+
+        // The empty-state placeholder below the strip should sit on the
+        // sidebar's themed surface background, not a hardcoded colour.
+        // Sampled here, ahead of the glyph-brightness check below, so its
+        // luminance can serve as the known-background reference for that
+        // check too.
+        let placeholderAreaSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 20))
+        #expect(isCloseToDarkThemeFamily(placeholderAreaSample, background: surfaceBackground))
 
         // No near-black glyphs anywhere in the content area: the segmented
         // control's own tab labels are system-drawn text over the themed
@@ -77,12 +95,12 @@ struct RightSidebarSnapshotTests {
         )
         print("sidebar content area: minLuminance=\(minLuminance) maxLuminance=\(maxLuminance)")
         #expect(minLuminance > 0.05)
-        #expect(maxLuminance > 0.05)
-
-        // The empty-state placeholder below the strip should sit on the
-        // sidebar's themed surface background, not a hardcoded colour.
-        let placeholderAreaSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 20))
-        #expect(isCloseToDarkThemeFamily(placeholderAreaSample, background: NSColor(palette.surfaceBackground)))
+        // A readable light-on-dark label produces pixels well above the
+        // background's own luminance; `maxLuminance > 0.05` alone can never
+        // fail independently of the assertion above (max >= min by
+        // construction), so this checks the brightest pixel really is a
+        // rendered glyph rather than just "not black".
+        #expect(maxLuminance - luminance(of: placeholderAreaSample) > 0.3)
     }
 
     /// Cheap, non-asserting re-check of the same conditions the real
@@ -177,6 +195,17 @@ struct RightSidebarSnapshotTests {
     private func luminance(of color: NSColor) -> CGFloat {
         let c = color.usingColorSpace(.deviceRGB) ?? color
         return 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+    }
+
+    /// Sum of per-channel absolute differences, used where luminance alone
+    /// can't tell a neutral grey (equal r/g/b) apart from a blue-tinted
+    /// colour of similar brightness.
+    private func colorDistance(_ a: NSColor, _ b: NSColor) -> CGFloat {
+        let a = a.usingColorSpace(.deviceRGB) ?? a
+        let b = b.usingColorSpace(.deviceRGB) ?? b
+        return abs(a.redComponent - b.redComponent)
+            + abs(a.greenComponent - b.greenComponent)
+            + abs(a.blueComponent - b.blueComponent)
     }
 
     private func luminanceRange(
