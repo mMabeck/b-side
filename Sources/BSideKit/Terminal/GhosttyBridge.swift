@@ -188,25 +188,63 @@ public enum GhosttyBridge {
         let themeDefinition: GhosttyThemeDefinition?
     }
 
+    /// Key equivalents this *app* owns, unbound in the terminal's config so
+    /// the surface does not swallow them.
+    ///
+    /// `AppTerminalView.performKeyEquivalent` asks
+    /// `ghostty_surface_key_is_binding` whether a key is one of Ghostty's
+    /// keybindings and, if so, handles it and returns `true`. AppKit offers
+    /// the focused view's `performKeyEquivalent` a key *before* the main
+    /// menu, so any shortcut Ghostty binds is consumed before the menu item
+    /// that shares it can ever fire. Ghostty binds `cmd+,` to `open_config`
+    /// by default, which is precisely why the App menu's Settings item did
+    /// nothing whenever the terminal had focus — the menu was correct, the
+    /// keystroke simply never reached it.
+    ///
+    /// `unbind` is Ghostty's own directive for releasing a binding, and is
+    /// harmless for a key Ghostty never bound, so the app's other window
+    /// shortcuts are listed too rather than waiting to be discovered the
+    /// same painful way.
+    static let appOwnedKeybinds = """
+
+    # Appended by B-Side: see GhosttyBridge.appOwnedKeybinds.
+    keybind = cmd+,=unbind
+    keybind = cmd+b=unbind
+    keybind = cmd+opt+b=unbind
+
+    """
+
     @MainActor
     static func resolveUserConfig(preferDark: Bool = systemPrefersDarkAppearance) -> ResolvedUserConfig {
         guard let path = userConfigFilePath,
               let raw = try? String(contentsOfFile: path, encoding: .utf8)
         else {
-            return ResolvedUserConfig(configSource: .none, theme: .default, themeDefinition: nil)
+            // Still generated rather than `.none`: even with no user config
+            // at all, the app's own key equivalents must be released from
+            // Ghostty's defaults.
+            return ResolvedUserConfig(
+                configSource: .generated(appOwnedKeybinds),
+                theme: .default,
+                themeDefinition: nil
+            )
         }
 
         let (sanitized, directive) = extractThemeDirective(from: raw)
         guard let directive else {
-            // No theme directive to resolve: pass the file straight
-            // through, unchanged from the app's previous behaviour.
-            return ResolvedUserConfig(configSource: .file(path), theme: .default, themeDefinition: nil)
+            // No theme directive to resolve, so the file passes through
+            // verbatim — but as generated text rather than `.file(path)`,
+            // since the unbinds have to be appended to it.
+            return ResolvedUserConfig(
+                configSource: .generated(sanitized + appOwnedKeybinds),
+                theme: .default,
+                themeDefinition: nil
+            )
         }
 
         let definition = resolveThemeDefinition(directive, preferDark: preferDark)
         let theme = definition?.toTerminalTheme() ?? .default
         return ResolvedUserConfig(
-            configSource: .generated(sanitized),
+            configSource: .generated(sanitized + appOwnedKeybinds),
             theme: theme,
             themeDefinition: definition
         )

@@ -44,8 +44,14 @@ public final class WindowLayoutState: ObservableObject {
         withAnimation(.easeInOut(duration: 0.18)) { leftSidebarCollapsed.toggle() }
     }
 
+    /// Deliberately *not* wrapped in a custom `withAnimation`, unlike the
+    /// other two. The right sidebar is presented by SwiftUI's native
+    /// `.inspector` modifier, which animates its own show/hide transition;
+    /// imposing a 0.18s `easeInOut` on top of that overrides the system
+    /// curve and is what made this side feel unlike the left column, which
+    /// AppKit animates internally no matter what this wrapper says.
     public func toggleRightSidebar() {
-        withAnimation(.easeInOut(duration: 0.18)) { rightSidebarCollapsed.toggle() }
+        rightSidebarCollapsed.toggle()
     }
 
     public func toggleTerminalDrawer() {

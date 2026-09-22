@@ -94,6 +94,15 @@ struct RightSidebarSnapshotTests {
             backing: .buffered,
             defer: false
         )
+        // Explicitly themed, exactly as `themedWindow` does in production.
+        // Without this the suite passes or fails depending on run *order*:
+        // `NSApp.appearance` is process-global, and the suites that host a
+        // whole `ContentView` set it as a side effect, so this view would
+        // inherit dark appearance only when one of those happened to run
+        // first. Alone, it rendered its AppKit tab strip in light `aqua` —
+        // black labels on the dark themed surface, the very bug the
+        // minimum-luminance assertion below exists to catch.
+        window.appearance = theme.palette.preferredAppearance
         window.contentView = NSHostingView(rootView: RightSidebarView(store: store))
         window.setIsVisible(true)
         try await Task.sleep(for: .milliseconds(400))

@@ -143,6 +143,11 @@ struct AuxiliaryWindowThemeSnapshotTests {
             backing: .buffered,
             defer: false
         )
+        // Themed explicitly, as `themedWindow` does in production: relying
+        // on the process-global `NSApp.appearance` that other suites set as
+        // a side effect makes these captures order-dependent (see
+        // RightSidebarSnapshotTests for the same hazard biting).
+        window.appearance = theme.palette.preferredAppearance
         window.contentView = try makeView(theme.palette)
         window.setIsVisible(true)
         try await Task.sleep(for: .milliseconds(400))

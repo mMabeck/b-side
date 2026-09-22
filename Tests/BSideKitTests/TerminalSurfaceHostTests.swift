@@ -67,3 +67,58 @@ struct TerminalSurfaceHostTests {
         window.orderOut(nil)
     }
 }
+
+/// libghostty rejects an *entire* config when a single directive fails to
+/// parse — the failure mode that once cost this app its whole theme over one
+/// `theme =` line. The `keybind = …=unbind` directives `GhosttyBridge`
+/// appends to release the app's own key equivalents are therefore checked
+/// against a real surface here, not merely asserted as strings, so a syntax
+/// mistake surfaces as a test failure instead of silently discarding every
+/// setting the user wrote.
+@MainActor
+struct GeneratedKeybindConfigTests {
+    @Test("A real surface accepts the generated config, unbinds included")
+    func realSurfaceAcceptsGeneratedConfig() async throws {
+        let configHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ghostty-keybind-surface-\(UUID().uuidString)")
+        let configDir = configHome.appendingPathComponent("ghostty")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        try "theme = Ayu Mirage\nfont-size = 14\n".write(
+            to: configDir.appendingPathComponent("config"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer { try? FileManager.default.removeItem(at: configHome) }
+
+        let previous = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+        setenv("XDG_CONFIG_HOME", configHome.path, 1)
+        defer {
+            if let previous {
+                setenv("XDG_CONFIG_HOME", previous, 1)
+            } else {
+                unsetenv("XDG_CONFIG_HOME")
+            }
+        }
+
+        let host = TerminalSurfaceHost(
+            workingDirectory: FileManager.default.temporaryDirectory,
+            shell: "/bin/zsh"
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 600, height: 400),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: TerminalHostView(host: host))
+        window.setIsVisible(true)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(800))
+
+        let issue = host.state.controller.lastConfigurationIssue
+        if let issue {
+            Issue.record("libghostty rejected the generated config: \(issue)")
+        }
+        #expect(issue == nil)
+    }
+}

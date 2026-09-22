@@ -68,7 +68,7 @@ struct GhosttyThemeConfigTests {
         #expect(resolved?.background == "1f2430")
     }
 
-    @Test("An absent config file (via a relocated XDG_CONFIG_HOME) resolves to no path and no theme")
+    @Test("An absent config file (via a relocated XDG_CONFIG_HOME) still releases the app's own key equivalents")
     func absentConfigFile() {
         let emptyConfigHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("ghostty-theme-test-\(UUID().uuidString)")
@@ -88,8 +88,54 @@ struct GhosttyThemeConfigTests {
         #expect(GhosttyBridge.userConfigFilePath == nil)
 
         let resolved = GhosttyBridge.resolveUserConfig(preferDark: true)
-        #expect(resolved.configSource == .none)
         #expect(resolved.themeDefinition == nil)
+        // Generated, not `.none`: the unbinds below must reach the surface
+        // even when the user has no Ghostty config at all.
+        #expect(resolved.configSource == .generated(GhosttyBridge.appOwnedKeybinds))
+    }
+
+    /// `AppTerminalView.performKeyEquivalent` consumes any key Ghostty binds
+    /// before the main menu is offered it, so a shortcut the app's own menu
+    /// owns has to be released from Ghostty's defaults or the menu item
+    /// silently never fires. `cmd+,` (Ghostty's `open_config`) is the one
+    /// that actually broke Settings.
+    @Test("Every config path unbinds the key equivalents the app's own menus own")
+    func generatedConfigUnbindsAppOwnedKeys() throws {
+        let configHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ghostty-keybind-test-\(UUID().uuidString)")
+        let configDir = configHome.appendingPathComponent("ghostty")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: configHome) }
+
+        let previous = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+        setenv("XDG_CONFIG_HOME", configHome.path, 1)
+        defer {
+            if let previous {
+                setenv("XDG_CONFIG_HOME", previous, 1)
+            } else {
+                unsetenv("XDG_CONFIG_HOME")
+            }
+        }
+
+        // Both branches that read a real file: one with a `theme` directive
+        // to strip and one without, since they build their config source
+        // separately and either could drop the unbinds.
+        for contents in ["theme = Ayu Mirage\nfont-size = 14\n", "font-size = 14\n"] {
+            try contents.write(
+                to: configDir.appendingPathComponent("config"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+            let resolved = GhosttyBridge.resolveUserConfig(preferDark: true)
+            guard case let .generated(generated) = resolved.configSource else {
+                Issue.record("expected a generated config source, got \(resolved.configSource)")
+                return
+            }
+            #expect(generated.contains("keybind = cmd+,=unbind"))
+            // The user's own settings must survive the append.
+            #expect(generated.contains("font-size = 14"))
+        }
     }
 
     @Test("resolveEagerly publishes the resolved theme independent of any terminal surface")

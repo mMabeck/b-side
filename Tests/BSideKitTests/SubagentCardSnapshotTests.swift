@@ -45,6 +45,10 @@ struct SubagentCardSnapshotTests {
             backing: .buffered,
             defer: false
         )
+        // Themed explicitly, as `themedWindow` does in production, so this
+        // capture does not silently depend on whichever suite last set the
+        // process-global `NSApp.appearance`.
+        window.appearance = theme.palette.preferredAppearance
         let hostingView = NSHostingView(rootView: content)
         hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 560)
         window.contentView = hostingView
