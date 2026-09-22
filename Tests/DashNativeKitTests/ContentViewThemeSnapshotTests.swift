@@ -71,28 +71,26 @@ struct ContentViewThemeSnapshotTests {
         frameView.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
-        // The offscreen window is never actually composited on a live
-        // display (it sits off any real desktop at x=-20000), so macOS's
-        // "Liquid Glass" sidebar chrome — which normally samples what's
-        // behind the window to render its blur — has nothing to sample and
-        // falls back to opaque white. That's a limitation of capturing a
-        // window this way, not a theming bug: hide those purely decorative
-        // glass/backdrop layers before sampling so the pixels underneath
-        // (this app's own SwiftUI-drawn, theme-derived backgrounds) are
-        // what gets measured.
-        hideDecorativeGlassLayers(in: frameView)
-
-        guard let bitmap = frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds) else {
-            Issue.record("Failed to create bitmap representation")
+        // Captured via `CGWindowListCreateImage`, not a manual `NSView` draw
+        // pass: a manual `bitmapImageRepForCachingDisplay` +
+        // `displayIgnoringOpacity` capture only walks the `drawRect`-based
+        // rendering path and silently produces a blank image for content
+        // whose real painting happens only through WindowServer's
+        // compositor (confirmed separately for `List`'s per-row
+        // `NSHostingView`s in `SidebarSnapshotTests`). Asking WindowServer
+        // directly for this window's own composited pixels is the only
+        // capture path that reflects what real rendering actually produced.
+        // The window is still positioned off any physical display and never
+        // key/frontmost, so nothing is shown to the user; no layers are
+        // hidden before sampling.
+        let windowID = CGWindowID(window.windowNumber)
+        guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
+            Issue.record("Failed to capture window image")
             window.orderOut(nil)
             return
         }
-        let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap)!
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphicsContext
-        frameView.displayIgnoringOpacity(frameView.bounds, in: graphicsContext)
-        NSGraphicsContext.restoreGraphicsState()
         window.orderOut(nil)
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
 
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
             Issue.record("Failed to encode PNG")
@@ -145,22 +143,6 @@ struct ContentViewThemeSnapshotTests {
         #expect(isCloseToDarkThemeFamily(leftSidebarColor, background: expectedBackground))
         #expect(isCloseToDarkThemeFamily(mainAreaColor, background: expectedBackground))
         #expect(isCloseToDarkThemeFamily(rightSidebarColor, background: expectedBackground))
-    }
-}
-
-/// Test-only helper: recursively hides system decorative blur/glass layers
-/// (private AppKit classes such as `BackdropView`, `NSGlassEffectView`,
-/// `NSContainerConcentricGlassEffectView`) identified by class name, so an
-/// offscreen, never-composited window doesn't measure their white fallback
-/// instead of this app's own themed content.
-@MainActor
-private func hideDecorativeGlassLayers(in view: NSView) {
-    let className = NSStringFromClass(type(of: view))
-    if className.contains("Backdrop") || className.contains("Glass") || className.contains("Blurry") {
-        view.isHidden = true
-    }
-    for subview in view.subviews {
-        hideDecorativeGlassLayers(in: subview)
     }
 }
 

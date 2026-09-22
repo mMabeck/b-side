@@ -24,4 +24,12 @@ extension GitCLI {
         }
         return paths
     }
+
+    /// Whether `path`'s working tree has any uncommitted changes (staged,
+    /// unstaged, or untracked). Cheap: a single porcelain status call, no
+    /// diff computation.
+    public static func isWorkingTreeDirty(at path: URL) async throws -> Bool {
+        let data = try await run(["status", "--porcelain", "-z"], in: path)
+        return !data.isEmpty
+    }
 }
