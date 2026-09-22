@@ -33,12 +33,17 @@ public final class AppDatabase: Sendable {
     /// `legacyAppName` (if present) the first time the new directory doesn't exist yet.
     static func open(appName: String, legacyAppName: String, in baseDirectory: URL) throws -> AppDatabase {
         let fileManager = FileManager.default
-        let directory = baseDirectory.appendingPathComponent(appName, isDirectory: true)
-        migrateLegacyDirectoryIfNeeded(
+        let newDirectory = baseDirectory.appendingPathComponent(appName, isDirectory: true)
+        let legacyDirectory = baseDirectory.appendingPathComponent(legacyAppName, isDirectory: true)
+        // If the move fails we keep running out of the legacy directory rather than
+        // creating an empty one, which would orphan the old data and, because the new
+        // directory would then exist, stop the migration ever being retried.
+        let migrated = migrateLegacyDirectoryIfNeeded(
             fileManager: fileManager,
-            from: baseDirectory.appendingPathComponent(legacyAppName, isDirectory: true),
-            to: directory
+            from: legacyDirectory,
+            to: newDirectory
         )
+        let directory = migrated ? newDirectory : legacyDirectory
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let dbURL = directory.appendingPathComponent("db.sqlite")
         logger.info("Opening database at \(dbURL.path, privacy: .public)")
@@ -52,14 +57,20 @@ public final class AppDatabase: Sendable {
     /// One-time move of a legacy data directory into the new location. No-ops if the new
     /// location already exists or the legacy one doesn't; failures are logged, not thrown,
     /// so a migration hiccup never crashes the app or loses the old data.
-    static func migrateLegacyDirectoryIfNeeded(fileManager: FileManager, from oldURL: URL, to newURL: URL) {
-        guard !fileManager.fileExists(atPath: newURL.path) else { return }
-        guard fileManager.fileExists(atPath: oldURL.path) else { return }
+    ///
+    /// Returns `false` only when a move was attempted and failed — the caller then stays
+    /// on the legacy directory so the next launch can try again.
+    @discardableResult
+    static func migrateLegacyDirectoryIfNeeded(fileManager: FileManager, from oldURL: URL, to newURL: URL) -> Bool {
+        guard !fileManager.fileExists(atPath: newURL.path) else { return true }
+        guard fileManager.fileExists(atPath: oldURL.path) else { return true }
         do {
             try fileManager.moveItem(at: oldURL, to: newURL)
             logger.info("Migrated data directory from \(oldURL.path, privacy: .public) to \(newURL.path, privacy: .public)")
+            return true
         } catch {
             logger.error("Failed to migrate data directory from \(oldURL.path, privacy: .public): \(error, privacy: .public)")
+            return false
         }
     }
 

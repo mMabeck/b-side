@@ -86,6 +86,28 @@ struct DataDirectoryMigrationTests {
         #expect(FileManager.default.fileExists(atPath: newDir.appendingPathComponent("db.sqlite").path))
     }
 
+    @Test("Move fails: the app stays on the legacy data rather than opening an empty database")
+    func failedMigrationKeepsLegacyData() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            TestRepo.removeTempDirectory(root)
+        }
+
+        let oldDir = root.appendingPathComponent("DashNative", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldDir, withIntermediateDirectories: true)
+        try "old".write(to: oldDir.appendingPathComponent("marker.txt"), atomically: true, encoding: .utf8)
+        // read-only parent: the rename cannot happen, but the legacy directory is still writable
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+
+        _ = try AppDatabase.open(appName: "B-Side", legacyAppName: "DashNative", in: root)
+
+        #expect(FileManager.default.fileExists(atPath: oldDir.appendingPathComponent("marker.txt").path))
+        #expect(FileManager.default.fileExists(atPath: oldDir.appendingPathComponent("db.sqlite").path))
+        // no empty new directory, so the next launch retries the migration
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("B-Side").path))
+    }
+
     @Test("Neither present: new directory is created fresh")
     func neitherPresentCreatesFresh() throws {
         let root = try TestRepo.makeTempDirectory()

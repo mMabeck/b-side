@@ -42,7 +42,7 @@ recolour the field; orange `#FF6C2F` is the brand.
 ## Theme
 
 `assets/theme/b-side.conf` (dark) and `b-side-paper.conf` (light) are Ghostty
-themes. The app derives its whole-window `DashPalette` from the active Ghostty
+themes. The app derives its whole-window `BSidePalette` from the active Ghostty
 theme, so these files set both terminal and chrome colours.
 
 | Role | Hex | Where |
