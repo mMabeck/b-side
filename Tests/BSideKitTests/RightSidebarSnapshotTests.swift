@@ -58,24 +58,42 @@ struct RightSidebarSnapshotTests {
         let topRowSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh - 1))
         #expect(luminance(of: topRowSample) > 0.02)
 
-        // Full width: sampling near the left and right edges of the strip's
-        // row should both land inside picker/strip chrome, not the bare
-        // sidebar background peeking out at either side. The old, broken
-        // layout shrink-wrapped the segmented control into a small centred
-        // pill, which left the sidebar's own (blue-tinted) surface colour
-        // showing untouched at both edges — a colour distance of exactly
-        // zero from `palette.surfaceBackground`. The control's own chrome is
-        // a neutral grey, so a genuinely full-width strip pulls the sampled
-        // colour well away from the surface colour at both edges; this
-        // asserts that distance rather than just printing it.
-        let stripRowY = bitmap.pixelsHigh - 10
-        let leftEdgeSample = try #require(bitmap.colorAt(x: 4, y: stripRowY))
-        let rightEdgeSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide - 4, y: stripRowY))
+        // Full width: sample two points inside the strip row that sit well
+        // clear of the segmented control's own 8pt (16px at this capture's
+        // 2x backing scale) horizontal padding, near the left and right
+        // edges of the sidebar, and compare them against a plain-background
+        // reference sampled from the same row, just inside that padding.
+        // The old, broken layout shrink-wrapped the segmented control into a
+        // small centred pill, which left these same coordinates showing the
+        // bare sidebar background untouched, indistinguishable from the
+        // reference; a genuinely full-width strip instead has its own
+        // chrome there — measured here at approximately 0.39 (selected
+        // segment fill) and 0.28 (unselected segment fill) per channel,
+        // against a background reference of approximately 0.21.
+        //
+        // This deliberately does NOT compare against the nominal
+        // `palette.surfaceBackground`, which a first attempt at this
+        // assertion did: measured on this same capture, plain sidebar
+        // background differs from `NSColor(palette.surfaceBackground)` by a
+        // colour distance of roughly 0.088, just from AppKit's colour-space
+        // conversion, not from anything being wrong with the layout. That
+        // gap alone clears the `> 0.03` threshold that comparison used, so
+        // it passed whether or not the strip was actually full width — the
+        // rendered surface never matches the nominal palette colour closely
+        // enough for that comparison to mean anything here.
+        let stripRowY = 35
+        let backgroundReference = try #require(bitmap.colorAt(x: 8, y: stripRowY))
+        let leftInteriorSample = try #require(bitmap.colorAt(x: 24, y: stripRowY))
+        let rightInteriorSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide - 24, y: stripRowY))
+        report("stripLeftInterior", leftInteriorSample, expected: backgroundReference)
+        report("stripRightInterior", rightInteriorSample, expected: backgroundReference)
+        // 0.1 sits with wide headroom above zero (what same-background noise
+        // would produce) and well below the smallest measured real gap
+        // (~0.22 for the unselected segment against the background).
+        #expect(colorDistance(leftInteriorSample, backgroundReference) > 0.1)
+        #expect(colorDistance(rightInteriorSample, backgroundReference) > 0.1)
+
         let surfaceBackground = NSColor(palette.surfaceBackground)
-        report("stripLeftEdge", leftEdgeSample, expected: surfaceBackground)
-        report("stripRightEdge", rightEdgeSample, expected: surfaceBackground)
-        #expect(colorDistance(leftEdgeSample, surfaceBackground) > 0.03)
-        #expect(colorDistance(rightEdgeSample, surfaceBackground) > 0.03)
 
         // The empty-state placeholder below the strip should sit on the
         // sidebar's themed surface background, not a hardcoded colour.
