@@ -5,8 +5,26 @@ import Testing
 
 /// Exercises `ProjectsStore`'s selection model against a real in-memory
 /// database, per the pattern the sidebar snapshot tests use: `start()` and
-/// wait briefly for `ValueObservation` to populate `projects`/`tasksByProject`
+/// wait for `ValueObservation` to populate `projects`/`tasksByProject`
 /// before asserting.
+
+/// Polls until `condition` holds or `timeout` elapses. This suite (and
+/// `MainAreaLogicTests`) run alongside heavy offscreen snapshot suites that
+/// render real windows through WindowServer, which can load the machine
+/// enough to delay GRDB's `ValueObservation` past any fixed sleep duration a
+/// test could pick. Polling for the specific state the following assertions
+/// depend on avoids that without masking a genuine failure: if `condition`
+/// never becomes true, this simply returns at `timeout` and the assertions
+/// below fail on their own with their real messages.
+@MainActor
+func waitUntil(_ timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+}
+
 @MainActor
 @Suite("ProjectsStore selection")
 struct ProjectsStoreSelectionTests {
@@ -28,7 +46,11 @@ struct ProjectsStoreSelectionTests {
         }
 
         store.start()
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil {
+            store.projects.contains { $0.id == projectA.id }
+                && store.projects.contains { $0.id == projectB.id }
+                && (store.tasksByProject[projectA.id!]?.contains { $0.id == taskA.id } ?? false)
+        }
         return (store, projectA, projectB, taskA)
     }
 
@@ -175,7 +197,9 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedTaskID == taskA.id)
 
         try await store.archiveTask(taskA, project: projectA, removeWorktree: false)
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil {
+            !(store.tasksByProject[projectA.id!]?.contains { $0.id == taskA.id } ?? false)
+        }
 
         #expect(store.selectedTaskID == nil)
         #expect(store.selectedProjectID == projectA.id)
@@ -194,17 +218,21 @@ struct ProjectsStoreSelectionTests {
         let store = ProjectsStore(database: database)
         try await store.addProject(at: repoURL)
         store.start()
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil { !store.projects.isEmpty }
 
         let project = try #require(store.projects.first)
         let task = try await store.createTask(project: project, name: "Task")
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil {
+            store.tasksByProject[project.id!]?.contains { $0.id == task.id } ?? false
+        }
 
         store.selectTask(task, project: project)
         #expect(store.selectedTaskID == task.id)
 
         try await store.deleteTask(task, project: project, deleteLocalBranch: true, deleteRemoteBranch: false)
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil {
+            !(store.tasksByProject[project.id!]?.contains { $0.id == task.id } ?? false)
+        }
 
         #expect(store.selectedTaskID == nil)
         #expect(store.selectedProjectID == project.id)
@@ -216,7 +244,9 @@ struct ProjectsStoreSelectionTests {
         store.selectProject(projectA)
 
         try await store.removeProject(projectA)
-        try await Task.sleep(for: .milliseconds(200))
+        try await waitUntil {
+            !store.projects.contains { $0.id == projectA.id }
+        }
 
         #expect(store.selectedProjectID == nil)
         #expect(store.selectedTaskID == nil)
