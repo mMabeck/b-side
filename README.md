@@ -1,4 +1,4 @@
-# Dash Native
+# B-Side
 
 A from-scratch, macOS-only, Swift rewrite of Dash Pi. Native AppKit/SwiftUI,
 libghostty for terminals, git worktrees as the organising principle.
@@ -30,7 +30,7 @@ Filter to one suite with `swift test --filter GitCLITests`.
 
 ```sh
 ./scripts/bundle.sh
-open "dist/Dash Native.app"
+open "dist/B-Side.app"
 ```
 
 Run it from the app bundle rather than `swift run`: the SwiftUI `Settings` scene

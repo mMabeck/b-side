@@ -3,13 +3,13 @@ import PackageDescription
 
 // Apple Silicon (arm64) only — the app is built and run locally, no Intel support intended.
 let package = Package(
-    name: "DashNative",
+    name: "BSide",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "DashNative", targets: ["DashNative"]),
-        .library(name: "DashNativeKit", targets: ["DashNativeKit"]),
+        .executable(name: "BSide", targets: ["BSide"]),
+        .library(name: "BSideKit", targets: ["BSideKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
@@ -20,11 +20,11 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "DashNative",
-            dependencies: ["DashNativeKit"]
+            name: "BSide",
+            dependencies: ["BSideKit"]
         ),
         .target(
-            name: "DashNativeKit",
+            name: "BSideKit",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
@@ -32,9 +32,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "DashNativeKitTests",
+            name: "BSideKitTests",
             dependencies: [
-                "DashNativeKit",
+                "BSideKit",
                 .product(name: "GhosttyTheme", package: "libghostty-spm"),
             ]
         ),
