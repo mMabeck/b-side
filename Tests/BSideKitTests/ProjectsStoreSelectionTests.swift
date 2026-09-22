@@ -81,4 +81,132 @@ struct ProjectsStoreSelectionTests {
 
         #expect(store.mainSelection == .task(taskA, projectA))
     }
+
+    // MARK: - Selection reconciliation (pure)
+
+    @Test("A live selected task is left untouched")
+    func reconcileKeepsLiveTaskSelected() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: 1,
+            selectedTaskID: 10,
+            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
+            tasksByProject: [1: [TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")]]
+        )
+        #expect(reconciled.selectedProjectID == 1)
+        #expect(reconciled.selectedTaskID == 10)
+    }
+
+    @Test("A vanished selected task falls back to its still-live parent project")
+    func reconcileFallsBackToParentProjectWhenTaskVanishes() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: 1,
+            selectedTaskID: 10,
+            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
+            tasksByProject: [1: []]
+        )
+        #expect(reconciled.selectedProjectID == 1)
+        #expect(reconciled.selectedTaskID == nil)
+    }
+
+    @Test("A vanished selected task whose project is also gone leaves no selection")
+    func reconcileClearsSelectionWhenTaskAndProjectVanish() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: 1,
+            selectedTaskID: 10,
+            projects: [],
+            tasksByProject: [:]
+        )
+        #expect(reconciled.selectedProjectID == nil)
+        #expect(reconciled.selectedTaskID == nil)
+    }
+
+    @Test("A vanished selected project with no task selected leaves no selection")
+    func reconcileClearsSelectionWhenOnlyProjectVanishes() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: 1,
+            selectedTaskID: nil,
+            projects: [],
+            tasksByProject: [:]
+        )
+        #expect(reconciled.selectedProjectID == nil)
+        #expect(reconciled.selectedTaskID == nil)
+    }
+
+    @Test("A live selected project with no task selected is left untouched")
+    func reconcileKeepsLiveProjectSelected() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: 1,
+            selectedTaskID: nil,
+            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
+            tasksByProject: [:]
+        )
+        #expect(reconciled.selectedProjectID == 1)
+        #expect(reconciled.selectedTaskID == nil)
+    }
+
+    @Test("No selection at all stays no selection")
+    func reconcileLeavesNoSelectionAsIs() {
+        let reconciled = ProjectsStore.reconcileSelection(
+            selectedProjectID: nil,
+            selectedTaskID: nil,
+            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
+            tasksByProject: [:]
+        )
+        #expect(reconciled.selectedProjectID == nil)
+        #expect(reconciled.selectedTaskID == nil)
+    }
+
+    @Test("Archiving the selected task clears it and falls back to the parent project")
+    func archivingSelectedTaskReconcilesSelection() async throws {
+        let (store, projectA, _, taskA) = try await makeStore()
+        store.selectTask(taskA, project: projectA)
+        #expect(store.selectedTaskID == taskA.id)
+
+        try await store.archiveTask(taskA, project: projectA, removeWorktree: false)
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(store.selectedTaskID == nil)
+        #expect(store.selectedProjectID == projectA.id)
+    }
+
+    @Test("Deleting the selected task clears it and falls back to the parent project")
+    func deletingSelectedTaskReconcilesSelection() async throws {
+        // Unlike `archiveTask(removeWorktree: false)`, `deleteTask` always
+        // tears down the worktree, so this needs a real git repo/worktree
+        // rather than the fake paths `makeStore()` uses elsewhere in this suite.
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await Task.sleep(for: .milliseconds(200))
+
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Task")
+        try await Task.sleep(for: .milliseconds(200))
+
+        store.selectTask(task, project: project)
+        #expect(store.selectedTaskID == task.id)
+
+        try await store.deleteTask(task, project: project, deleteLocalBranch: true, deleteRemoteBranch: false)
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(store.selectedTaskID == nil)
+        #expect(store.selectedProjectID == project.id)
+    }
+
+    @Test("Removing the selected project clears the whole selection")
+    func removingSelectedProjectReconcilesSelection() async throws {
+        let (store, projectA, _, _) = try await makeStore()
+        store.selectProject(projectA)
+
+        try await store.removeProject(projectA)
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(store.selectedProjectID == nil)
+        #expect(store.selectedTaskID == nil)
+    }
 }

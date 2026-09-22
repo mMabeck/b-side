@@ -63,6 +63,39 @@ public final class ProjectsStore {
         selectedTaskID = task.id
     }
 
+    /// Reconciles selection against a fresh `projects`/`tasksByProject`
+    /// snapshot so a task or project that disappeared — via `archiveTask`,
+    /// `deleteTask`, `removeProject`, or any other change underneath the
+    /// database, not just this store's own mutations — never leaves the
+    /// selection pointing at something no sidebar row or dashboard reads as
+    /// selected. Falls back to the vanished task's parent project (still
+    /// valid, since `selectTask` always keeps `selectedProjectID` in sync
+    /// with it) if that project still exists, and to no selection at all
+    /// once even the project is gone. Run from the `ValueObservation`
+    /// callback in `start()`, which is why it's pure and static: it needs to
+    /// react to *any* refresh of `projects`/`tasksByProject`, and being pure
+    /// makes that reaction directly testable without a database.
+    static func reconcileSelection(
+        selectedProjectID: Int64?,
+        selectedTaskID: Int64?,
+        projects: [Project],
+        tasksByProject: [Int64: [TaskRecord]]
+    ) -> (selectedProjectID: Int64?, selectedTaskID: Int64?) {
+        if let selectedTaskID {
+            let taskStillExists = tasksByProject.values.contains { $0.contains { $0.id == selectedTaskID } }
+            if taskStillExists {
+                return (selectedProjectID, selectedTaskID)
+            }
+            let projectStillExists = projects.contains { $0.id == selectedProjectID }
+            return (projectStillExists ? selectedProjectID : nil, nil)
+        }
+        if let selectedProjectID {
+            let projectStillExists = projects.contains { $0.id == selectedProjectID }
+            return (projectStillExists ? selectedProjectID : nil, nil)
+        }
+        return (nil, nil)
+    }
+
     /// What the main area should show, derived from the selection above
     /// rather than tracked separately, so there is exactly one place that
     /// decides dashboard vs. terminal vs. empty state. A task selection wins
@@ -118,6 +151,14 @@ public final class ProjectsStore {
                 for try await (projects, tasksByProject) in observation.values(in: database.dbQueue) {
                     self.projects = projects
                     self.tasksByProject = tasksByProject
+                    let reconciled = Self.reconcileSelection(
+                        selectedProjectID: self.selectedProjectID,
+                        selectedTaskID: self.selectedTaskID,
+                        projects: projects,
+                        tasksByProject: tasksByProject
+                    )
+                    self.selectedProjectID = reconciled.selectedProjectID
+                    self.selectedTaskID = reconciled.selectedTaskID
                 }
             } catch {
                 Self.logger.error("Project observation failed: \(error, privacy: .public)")

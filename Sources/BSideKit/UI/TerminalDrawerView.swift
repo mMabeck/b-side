@@ -14,10 +14,16 @@ import SwiftUI
 /// than conditionally removing it, so the surface is never deinitialized by
 /// the collapse toggle.
 ///
-/// This one surface is replaced (not cached per task, unlike the main area's
-/// task terminals) whenever the resolved directory changes: it is the user's
-/// own scratch shell, not a per-task artifact worth keeping alive once they
-/// have moved on.
+/// Unlike the main area's per-task terminals, there is only ever one of
+/// these for the whole session: it is created once, the first time this view
+/// appears, and is never torn down or replaced afterwards — not even when
+/// the selected task/project (and so `resolvedDirectory(for:)`) changes.
+/// This is the user's own scratch shell, and they may be mid-command in it;
+/// silently killing and respawning it every time they click a different
+/// task row would be far more surprising than it starting in whatever
+/// directory was current when the drawer first appeared. Nothing `cd`s it
+/// automatically on selection change — a stable shell is the point, not a
+/// synced one.
 struct TerminalDrawerView: View {
     var store: ProjectsStore
     var isCollapsed: Bool
@@ -33,7 +39,17 @@ struct TerminalDrawerView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
         .background(theme.palette.elevatedSurfaceBackground)
-        .task(id: MainAreaView.resolvedDirectory(for: store)) {
+        .task {
+            // No `id:` — this view stays mounted for the whole session (see
+            // the type doc comment), so a plain `.task` runs this exactly
+            // once. Keying it on `resolvedDirectory(for: store)` like the
+            // main area's per-task hosts do would resolve that directory
+            // (a synchronous `FileManager.fileExists` call, transitively)
+            // on every single body evaluation just to compare it against the
+            // previous id, and would tear down and recreate this host —
+            // killing whatever the user has running in it — on every
+            // selection change instead of only on first appearance.
+            guard host == nil else { return }
             let newHost = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(for: store))
             newHost.isVisible = !isCollapsed
             host = newHost
