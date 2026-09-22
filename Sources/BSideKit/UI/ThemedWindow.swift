@@ -142,11 +142,8 @@ private final class VibrancyGuardian: NSObject {
     ) {
         guard keyPath == "subviews", let view = object as? NSView else { return }
         MainActor.assumeIsolated {
-            // A newly inserted subview is exactly how both the
-            // `NSVisualEffectView` and private `BackdropView` chrome show up,
-            // whenever AppKit decides to create them — so react to the
-            // insertion itself instead of a timer, and keep watching the new
-            // subtree for further insertions.
+            // The `NSVisualEffectView` and private `BackdropView` chrome
+            // both arrive as newly inserted subviews.
             neutralizeVibrancy(in: view)
             observeSubtree(view)
         }

@@ -230,17 +230,9 @@ public enum GhosttyBridge {
         }
 
         let (sanitized, directive) = extractThemeDirective(from: raw)
-        guard let directive else {
-            // No theme directive to resolve, so the file passes through
-            // verbatim — but as generated text rather than `.file(path)`,
-            // since the unbinds have to be appended to it.
-            return ResolvedUserConfig(
-                configSource: .generated(sanitized + appOwnedKeybinds),
-                theme: .default,
-                themeDefinition: nil
-            )
-        }
-
+        // Passes through as generated text rather than `.file(path)` even
+        // when there's no theme directive to resolve, since the unbinds
+        // have to be appended to it either way.
         let definition = resolveThemeDefinition(directive, preferDark: preferDark)
         let theme = definition?.toTerminalTheme() ?? .default
         return ResolvedUserConfig(

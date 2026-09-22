@@ -69,8 +69,8 @@ struct InspectorTabStrip<Tab: Hashable>: NSViewRepresentable {
                 NSImage(systemSymbolName: item.systemImage, accessibilityDescription: item.title),
                 forSegment: index
             )
-            // Icon left of the title, rather than the default overlap that
-            // makes the image win and the label vanish.
+            // Scales an oversized symbol down to fit the segment, rather
+            // than letting it crowd out the label.
             control.setImageScaling(.scaleProportionallyDown, forSegment: index)
             control.setToolTip(item.title, forSegment: index)
         }

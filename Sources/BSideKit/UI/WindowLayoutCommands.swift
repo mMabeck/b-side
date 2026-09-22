@@ -42,4 +42,3 @@ public enum WindowLayoutShortcut {
     public static let rightSidebar = KeyboardShortcut("b", modifiers: [.command, .option])
     public static let terminalDrawer = KeyboardShortcut("æ", modifiers: [.command])
 }
-
