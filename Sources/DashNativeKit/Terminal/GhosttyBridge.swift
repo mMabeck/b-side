@@ -221,9 +221,9 @@ public enum GhosttyBridge {
 /// with a recognised `theme` directive; readers should treat `nil` as "no
 /// opinion, use system colours."
 ///
-/// This does not restyle any existing view — it only makes the resolved
-/// colours available. Accessors are by semantic role, not raw palette index,
-/// so callers don't need to know which ANSI slot means what.
+/// `definition` only carries the raw theme; ``DashPalette/themed(from:)``
+/// (exposed here as ``palette``) is what turns it into semantic colours by
+/// role, so callers don't need to know which ANSI slot means what.
 @MainActor
 public final class GhosttyResolvedTheme: ObservableObject {
     public static let shared = GhosttyResolvedTheme()
@@ -238,57 +238,13 @@ public final class GhosttyResolvedTheme: ObservableObject {
         self.definition = definition
     }
 
-    /// The theme's background colour.
-    public var background: Color? { definition.map { Color(ghosttyHex: $0.background) } }
-
-    /// The theme's primary (body text) foreground colour.
-    public var foreground: Color? { definition.map { Color(ghosttyHex: $0.foreground) } }
-
-    /// A dimmer foreground for secondary or supporting text: palette index
-    /// 8, the "bright black" slot every ANSI palette reserves for exactly
-    /// this role. Falls back to the primary foreground if the theme leaves
-    /// that slot undefined.
-    public var secondaryForeground: Color? {
-        guard let definition else { return nil }
-        if let dim = definition.palette[8] {
-            return Color(ghosttyHex: dim)
-        }
-        return foreground
-    }
-
-    /// An accent colour for interactive or highlighted elements: the
-    /// theme's cursor colour where it defines one — Ghostty themes pick
-    /// that colour deliberately to stand out against the background —
-    /// falling back to palette index 4 ("blue"), the conventional ANSI
-    /// accent slot, then to the primary foreground.
-    public var accent: Color? {
-        guard let definition else { return nil }
-        if let cursorColor = definition.cursorColor {
-            return Color(ghosttyHex: cursorColor)
-        }
-        if let blue = definition.palette[4] {
-            return Color(ghosttyHex: blue)
-        }
-        return foreground
-    }
-
-    /// One of the theme's 16 ANSI palette colours (0–15). `nil` if no theme
-    /// has resolved, or the theme doesn't define that index.
-    public func paletteColor(_ index: Int) -> Color? {
-        definition?.palette[index].map { Color(ghosttyHex: $0) }
-    }
-}
-
-private extension Color {
-    /// Ghostty theme hex strings have no leading `#` (e.g. `"1f2430"`).
-    init(ghosttyHex hex: String) {
-        let cleaned = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        var value: UInt64 = 0
-        Scanner(string: cleaned).scanHexInt64(&value)
-        let r = Double((value & 0xFF0000) >> 16) / 255
-        let g = Double((value & 0x00FF00) >> 8) / 255
-        let b = Double(value & 0x0000FF) / 255
-        self.init(red: r, green: g, blue: b)
+    /// The full semantic palette for the whole app UI, derived from the
+    /// resolved theme when one exists, or ``DashPalette/fallback`` (plain
+    /// system colours) otherwise. This is the single source of colour truth
+    /// for everything outside the terminal grid — window chrome, sidebars,
+    /// drawer, settings, subagent cards.
+    public var palette: DashPalette {
+        definition.map(DashPalette.themed(from:)) ?? .fallback
     }
 }
 

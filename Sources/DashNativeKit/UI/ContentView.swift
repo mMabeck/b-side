@@ -7,6 +7,7 @@ public struct ContentView: View {
     @AppStorage("leftSidebarCollapsed") private var leftSidebarCollapsed = false
     @AppStorage("rightSidebarCollapsed") private var rightSidebarCollapsed = false
     @AppStorage("terminalDrawerCollapsed") private var terminalDrawerCollapsed = true
+    @ObservedObject private var theme = GhosttyResolvedTheme.shared
 
     private var store: ProjectsStore
 
@@ -29,14 +30,14 @@ public struct ContentView: View {
                 HStack(spacing: 0) {
                     MainAreaView(store: store)
                     if !rightSidebarCollapsed {
-                        Divider()
+                        Rectangle().fill(theme.palette.separator).frame(width: 1)
                         RightSidebarView(store: store)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if !terminalDrawerCollapsed {
-                    Divider()
+                    Rectangle().fill(theme.palette.separator).frame(height: 1)
                 }
                 // Always mounted, collapsed to zero height rather than removed:
                 // removing it from the hierarchy would deinit its terminal
@@ -72,5 +73,7 @@ public struct ContentView: View {
         .task {
             store.start()
         }
+        .background(theme.palette.windowBackground)
+        .themedWindow(theme.palette)
     }
 }

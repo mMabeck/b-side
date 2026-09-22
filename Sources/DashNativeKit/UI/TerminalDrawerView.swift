@@ -13,6 +13,7 @@ import SwiftUI
 struct TerminalDrawerView: View {
     var store: ProjectsStore
     var isCollapsed: Bool
+    @ObservedObject var theme: GhosttyResolvedTheme = .shared
 
     @State private var host: TerminalSurfaceHost?
 
@@ -23,6 +24,7 @@ struct TerminalDrawerView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
+        .background(theme.palette.elevatedSurfaceBackground)
         .task(id: store.selectedProject?.id) {
             let newHost = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(for: store))
             newHost.isVisible = !isCollapsed

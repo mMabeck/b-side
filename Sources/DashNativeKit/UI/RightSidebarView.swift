@@ -4,6 +4,7 @@ import SwiftUI
 /// a placeholder; Subagents renders live cards from `SubagentFeedStore`.
 struct RightSidebarView: View {
     var store: ProjectsStore
+    @ObservedObject var theme: GhosttyResolvedTheme = .shared
 
     private enum Tab: String, CaseIterable, Identifiable {
         case sourceControl = "Source Control"
@@ -22,6 +23,7 @@ struct RightSidebarView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .tint(theme.palette.accent)
             .padding(8)
 
             switch selectedTab {
@@ -31,11 +33,13 @@ struct RightSidebarView: View {
                     systemImage: "arrow.triangle.branch",
                     description: Text("Changed files, staging and commit will appear here.")
                 )
+                .foregroundStyle(theme.palette.textSecondary)
             case .subagents:
                 SubagentsTabView(store: store)
             }
             Spacer(minLength: 0)
         }
         .frame(minWidth: 260, maxWidth: 320, maxHeight: .infinity)
+        .background(theme.palette.surfaceBackground)
     }
 }

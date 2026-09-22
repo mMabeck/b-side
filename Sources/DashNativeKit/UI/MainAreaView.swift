@@ -6,6 +6,7 @@ import SwiftUI
 /// project's directory, falling back to the user's home directory.
 struct MainAreaView: View {
     var store: ProjectsStore
+    @ObservedObject var theme: GhosttyResolvedTheme = .shared
 
     @State private var host: TerminalSurfaceHost?
 
@@ -16,6 +17,7 @@ struct MainAreaView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.palette.windowBackground)
         .task(id: store.selectedProject?.id) {
             host = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(for: store))
         }
