@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import GhosttyTerminal
+import GhosttyTheme
 import OSLog
 import SwiftUI
 
@@ -45,31 +46,250 @@ import SwiftUI
 /// | Clipboard read/write confirmation (OSC 52, `clipboard-write = ask`) | `TerminalViewState.onClipboardConfirmationRequest` | left `nil`: Ghostty's documented default applies — a program's read/write is denied silently, a user-initiated paste is allowed |
 /// | Open URL, bell, desktop notification, mouse shape, scrollbar, focus, resize, grid resize, pwd, hover link, progress report, text selection request | *(no delegate adopted)* | Ghostty's own default behaviour for each; none is claimed as app-handled |
 public enum GhosttyBridge {
-    /// The user's own Ghostty config (`~/.config/ghostty/config`), if present.
-    /// Passed straight through to `TerminalController`/`TerminalViewState` so
-    /// the terminal renders with the user's real fonts, colours and theme —
-    /// per native-rewrite.md §6 this app must not define any of its own.
+    static let logger = Logger(subsystem: "ai.syv.dash-native", category: "terminal-theme")
+
+    /// The user's own Ghostty config, if present. Respects `XDG_CONFIG_HOME`
+    /// like Ghostty itself does, falling back to `~/.config/ghostty/config`.
     public static var userConfigFilePath: String? {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/ghostty/config").path
+        let configHome: URL
+        if let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"],
+           !xdgConfigHome.isEmpty
+        {
+            configHome = URL(fileURLWithPath: xdgConfigHome)
+        } else {
+            configHome = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config")
+        }
+        let path = configHome.appendingPathComponent("ghostty/config").path
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
-    // Known limitation, verified by hand (see Stage 2 build notes): a
-    // `theme = <name>` line referencing one of upstream Ghostty's bundled
-    // themes does not resolve here — this package ships only its own
-    // shell-integration and terminfo resources, no theme corpus — and
-    // libghostty rejects the *entire* config when one directive fails,
-    // falling back wholesale to this package's built-in default theme
-    // instead of the rest of the user's file. Every other directive (font
-    // size, cursor style, literal colours, padding, ...) loads correctly;
-    // only a named `theme` reference is affected. Confirmed by loading a
-    // copy of a real `~/.config/ghostty/config` with its `theme` line
-    // removed: `lastConfigurationIssue` went from a rejection to `nil` and
-    // every remaining directive took effect. Left unfixed for this stage —
-    // resolving named themes against the user's actual Ghostty.app bundle,
-    // or degrading a single bad directive instead of the whole file, is
-    // follow-up work, not something to route around silently here.
+    /// One `theme = ...` directive as written in a Ghostty config file:
+    /// either a single fixed name, or the light/dark adaptive form
+    /// `theme = light:<name>,dark:<name>`.
+    enum ThemeDirective: Equatable {
+        case fixed(String)
+        case adaptive(light: String, dark: String)
+    }
+
+    /// Diagnosed limitation, now worked around: `libghostty-spm` ships only
+    /// its own theme corpus (`GhosttyTheme`), and rejects the *entire*
+    /// config the moment a `theme = <name>` directive fails to resolve —
+    /// even one this package's own catalog does define, because the base
+    /// config load (before any programmatic override layer runs) parses it
+    /// unconditionally. See native-rewrite.md §6. The fix pulls the `theme`
+    /// line out before libghostty ever sees it, resolves it against
+    /// `GhosttyThemeCatalog` ourselves, and reapplies the result as
+    /// individual colour directives — which load fine, per the original
+    /// diagnosis that every non-`theme` directive already worked.
+    ///
+    /// Everything else in the user's file, including comments and directive
+    /// ordering, passes through untouched.
+    static func extractThemeDirective(from contents: String) -> (sanitized: String, directive: ThemeDirective?) {
+        var directive: ThemeDirective?
+        var sanitizedLines: [String] = []
+
+        for line in contents.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#"),
+                  let equalsIndex = trimmed.firstIndex(of: "=")
+            else {
+                sanitizedLines.append(line)
+                continue
+            }
+
+            let key = trimmed[trimmed.startIndex..<equalsIndex].trimmingCharacters(in: .whitespaces)
+            guard key == "theme" else {
+                sanitizedLines.append(line)
+                continue
+            }
+
+            let value = trimmed[trimmed.index(after: equalsIndex)...].trimmingCharacters(in: .whitespaces)
+            directive = parseThemeValue(value)
+            // The line itself is dropped: its colours are reapplied
+            // programmatically once resolved, instead of being handed back
+            // to libghostty as a directive it cannot parse.
+        }
+
+        return (sanitizedLines.joined(separator: "\n"), directive)
+    }
+
+    private static func parseThemeValue(_ value: String) -> ThemeDirective {
+        guard value.contains("light:") || value.contains("dark:") else {
+            return .fixed(value)
+        }
+
+        var light: String?
+        var dark: String?
+        for part in value.split(separator: ",") {
+            let piece = part.trimmingCharacters(in: .whitespaces)
+            if piece.hasPrefix("light:") {
+                light = String(piece.dropFirst("light:".count)).trimmingCharacters(in: .whitespaces)
+            } else if piece.hasPrefix("dark:") {
+                dark = String(piece.dropFirst("dark:".count)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        // A malformed adaptive form (missing one side) is treated as a
+        // literal theme name rather than silently discarded — it will not
+        // resolve, but the fallback logging in `resolveThemeDefinition`
+        // still fires and names the actual bad value.
+        guard let light, let dark else { return .fixed(value) }
+        return .adaptive(light: light, dark: dark)
+    }
+
+    /// Resolves a directive to a catalog definition for the given
+    /// appearance. Never throws: an unresolvable name is logged via `OSLog`
+    /// and `nil` is returned so the caller falls back to the package's
+    /// default theme while keeping the rest of the user's config intact.
+    static func resolveThemeDefinition(
+        _ directive: ThemeDirective?,
+        preferDark: Bool
+    ) -> GhosttyThemeDefinition? {
+        guard let directive else { return nil }
+
+        let name: String
+        switch directive {
+        case let .fixed(value):
+            name = value
+        case let .adaptive(light, dark):
+            name = preferDark ? dark : light
+        }
+
+        guard let definition = GhosttyThemeCatalog.theme(named: name) else {
+            logger.error("ghostty config: unknown theme \"\(name, privacy: .public)\" — falling back to default theme")
+            return nil
+        }
+        return definition
+    }
+
+    /// Whether the current system appearance is dark, used to resolve the
+    /// `light:/dark:` adaptive theme form.
+    @MainActor
+    static var systemPrefersDarkAppearance: Bool {
+        NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    /// The user's config, fully resolved: a `ConfigSource` libghostty can
+    /// load without rejection, the colour theme to layer on top (the
+    /// package's own `.default` if there was no `theme` directive to
+    /// resolve), and the definition itself for ``GhosttyResolvedTheme`` to
+    /// publish to the rest of the app.
+    ///
+    /// The resolved colours travel through `theme:`, not
+    /// `terminalConfiguration:` — `TerminalController` always renders a
+    /// theme layer last, on top of any session `terminalConfiguration`
+    /// commands (see `resolveEffectiveConfig` upstream), so colours placed
+    /// in `terminalConfiguration` are silently overwritten by the default
+    /// light theme applied afterwards. `theme:` is the layer meant to win.
+    struct ResolvedUserConfig {
+        let configSource: TerminalController.ConfigSource
+        let theme: TerminalTheme
+        let themeDefinition: GhosttyThemeDefinition?
+    }
+
+    @MainActor
+    static func resolveUserConfig(preferDark: Bool = systemPrefersDarkAppearance) -> ResolvedUserConfig {
+        guard let path = userConfigFilePath,
+              let raw = try? String(contentsOfFile: path, encoding: .utf8)
+        else {
+            return ResolvedUserConfig(configSource: .none, theme: .default, themeDefinition: nil)
+        }
+
+        let (sanitized, directive) = extractThemeDirective(from: raw)
+        guard let directive else {
+            // No theme directive to resolve: pass the file straight
+            // through, unchanged from the app's previous behaviour.
+            return ResolvedUserConfig(configSource: .file(path), theme: .default, themeDefinition: nil)
+        }
+
+        let definition = resolveThemeDefinition(directive, preferDark: preferDark)
+        let theme = definition?.toTerminalTheme() ?? .default
+        return ResolvedUserConfig(
+            configSource: .generated(sanitized),
+            theme: theme,
+            themeDefinition: definition
+        )
+    }
+}
+
+/// Publishes the Ghostty theme resolved from the user's own
+/// `~/.config/ghostty/config` (see ``GhosttyBridge``) so SwiftUI views
+/// outside the terminal grid — sidebar, subagent cards, window chrome — can
+/// mirror the user's real terminal theme instead of hardcoding colours.
+/// `definition` is `nil` until a ``TerminalSurfaceHost`` resolves a config
+/// with a recognised `theme` directive; readers should treat `nil` as "no
+/// opinion, use system colours."
+///
+/// This does not restyle any existing view — it only makes the resolved
+/// colours available. Accessors are by semantic role, not raw palette index,
+/// so callers don't need to know which ANSI slot means what.
+@MainActor
+public final class GhosttyResolvedTheme: ObservableObject {
+    public static let shared = GhosttyResolvedTheme()
+
+    @Published public private(set) var definition: GhosttyThemeDefinition?
+
+    init(definition: GhosttyThemeDefinition? = nil) {
+        self.definition = definition
+    }
+
+    func update(_ definition: GhosttyThemeDefinition?) {
+        self.definition = definition
+    }
+
+    /// The theme's background colour.
+    public var background: Color? { definition.map { Color(ghosttyHex: $0.background) } }
+
+    /// The theme's primary (body text) foreground colour.
+    public var foreground: Color? { definition.map { Color(ghosttyHex: $0.foreground) } }
+
+    /// A dimmer foreground for secondary or supporting text: palette index
+    /// 8, the "bright black" slot every ANSI palette reserves for exactly
+    /// this role. Falls back to the primary foreground if the theme leaves
+    /// that slot undefined.
+    public var secondaryForeground: Color? {
+        guard let definition else { return nil }
+        if let dim = definition.palette[8] {
+            return Color(ghosttyHex: dim)
+        }
+        return foreground
+    }
+
+    /// An accent colour for interactive or highlighted elements: the
+    /// theme's cursor colour where it defines one — Ghostty themes pick
+    /// that colour deliberately to stand out against the background —
+    /// falling back to palette index 4 ("blue"), the conventional ANSI
+    /// accent slot, then to the primary foreground.
+    public var accent: Color? {
+        guard let definition else { return nil }
+        if let cursorColor = definition.cursorColor {
+            return Color(ghosttyHex: cursorColor)
+        }
+        if let blue = definition.palette[4] {
+            return Color(ghosttyHex: blue)
+        }
+        return foreground
+    }
+
+    /// One of the theme's 16 ANSI palette colours (0–15). `nil` if no theme
+    /// has resolved, or the theme doesn't define that index.
+    public func paletteColor(_ index: Int) -> Color? {
+        definition?.palette[index].map { Color(ghosttyHex: $0) }
+    }
+}
+
+private extension Color {
+    /// Ghostty theme hex strings have no leading `#` (e.g. `"1f2430"`).
+    init(ghosttyHex hex: String) {
+        let cleaned = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        var value: UInt64 = 0
+        Scanner(string: cleaned).scanHexInt64(&value)
+        let r = Double((value & 0xFF0000) >> 16) / 255
+        let g = Double((value & 0x00FF00) >> 8) / 255
+        let b = Double(value & 0x0000FF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
 }
 
 /// One libghostty surface: a real pty running a login shell, owned by the
@@ -89,7 +309,12 @@ public final class TerminalSurfaceHost: ObservableObject {
     ///     login shell, invoked with `-l` so it reads the same profile files
     ///     an interactive terminal would.
     public init(workingDirectory: URL, shell: String? = nil) {
-        state = TerminalViewState(configFilePath: GhosttyBridge.userConfigFilePath)
+        let resolvedConfig = GhosttyBridge.resolveUserConfig()
+        state = TerminalViewState(
+            configSource: resolvedConfig.configSource,
+            theme: resolvedConfig.theme
+        )
+        GhosttyResolvedTheme.shared.update(resolvedConfig.themeDefinition)
 
         let resolvedShell = shell ?? ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         state.configuration = TerminalSurfaceOptions(
