@@ -4,3 +4,5 @@
 DerivedData/
 dist/
 .DS_Store
+assets/icon/icon-masked.png
+assets/icon/icon-plain.png
