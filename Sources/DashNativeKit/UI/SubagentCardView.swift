@@ -30,6 +30,10 @@ struct SubagentCardView: View {
     private var dimColor: Color { theme.secondaryForeground ?? .secondary }
     private var backgroundColor: Color { (theme.background ?? Color(nsColor: .textBackgroundColor)).opacity(0.6) }
 
+    /// The title patch must be fully opaque. A translucent one lets the border
+    /// stroke underneath show through the text, which reads as strikethrough.
+    private var titleMaskColor: Color { theme.background ?? Color(nsColor: .textBackgroundColor) }
+
     private var isFinished: Bool { run.state == .completed || run.state == .failed }
 
     private var borderColor: Color {
@@ -92,7 +96,7 @@ struct SubagentCardView: View {
         .padding(.horizontal, 6)
         .background(
             GeometryReader { proxy in
-                backgroundColor.preference(key: TitleSizeKey.self, value: proxy.size)
+                titleMaskColor.preference(key: TitleSizeKey.self, value: proxy.size)
             }
         )
         .fixedSize(horizontal: false, vertical: true)
