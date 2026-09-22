@@ -248,30 +248,33 @@ public final class ProjectsStore {
     /// Creates a task: resolves the base ref, creates (or attaches to) a branch
     /// and worktree, copies ignored files, runs setup, then persists the task.
     /// `onOutput` streams setup command output for display while creation is
-    /// still in progress.
+    /// still in progress. A blank `name` falls back to the placeholder "New Task".
+    /// `useWorktree` defaults to the project's `ProjectConfig` setting when omitted.
     @discardableResult
     public func createTask(
         project: Project,
         name: String,
         baseRef: String? = nil,
         existingBranch: String? = nil,
+        useWorktree: Bool? = nil,
         onOutput: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> TaskRecord {
         let config = ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path))
+        let resolvedName = name.trimmingCharacters(in: .whitespaces).isEmpty ? "New Task" : name
 
         let setupResult = try await TaskWorktreeService.createWorktree(
             for: project,
-            taskName: name,
+            taskName: resolvedName,
             baseRef: baseRef,
             existingBranch: existingBranch,
-            useWorktree: config.taskDefaults.useWorktree,
+            useWorktree: useWorktree ?? config.taskDefaults.useWorktree,
             setupCommand: config.setupCommand,
             onOutput: onOutput
         )
 
         let task = TaskRecord(
             projectId: project.id ?? 0,
-            name: name,
+            name: resolvedName,
             branchName: setupResult.branchName,
             branchCreatedByApp: setupResult.branchCreatedByApp,
             worktreePath: setupResult.worktreePath,

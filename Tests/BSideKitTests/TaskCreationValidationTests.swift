@@ -4,10 +4,10 @@ import Testing
 
 @Suite("TaskCreationValidation")
 struct TaskCreationValidationTests {
-    @Test("canCreate requires a non-blank name")
-    func requiresNonBlankName() {
-        #expect(!TaskCreationValidation.canCreate(name: "", mode: .newBranch, baseRef: "main", selectedBranch: nil))
-        #expect(!TaskCreationValidation.canCreate(name: "   ", mode: .newBranch, baseRef: "main", selectedBranch: nil))
+    @Test("canCreate allows a blank name, which falls back to a placeholder")
+    func allowsBlankName() {
+        #expect(TaskCreationValidation.canCreate(name: "", mode: .newBranch, baseRef: "main", selectedBranch: nil))
+        #expect(TaskCreationValidation.canCreate(name: "   ", mode: .newBranch, baseRef: "main", selectedBranch: nil))
         #expect(TaskCreationValidation.canCreate(name: "Fix bug", mode: .newBranch, baseRef: "main", selectedBranch: nil))
     }
 
@@ -22,6 +22,20 @@ struct TaskCreationValidationTests {
     func existingBranchRequiresSelection() {
         #expect(!TaskCreationValidation.canCreate(name: "Fix bug", mode: .existingBranch, baseRef: "", selectedBranch: nil))
         #expect(TaskCreationValidation.canCreate(name: "Fix bug", mode: .existingBranch, baseRef: "", selectedBranch: "feature/x"))
+    }
+
+    @Test("turning worktree off requires neither a base ref nor a selected branch")
+    func worktreeOffSkipsBranchRequirements() {
+        #expect(
+            TaskCreationValidation.canCreate(
+                name: "", mode: .newBranch, baseRef: "", selectedBranch: nil, useWorktree: false
+            )
+        )
+        #expect(
+            TaskCreationValidation.canCreate(
+                name: "Fix bug", mode: .existingBranch, baseRef: "", selectedBranch: nil, useWorktree: false
+            )
+        )
     }
 
     @Test("displayName is just the branch name when it isn't checked out")

@@ -11,16 +11,19 @@ enum TaskCreationMode: String, CaseIterable, Identifiable, Sendable {
 /// Pure validation and formatting rules for ``TaskCreationView``, kept free
 /// of SwiftUI so they're directly unit-testable.
 enum TaskCreationValidation {
-    /// Whether the form has enough information to attempt `create()`: a
-    /// non-blank task name, plus either a non-blank base ref (new branch) or
-    /// a chosen branch (existing branch).
+    /// Whether the form has enough information to attempt `create()`. The
+    /// task name may be left blank (it falls back to a placeholder). When
+    /// `useWorktree` is off the task runs in place, so no base ref or branch
+    /// is required either; otherwise a non-blank base ref (new branch) or a
+    /// chosen branch (existing branch) is required.
     static func canCreate(
         name: String,
         mode: TaskCreationMode,
         baseRef: String,
-        selectedBranch: String?
+        selectedBranch: String?,
+        useWorktree: Bool = true
     ) -> Bool {
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard useWorktree else { return true }
         switch mode {
         case .newBranch:
             return !baseRef.trimmingCharacters(in: .whitespaces).isEmpty
@@ -55,6 +58,7 @@ struct TaskCreationView: View {
     @State private var name = ""
     @State private var baseRef: String
     @State private var mode: Mode = .newBranch
+    @State private var useWorktree: Bool
     @State private var branches: [TaskWorktreeService.BranchOption] = []
     @State private var selectedBranch: String?
     @State private var branchesLoaded = false
@@ -71,6 +75,8 @@ struct TaskCreationView: View {
         self.store = store
         self.onFinished = onFinished
         _baseRef = State(initialValue: project.baseRef)
+        let config = ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path))
+        _useWorktree = State(initialValue: config.taskDefaults.useWorktree)
     }
 
     var body: some View {
@@ -127,27 +133,33 @@ struct TaskCreationView: View {
 
     private var formView: some View {
         VStack(alignment: .leading, spacing: 16) {
-            formRow("Task name") {
-                themedTextField("e.g. Fix login bug", text: $name)
+            formRow("Task name (optional)") {
+                themedTextField("New Task", text: $name)
             }
 
-            formRow("Start from") {
-                modeToggle
+            formRow("Use worktree") {
+                worktreeToggle
             }
 
-            switch mode {
-            case .newBranch:
-                formRow("Base ref") {
-                    themedTextField("main", text: $baseRef)
+            if useWorktree {
+                formRow("Start from") {
+                    modeToggle
                 }
-            case .existingBranch:
-                formRow("Branch") {
-                    if branches.isEmpty {
-                        Text("No local branches found.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.palette.textDisabled)
-                    } else {
-                        branchPicker
+
+                switch mode {
+                case .newBranch:
+                    formRow("Base ref") {
+                        themedTextField("main", text: $baseRef)
+                    }
+                case .existingBranch:
+                    formRow("Branch") {
+                        if branches.isEmpty {
+                            Text("No local branches found.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.palette.textDisabled)
+                        } else {
+                            branchPicker
+                        }
                     }
                 }
             }
@@ -210,6 +222,38 @@ struct TaskCreationView: View {
         .buttonStyle(.plain)
     }
 
+    /// Whether the task's setup runs in a fresh branch/worktree or in the
+    /// project's own checkout, as a themed two-state control matching
+    /// `modeToggle` rather than a stock `Toggle`.
+    private var worktreeToggle: some View {
+        HStack(spacing: 8) {
+            worktreeToggleButton(true, label: "Worktree")
+            worktreeToggleButton(false, label: "In place")
+        }
+    }
+
+    private func worktreeToggleButton(_ candidate: Bool, label: String) -> some View {
+        let isSelected = useWorktree == candidate
+        return Button {
+            useWorktree = candidate
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isSelected ? theme.palette.selectionForeground : theme.palette.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isSelected ? theme.palette.accent : theme.palette.elevatedSurfaceBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(theme.palette.separator, lineWidth: isSelected ? 0 : 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     private var branchPicker: some View {
         Menu {
             ForEach(branches) { branch in
@@ -243,7 +287,7 @@ struct TaskCreationView: View {
     }
 
     private var canCreate: Bool {
-        TaskCreationValidation.canCreate(name: name, mode: mode, baseRef: baseRef, selectedBranch: selectedBranch)
+        TaskCreationValidation.canCreate(name: name, mode: mode, baseRef: baseRef, selectedBranch: selectedBranch, useWorktree: useWorktree)
     }
 
     // MARK: - Creation progress
@@ -367,8 +411,9 @@ struct TaskCreationView: View {
                 _ = try await store.createTask(
                     project: project,
                     name: name,
-                    baseRef: mode == .newBranch ? baseRef : nil,
-                    existingBranch: mode == .existingBranch ? selectedBranch : nil,
+                    baseRef: useWorktree && mode == .newBranch ? baseRef : nil,
+                    existingBranch: useWorktree && mode == .existingBranch ? selectedBranch : nil,
+                    useWorktree: useWorktree,
                     onOutput: { line in
                         Task { @MainActor in logLines.append(line) }
                     }
