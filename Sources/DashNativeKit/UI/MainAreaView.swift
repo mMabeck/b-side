@@ -1,13 +1,28 @@
+import Foundation
 import SwiftUI
 
-/// Placeholder for the selected task's agent terminal.
+/// The selected task's agent terminal. For this stage (before task
+/// creation exists) it hosts a plain login shell in the currently selected
+/// project's directory, falling back to the user's home directory.
 struct MainAreaView: View {
+    var store: ProjectsStore
+
+    @State private var host: TerminalSurfaceHost?
+
     var body: some View {
-        ContentUnavailableView(
-            "No Task Selected",
-            systemImage: "terminal",
-            description: Text("The agent terminal will appear here.")
-        )
+        ZStack {
+            if let host {
+                TerminalHostView(host: host)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: store.selectedProject?.id) {
+            host = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(for: store))
+        }
+    }
+
+    static func resolvedDirectory(for store: ProjectsStore) -> URL {
+        store.selectedProject.map { URL(fileURLWithPath: $0.path) }
+            ?? FileManager.default.homeDirectoryForCurrentUser
     }
 }

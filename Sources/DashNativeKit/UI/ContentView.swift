@@ -27,7 +27,7 @@ public struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
-                    MainAreaView()
+                    MainAreaView(store: store)
                     if !rightSidebarCollapsed {
                         Divider()
                         RightSidebarView()
@@ -37,8 +37,20 @@ public struct ContentView: View {
 
                 if !terminalDrawerCollapsed {
                     Divider()
-                    TerminalDrawerView()
                 }
+                // Always mounted, collapsed to zero height rather than removed:
+                // removing it from the hierarchy would deinit its terminal
+                // surface instead of just marking it not-visible (see
+                // TerminalDrawerView's doc comment and native-rewrite.md §6).
+                TerminalDrawerView(store: store, isCollapsed: terminalDrawerCollapsed)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: terminalDrawerCollapsed ? 0 : 160,
+                        maxHeight: terminalDrawerCollapsed ? 0 : 240
+                    )
+                    .opacity(terminalDrawerCollapsed ? 0 : 1)
+                    .allowsHitTesting(!terminalDrawerCollapsed)
+                    .clipped()
             }
             .toolbar {
                 ToolbarItem {

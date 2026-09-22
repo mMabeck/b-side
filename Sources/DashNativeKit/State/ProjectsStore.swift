@@ -13,6 +13,14 @@ public final class ProjectsStore {
     public private(set) var syncStatusByTask: [Int64: TaskWorktreeService.BranchSyncStatus] = [:]
     public private(set) var vanishedWorktreeTaskIds: Set<Int64> = []
 
+    /// The project whose terminals the main area and terminal drawer show.
+    /// In-memory only; not persisted. `nil` until the user picks a project.
+    public var selectedProjectID: Int64?
+
+    public var selectedProject: Project? {
+        projects.first { $0.id == selectedProjectID }
+    }
+
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?
     private static let logger = Logger(subsystem: "ai.syv.dash-native", category: "projects-store")

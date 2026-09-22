@@ -27,7 +27,18 @@ struct SidebarView: View {
                         }
                     }
                 } header: {
-                    Text(project.displayName)
+                    Button {
+                        store.selectedProjectID = project.id
+                    } label: {
+                        HStack {
+                            Text(project.displayName)
+                            if store.selectedProjectID == project.id {
+                                Spacer()
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
                 .contextMenu {
                     Button("New Task…") {
