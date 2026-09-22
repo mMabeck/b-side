@@ -70,10 +70,37 @@ struct MainAreaView: View {
         }
     }
 
+    /// With no projects at all, invites adding one instead of the plain
+    /// "Select a project or task" prompt, which would otherwise describe a
+    /// choice the user has no way to make yet — mirrors the sidebar's own
+    /// `emptyProjectsState` for the same reason.
+    @ViewBuilder
     private var emptyStateView: some View {
-        Text("Select a project or task")
-            .font(.system(size: 13))
-            .foregroundStyle(theme.palette.textSecondary)
+        if store.projects.isEmpty {
+            VStack(spacing: 10) {
+                Text("No projects yet")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.palette.textSecondary)
+                Button {
+                    ProjectCreation.addProject(store: store)
+                } label: {
+                    Label("Add Project", systemImage: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(theme.palette.selectionForeground)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(theme.palette.accent)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        } else {
+            Text("Select a project or task")
+                .font(.system(size: 13))
+                .foregroundStyle(theme.palette.textSecondary)
+        }
     }
 
     private func ensureHost(for task: TaskRecord, project: Project) {

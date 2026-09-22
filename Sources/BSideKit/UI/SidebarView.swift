@@ -22,48 +22,58 @@ struct SidebarView: View {
     @State private var gitInfo = SidebarGitInfoCache()
     @AppStorage("sidebarCollapsedProjectIDs") private var collapseState = SidebarCollapseState()
 
-    @State private var taskCreationProject: Project?
     @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
 
     var body: some View {
-        List {
-            ForEach(store.projects) { project in
-                let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
-                let isExpandedBinding = Binding<Bool>(
-                    get: { collapseState.isExpanded(project.id) },
-                    set: { expanded in
-                        guard let id = project.id else { return }
-                        collapseState.setExpanded(expanded, for: id)
-                    }
-                )
-                Section(isExpanded: isExpandedBinding) {
-                    if tasks.isEmpty {
-                        Text("No tasks")
-                            .foregroundStyle(theme.palette.textSecondary)
-                            .listRowBackground(theme.palette.surfaceBackground)
-                    } else {
-                        ForEach(tasks) { task in
-                            taskRow(task, project: project)
+        VStack(spacing: 0) {
+            if store.projects.isEmpty {
+                emptyProjectsState
+            } else {
+                List {
+                    ForEach(store.projects) { project in
+                        let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
+                        let isExpandedBinding = Binding<Bool>(
+                            get: { collapseState.isExpanded(project.id) },
+                            set: { expanded in
+                                guard let id = project.id else { return }
+                                collapseState.setExpanded(expanded, for: id)
+                            }
+                        )
+                        Section(isExpanded: isExpandedBinding) {
+                            if tasks.isEmpty {
+                                Text("No tasks")
+                                    .foregroundStyle(theme.palette.textSecondary)
+                                    .listRowBackground(theme.palette.surfaceBackground)
+                            } else {
+                                ForEach(tasks) { task in
+                                    taskRow(task, project: project)
+                                }
+                            }
+                        } header: {
+                            projectRow(project, taskCount: tasks.count)
                         }
                     }
-                } header: {
-                    projectRow(project, taskCount: tasks.count)
                 }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
             }
+
+            // A persistent footer, not another `List` row: it must stay put
+            // while the list above it scrolls, and be reachable even when
+            // `store.projects` is empty (the empty state above already offers
+            // its own "Add Project" button, but keeping this one too means the
+            // affordance is always in the same place).
+            Rectangle().fill(theme.palette.separator).frame(height: 1)
+            addProjectFooter
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
         .background(theme.palette.surfaceBackground)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button(action: addProject) {
+                Button {
+                    ProjectCreation.addProject(store: store)
+                } label: {
                     Label("Add Project", systemImage: "plus")
                 }
-            }
-        }
-        .sheet(item: $taskCreationProject) { project in
-            TaskCreationView(project: project, store: store) {
-                taskCreationProject = nil
             }
         }
         .alert(
@@ -115,6 +125,7 @@ struct SidebarView: View {
                         .truncationMode(.middle)
                 }
                 Spacer()
+                addTaskButton(for: project)
                 Text("\(taskCount)")
                     .font(.caption)
                     .foregroundStyle(secondary)
@@ -128,13 +139,34 @@ struct SidebarView: View {
         .listRowBackground(Color.clear)
         .contextMenu {
             Button("New Task…") {
-                taskCreationProject = project
+                store.pendingTaskCreationProject = project
             }
             Button("Remove Project", role: .destructive) {
                 Task { try? await store.removeProject(project) }
             }
         }
         .task(id: project.id) { gitInfo.refresh(project) }
+    }
+
+    /// A quiet, low-contrast "+" beside each project header for starting a
+    /// task in that project without opening its context menu. Sized to a
+    /// fixed small frame and drawn with `.plain` so it neither disturbs the
+    /// header row's existing height/padding nor the task-count indicator
+    /// beside it, and a nested `Button` inside `projectRow`'s own `Button`
+    /// label works fine here because SwiftUI resolves the tap to whichever
+    /// control's own hit area was actually touched.
+    private func addTaskButton(for project: Project) -> some View {
+        Button {
+            store.pendingTaskCreationProject = project
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.palette.textDisabled)
+                .frame(width: 16, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("New Task in \(project.displayName)")
     }
 
     /// One terse secondary line combining branch and path (`main* — ~/Claude/dotfiles`)
@@ -260,29 +292,46 @@ struct SidebarView: View {
             .fill(isSelected ? palette.selectionBackground : Color.clear)
     }
 
-    private func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task {
-            if await !GitCLI.isGitRepository(at: url) {
-                guard offerToInitRepository(at: url) else { return }
+    /// The persistent "Add Project" row pinned below the list — not a `List`
+    /// row itself, so it never scrolls out of view. Same `.plain`,
+    /// palette-only styling as the rest of the sidebar; routes through
+    /// `ProjectCreation` like every other add-project entry point.
+    private var addProjectFooter: some View {
+        Button {
+            ProjectCreation.addProject(store: store)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Add Project")
+                    .font(.system(size: 12, weight: .medium))
             }
-            try? await store.addProject(at: url)
+            .foregroundStyle(theme.palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
-    /// Shows a confirmation alert asking whether to `git init` a non-repo directory.
-    /// Returns whether the user agreed.
-    private func offerToInitRepository(at url: URL) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "Not a Git Repository"
-        alert.informativeText = "\(url.lastPathComponent) isn't a git repository yet. Run \"git init\" in it?"
-        alert.addButton(withTitle: "Initialize")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+    /// Shown instead of the (otherwise empty) list when there are no
+    /// projects yet, so a brand-new install invites the first "Add Project"
+    /// rather than presenting a blank column.
+    private var emptyProjectsState: some View {
+        VStack(spacing: 8) {
+            Text("No projects yet")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+            Button {
+                ProjectCreation.addProject(store: store)
+            } label: {
+                Label("Add Project", systemImage: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.palette.textPrimary)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

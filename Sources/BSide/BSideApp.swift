@@ -28,6 +28,7 @@ struct BSideApp: App {
         }
         .commands {
             WindowLayoutCommands()
+            ProjectCommands(store: store)
         }
     }
 }

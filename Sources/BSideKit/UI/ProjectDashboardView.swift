@@ -13,7 +13,6 @@ struct ProjectDashboardView: View {
 
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
     @State private var gitInfo = SidebarGitInfoCache()
-    @State private var isCreatingTask = false
 
     private var tasks: [TaskRecord] {
         project.id.flatMap { store.tasksByProject[$0] } ?? []
@@ -41,11 +40,6 @@ struct ProjectDashboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.palette.windowBackground)
-        .sheet(isPresented: $isCreatingTask) {
-            TaskCreationView(project: project, store: store) {
-                isCreatingTask = false
-            }
-        }
         .task(id: project.id) { gitInfo.refresh(project) }
     }
 
@@ -92,7 +86,7 @@ struct ProjectDashboardView: View {
     /// user's Ghostty theme instead of showing macOS's own accent colour.
     private var newTaskButton: some View {
         Button {
-            isCreatingTask = true
+            store.pendingTaskCreationProject = project
         } label: {
             Label("New Task", systemImage: "plus")
                 .font(.system(size: 13, weight: .medium))
