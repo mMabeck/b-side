@@ -24,6 +24,20 @@ public struct ContentView: View {
         )
     }
 
+    // Drives the native `.inspector` presentation from the same
+    // `WindowLayoutState.shared.rightSidebarCollapsed` flag the toolbar
+    // button and `WindowLayoutCommands`' View-menu item already toggle, so
+    // there is one source of truth rather than parallel presentation state.
+    private var rightSidebarPresented: Binding<Bool> {
+        Binding(
+            get: { !layout.rightSidebarCollapsed },
+            set: { newValue in
+                guard newValue == layout.rightSidebarCollapsed else { return }
+                layout.toggleRightSidebar()
+            }
+        )
+    }
+
     public var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(store: store)
@@ -33,15 +47,16 @@ public struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         } detail: {
             VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    MainAreaView(store: store)
-                    if !layout.rightSidebarCollapsed {
-                        Rectangle().fill(theme.palette.separator).frame(width: 1)
+                MainAreaView(store: store)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // The native inspector column: real resizable-by-drag
+                    // chrome with its own separator, replacing the old
+                    // hand-drawn `Rectangle()` divider and the hard
+                    // `.frame(minWidth:maxWidth:)` that fought resizing.
+                    .inspector(isPresented: rightSidebarPresented) {
                         RightSidebarView(store: store)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .inspectorColumnWidth(min: 260, ideal: 300, max: 480)
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if !layout.terminalDrawerCollapsed {
                     Rectangle().fill(theme.palette.separator).frame(height: 1)
