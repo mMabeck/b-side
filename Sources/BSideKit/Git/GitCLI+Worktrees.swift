@@ -79,6 +79,16 @@ extension GitCLI {
         )
     }
 
+    /// Moves a worktree's directory from `oldPath` to `newPath`. Follows up with
+    /// `worktree repair`, which is cheap and idempotent, so both the worktree's
+    /// gitlink and the main repository's administrative files agree on the new
+    /// path even on git versions where `worktree move` alone can leave them
+    /// out of sync.
+    public static func moveWorktree(from oldPath: URL, to newPath: URL, in repositoryPath: URL) async throws {
+        _ = try await run(["worktree", "move", oldPath.path, newPath.path], in: repositoryPath)
+        _ = try? await run(["worktree", "repair"], in: repositoryPath)
+    }
+
     /// Removes the worktree at `worktreePath`. `force` allows removal despite
     /// uncommitted changes.
     public static func removeWorktree(at worktreePath: URL, in repositoryPath: URL, force: Bool = false) async throws {

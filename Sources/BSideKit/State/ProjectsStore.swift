@@ -260,7 +260,8 @@ public final class ProjectsStore {
         onOutput: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> TaskRecord {
         let config = ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path))
-        let resolvedName = name.trimmingCharacters(in: .whitespaces).isEmpty ? "New Task" : name
+        let nameWasBlank = name.trimmingCharacters(in: .whitespaces).isEmpty
+        let resolvedName = nameWasBlank ? "New Task" : name
 
         let setupResult = try await TaskWorktreeService.createWorktree(
             for: project,
@@ -279,7 +280,8 @@ public final class ProjectsStore {
             branchCreatedByApp: setupResult.branchCreatedByApp,
             worktreePath: setupResult.worktreePath,
             harness: "claude",
-            permissionLevel: config.taskDefaults.permissionMode
+            permissionLevel: config.taskDefaults.permissionMode,
+            awaitingAutoRename: nameWasBlank
         )
         return try await database.dbQueue.write { db in
             var task = task
@@ -368,6 +370,46 @@ public final class ProjectsStore {
         try await database.dbQueue.write { db in
             guard var updated = try Conversation.fetchOne(db, key: id) else { return }
             updated.transcriptPath = path
+            try updated.update(db)
+        }
+    }
+
+    /// The task with `id` from the current in-memory snapshot, not the
+    /// database — for callers (the auto-rename watcher in `MainAreaView`)
+    /// that need the freshest known state without a round trip.
+    public func task(withId id: Int64) -> TaskRecord? {
+        tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == id }
+    }
+
+    /// Applies the once-only automatic rename derived from a task's first pi
+    /// prompt (see `TaskAutoRenameService`): renames the task, and its
+    /// worktree/branch when it owns ones the app created. Always clears
+    /// `awaitingAutoRename`, even when `prompt` doesn't yield a usable title,
+    /// so this never re-fires for the same task.
+    public func applyAutoRename(task: TaskRecord, project: Project, prompt: String) async {
+        guard task.awaitingAutoRename else { return }
+        guard let title = TaskAutoRenameService.deriveTitle(fromPrompt: prompt) else {
+            await clearAwaitingAutoRename(task)
+            return
+        }
+
+        let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: title)
+        guard let id = task.id else { return }
+        try? await database.dbQueue.write { db in
+            guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
+            updated.name = renamed.name
+            updated.branchName = renamed.branchName
+            updated.worktreePath = renamed.worktreePath
+            updated.awaitingAutoRename = false
+            try updated.update(db)
+        }
+    }
+
+    private func clearAwaitingAutoRename(_ task: TaskRecord) async {
+        guard let id = task.id else { return }
+        try? await database.dbQueue.write { db in
+            guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
+            updated.awaitingAutoRename = false
             try updated.update(db)
         }
     }

@@ -47,5 +47,14 @@ enum Migrations {
                 t.add(column: "sessionId", .text).notNull().defaults(to: "")
             }
         }
+
+        // Added for automatic task renaming from a task's first pi prompt
+        // (see `TaskAutoRenameService`): whether a task, created with a
+        // blank name, is still waiting for that rename.
+        migrator.registerMigration("v3_task_awaiting_auto_rename") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "awaitingAutoRename", .boolean).notNull().defaults(to: false)
+            }
+        }
     }
 }
