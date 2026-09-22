@@ -41,23 +41,6 @@ struct WindowLayoutTests {
         }
     }
 
-    @Test("Settings shortcut is Cmd+, distinct from the three region toggles")
-    func settingsShortcut() {
-        #expect(AppCommandShortcut.settings.key.character == ",")
-        #expect(AppCommandShortcut.settings.modifiers == [.command])
-
-        let regionShortcuts = [
-            WindowLayoutShortcut.leftSidebar,
-            WindowLayoutShortcut.rightSidebar,
-            WindowLayoutShortcut.terminalDrawer,
-        ]
-        for shortcut in regionShortcuts {
-            let same = shortcut.key.character == AppCommandShortcut.settings.key.character
-                && shortcut.modifiers == AppCommandShortcut.settings.modifiers
-            #expect(!same)
-        }
-    }
-
     @Test("Each toggle flips only its own region, independent of the others")
     func togglesAreIndependent() {
         let state = WindowLayoutState(defaults: makeIsolatedDefaults())

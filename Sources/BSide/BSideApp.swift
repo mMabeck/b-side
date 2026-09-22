@@ -19,15 +19,12 @@ struct BSideApp: App {
         // implicitly-unwrapped optional that is not guaranteed set this
         // early in the SwiftUI `App` lifecycle — `.shared` lazily creates
         // the application instance instead of force-unwrapping a possibly-nil
-        // reference to it. Deferred a runloop turn: forcing `NSApplication`
-        // into existence synchronously inside `App.init()` raced SwiftUI's
-        // own app-menu construction (the one that inserts the automatic
-        // "Settings…"/Cmd+, item for the `Settings` scene below) and could
-        // leave the App menu malformed. Dispatching it lets SwiftUI finish
-        // building its default menu first.
-        DispatchQueue.main.async {
-            NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
-        }
+        // reference to it. Set synchronously (a prior deferral, added on a
+        // theory that this raced SwiftUI's app-menu construction, was
+        // disproved by a menu-dump diagnostic — the same menu resulted
+        // either way): deferring risks a light-appearance flash on the
+        // first frame.
+        NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
 
         do {
             let database = try AppDatabase.openStandard()
@@ -49,17 +46,12 @@ struct BSideApp: App {
         // regions. This takes only the floor from `ContentView`'s frame.
         .windowResizability(.contentMinSize)
         .commands {
-            // The `Settings` scene below is supposed to generate this item
-            // (and its Cmd+, shortcut) automatically, but that only reliably
-            // happens when a `Settings` scene's automatic app-menu wiring
-            // hasn't been disturbed. Replacing `.appSettings` explicitly
-            // makes the item unconditional rather than depending on that.
-            CommandGroup(replacing: .appSettings) {
-                SettingsLink {
-                    Text("Settings…")
-                }
-                .keyboardShortcut(AppCommandShortcut.settings)
-            }
+            // The `Settings` scene below already generates the App menu's
+            // "Settings…" item and its Cmd+, shortcut automatically. An
+            // explicit `CommandGroup(replacing: .appSettings)` used to sit
+            // here too, but it duplicated the item instead of replacing it
+            // (both routed through SwiftUI's internal `menuAction:`, and a
+            // menu-dump diagnostic showed neither opened a window) — removed.
             WindowLayoutCommands()
         }
 
