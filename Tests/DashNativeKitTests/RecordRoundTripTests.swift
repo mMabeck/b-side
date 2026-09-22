@@ -1,0 +1,93 @@
+import Foundation
+import GRDB
+import Testing
+
+@testable import DashNativeKit
+
+@Suite("Record round-trips")
+struct RecordRoundTripTests {
+    private func makeDatabase() throws -> AppDatabase {
+        try AppDatabase.openInMemory()
+    }
+
+    @Test("Project inserts and fetches back equal")
+    func projectRoundTrip() throws {
+        let database = try makeDatabase()
+        var project = Project(path: "/tmp/repo", displayName: "repo", remote: "git@example.com:x/repo.git", baseRef: "main")
+
+        try database.dbQueue.write { db in
+            try project.insert(db)
+        }
+        #expect(project.id != nil)
+
+        let fetched = try database.dbQueue.read { db in
+            try Project.fetchOne(db, id: project.id!)
+        }
+        #expect(fetched == project)
+    }
+
+    @Test("Task inserts and fetches back equal")
+    func taskRoundTrip() throws {
+        let database = try makeDatabase()
+        var project = Project(path: "/tmp/repo", displayName: "repo", baseRef: "main")
+        try database.dbQueue.write { db in try project.insert(db) }
+
+        var task = TaskRecord(
+            projectId: project.id!,
+            name: "Fix bug",
+            branchName: "task/fix-bug",
+            branchCreatedByApp: true,
+            worktreePath: "/tmp/repo-worktrees/fix-bug",
+            harness: "claude",
+            permissionLevel: "default",
+            contextPrompt: "Be careful",
+            setupCommand: "npm install",
+            teardownCommand: nil,
+            archived: false,
+            sortPosition: 0
+        )
+        try database.dbQueue.write { db in
+            try task.insert(db)
+        }
+        #expect(task.id != nil)
+
+        let fetched = try database.dbQueue.read { db in
+            try TaskRecord.fetchOne(db, id: task.id!)
+        }
+        #expect(fetched == task)
+    }
+
+    @Test("Conversation inserts and fetches back equal")
+    func conversationRoundTrip() throws {
+        let database = try makeDatabase()
+        var project = Project(path: "/tmp/repo", displayName: "repo", baseRef: "main")
+        try database.dbQueue.write { db in try project.insert(db) }
+
+        var task = TaskRecord(
+            projectId: project.id!,
+            name: "Fix bug",
+            branchName: "task/fix-bug",
+            worktreePath: "/tmp/repo-worktrees/fix-bug",
+            harness: "claude",
+            permissionLevel: "default"
+        )
+        try database.dbQueue.write { db in try task.insert(db) }
+
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        var conversation = Conversation(
+            taskId: task.id!,
+            transcriptPath: "/tmp/transcripts/1.jsonl",
+            startedAt: startedAt,
+            isActive: true
+        )
+        try database.dbQueue.write { db in
+            try conversation.insert(db)
+        }
+        #expect(conversation.id != nil)
+
+        let fetched = try database.dbQueue.read { db in
+            try Conversation.fetchOne(db, id: conversation.id!)
+        }
+        #expect(fetched == conversation)
+    }
+}
