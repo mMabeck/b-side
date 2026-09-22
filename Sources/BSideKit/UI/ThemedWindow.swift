@@ -94,7 +94,12 @@ private final class VibrancyGuardian: NSObject {
             NSWindow.didBecomeKeyNotification,
             NSWindow.didResizeNotification,
             NSWindow.didChangeScreenNotification,
-            NSWindow.didUpdateNotification,
+            // Deliberately not `didUpdateNotification`: it fires about once
+            // per event-loop cycle for the window, and each rescan walks the
+            // whole view tree and re-registers KVO — continuous overhead in
+            // an app whose main content is a constantly redrawing terminal.
+            // The `subviews` KVO below already catches every insertion,
+            // which is the event that actually matters here.
         ] {
             notificationTokens.append(
                 center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
