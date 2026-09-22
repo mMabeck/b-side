@@ -12,3 +12,9 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools swift build
 ```
 
 Apple Silicon only — the libghostty XCFramework is arm64.
+
+## Test
+
+```sh
+./scripts/test.sh
+```
