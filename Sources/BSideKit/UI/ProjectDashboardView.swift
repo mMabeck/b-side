@@ -22,7 +22,9 @@ struct ProjectDashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider().overlay(theme.palette.separator)
+            Rectangle()
+                .fill(theme.palette.separator)
+                .frame(height: 1)
 
             if tasks.isEmpty {
                 emptyState
@@ -69,13 +71,7 @@ struct ProjectDashboardView: View {
                     .truncationMode(.middle)
             }
             Spacer()
-            Button {
-                isCreatingTask = true
-            } label: {
-                Label("New Task", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(theme.palette.accent)
+            newTaskButton
         }
         .padding(20)
     }
@@ -85,15 +81,30 @@ struct ProjectDashboardView: View {
             Text("No tasks yet")
                 .font(.system(size: 13))
                 .foregroundStyle(theme.palette.textSecondary)
-            Button {
-                isCreatingTask = true
-            } label: {
-                Label("New Task", systemImage: "plus")
-            }
-            .buttonStyle(.bordered)
-            .tint(theme.palette.accent)
+            newTaskButton
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A filled, themed "New Task" action, styled like `SidebarView`'s rows
+    /// (`.plain` with an explicit palette fill) rather than system
+    /// `.borderedProminent`/`.bordered` chrome, so it restyles with the
+    /// user's Ghostty theme instead of showing macOS's own accent colour.
+    private var newTaskButton: some View {
+        Button {
+            isCreatingTask = true
+        } label: {
+            Label("New Task", systemImage: "plus")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.palette.selectionForeground)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(theme.palette.accent)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     /// A compact task summary card: name, status dot, branch sync summary,

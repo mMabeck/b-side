@@ -20,6 +20,13 @@ struct MainAreaView: View {
 
     @State private var hostsByTaskID: [Int64: TerminalSurfaceHost] = [:]
 
+    /// Which cached host, if any, should hold keyboard focus — driven
+    /// explicitly by `syncFocus()` rather than left to click-to-focus, since
+    /// every cached host stays mounted underneath the visible one and AppKit
+    /// has no reason to move first responder on its own when the *SwiftUI*
+    /// selection changes. See `syncFocus()` for what goes wrong without this.
+    @FocusState private var focusedTaskID: Int64?
+
     private var liveTaskIDs: Set<Int64> {
         Set(store.tasksByProject.values.flatMap { $0.compactMap(\.id) })
     }
@@ -28,12 +35,15 @@ struct MainAreaView: View {
         ZStack {
             // Every cached terminal stays mounted here regardless of the
             // current selection; only its opacity/hit-testing tracks whether
-            // its task is the active one.
-            ForEach(Array(hostsByTaskID.keys), id: \.self) { taskID in
+            // its task is the active one. Sorted so cache iteration order is
+            // deterministic (dictionary order is not) — mostly a debugging/
+            // diffing convenience, since the ZStack itself doesn't care.
+            ForEach(hostsByTaskID.keys.sorted(), id: \.self) { taskID in
                 if let host = hostsByTaskID[taskID] {
-                    TerminalHostView(host: host)
-                        .opacity(taskID == store.selectedTaskID ? 1 : 0)
-                        .allowsHitTesting(taskID == store.selectedTaskID)
+                    let isVisible = taskID == MainAreaView.visibleTaskID(for: store.mainSelection)
+                    TerminalHostView(host: host, focusedTaskID: $focusedTaskID, taskID: taskID)
+                        .opacity(isVisible ? 1 : 0)
+                        .allowsHitTesting(isVisible)
                 }
             }
 
@@ -53,6 +63,7 @@ struct MainAreaView: View {
                 ensureHost(for: task, project: project)
             }
             syncVisibility()
+            syncFocus()
         }
         .onChange(of: liveTaskIDs) { _, ids in
             purgeHosts(keeping: ids)
@@ -73,11 +84,27 @@ struct MainAreaView: View {
     /// Marks the active task's host visible and every other cached host not
     /// visible, so hidden surfaces stop drawing frames nobody sees (per
     /// `TerminalSurfaceHost.isVisible`'s own doc comment) without losing
-    /// their grid, scrollback, or running shell.
+    /// their grid, scrollback, or running shell. Derived from `mainSelection`,
+    /// not the raw `selectedTaskID`, so this never disagrees with which
+    /// branch of the `switch` above is actually on screen — see
+    /// `visibleTaskID(for:)`.
     private func syncVisibility() {
+        let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         for (id, host) in hostsByTaskID {
-            host.isVisible = (id == store.selectedTaskID)
+            host.isVisible = (id == visibleID)
         }
+    }
+
+    /// Explicitly moves keyboard focus to the active task's host (or off of
+    /// every host, when the main selection isn't a task) rather than
+    /// leaving it wherever it last was. `opacity`/`allowsHitTesting` hide a
+    /// host visually and stop clicks from reaching it, but neither resigns
+    /// its terminal view as first responder — without this, switching from
+    /// task A to task B would leave keystrokes still landing in A's shell
+    /// (invisible, but very much still running) until the user clicked into
+    /// B, which can mean running a command against the wrong worktree.
+    private func syncFocus() {
+        focusedTaskID = MainAreaView.visibleTaskID(for: store.mainSelection)
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
@@ -90,6 +117,18 @@ struct MainAreaView: View {
     /// among live (non-archived, non-deleted) tasks should be evicted.
     static func idsToPurge(cachedIDs: Set<Int64>, liveTaskIDs: Set<Int64>) -> Set<Int64> {
         cachedIDs.subtracting(liveTaskIDs)
+    }
+
+    /// The task id that should read as visible/focused for a given
+    /// `mainSelection` — the one place both `syncVisibility()` and
+    /// `syncFocus()` (and the `ForEach` in `body`) go to decide "is this the
+    /// active task's host", so opacity, hit-testing, and keyboard focus can
+    /// never independently disagree about it. Pure so it's directly testable.
+    static func visibleTaskID(for selection: MainSelection) -> Int64? {
+        if case .task(let task, _) = selection {
+            return task.id
+        }
+        return nil
     }
 
     /// The directory a task's terminal should start in: its worktree, or the

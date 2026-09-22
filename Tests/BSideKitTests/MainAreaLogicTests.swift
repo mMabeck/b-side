@@ -118,4 +118,24 @@ struct MainAreaLogicTests {
         let cached: Set<Int64> = [1, 2, 3]
         #expect(MainAreaView.idsToPurge(cachedIDs: cached, liveTaskIDs: []) == cached)
     }
+
+    // MARK: - Visible/focused task id
+
+    @Test("A task main selection reports its task id as visible")
+    func visibleTaskIDForTaskSelection() {
+        let project = Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")
+        let task = TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")
+        #expect(MainAreaView.visibleTaskID(for: .task(task, project)) == 10)
+    }
+
+    @Test("A project main selection reports no visible task")
+    func visibleTaskIDForProjectSelection() {
+        let project = Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")
+        #expect(MainAreaView.visibleTaskID(for: .project(project)) == nil)
+    }
+
+    @Test("No main selection reports no visible task")
+    func visibleTaskIDForNoSelection() {
+        #expect(MainAreaView.visibleTaskID(for: .none) == nil)
+    }
 }
