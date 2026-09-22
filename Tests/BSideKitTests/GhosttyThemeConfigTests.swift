@@ -94,6 +94,44 @@ struct GhosttyThemeConfigTests {
         #expect(resolved.configSource == .generated(GhosttyBridge.appOwnedKeybinds))
     }
 
+    @Test("A config file that exists but can't be read still falls back to the generated unbinds")
+    func unreadableConfigFileFallsBackToGenerated() throws {
+        guard getuid() != 0 else {
+            // root ignores POSIX permission bits, so chmod-based
+            // unreadability doesn't apply when tests run elevated.
+            return
+        }
+
+        let configHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ghostty-unreadable-test-\(UUID().uuidString)")
+        let configDir = configHome.appendingPathComponent("ghostty")
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        let configPath = configDir.appendingPathComponent("config")
+        try "theme = Ayu Mirage\n".write(to: configPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: configPath.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: configPath.path)
+            try? FileManager.default.removeItem(at: configHome)
+        }
+
+        let previous = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+        setenv("XDG_CONFIG_HOME", configHome.path, 1)
+        defer {
+            if let previous {
+                setenv("XDG_CONFIG_HOME", previous, 1)
+            } else {
+                unsetenv("XDG_CONFIG_HOME")
+            }
+        }
+
+        // The file exists, so this is a read failure, not an absent config.
+        #expect(GhosttyBridge.userConfigFilePath != nil)
+
+        let resolved = GhosttyBridge.resolveUserConfig(preferDark: true)
+        #expect(resolved.themeDefinition == nil)
+        #expect(resolved.configSource == .generated(GhosttyBridge.appOwnedKeybinds))
+    }
+
     /// `AppTerminalView.performKeyEquivalent` consumes any key Ghostty binds
     /// before the main menu is offered it, so a shortcut the app's own menu
     /// owns has to be released from Ghostty's defaults or the menu item

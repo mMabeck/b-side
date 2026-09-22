@@ -216,12 +216,26 @@ public enum GhosttyBridge {
 
     @MainActor
     static func resolveUserConfig(preferDark: Bool = systemPrefersDarkAppearance) -> ResolvedUserConfig {
-        guard let path = userConfigFilePath,
-              let raw = try? String(contentsOfFile: path, encoding: .utf8)
-        else {
+        guard let path = userConfigFilePath else {
             // Still generated rather than `.none`: even with no user config
             // at all, the app's own key equivalents must be released from
             // Ghostty's defaults.
+            return ResolvedUserConfig(
+                configSource: .generated(appOwnedKeybinds),
+                theme: .default,
+                themeDefinition: nil
+            )
+        }
+
+        let raw: String
+        do {
+            raw = try String(contentsOfFile: path, encoding: .utf8)
+        } catch {
+            // The file exists but couldn't be read (permissions, bad
+            // encoding, ...) — distinct from having no config at all, and
+            // otherwise silently falls back to the default theme with no
+            // way for the user to tell why.
+            logger.error("ghostty config: failed to read \(path, privacy: .public): \(error, privacy: .public)")
             return ResolvedUserConfig(
                 configSource: .generated(appOwnedKeybinds),
                 theme: .default,
