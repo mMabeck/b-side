@@ -334,7 +334,7 @@ struct ProjectsStoreAutoRenameTests {
 
 @Suite("Auto-rename doesn't disturb pi session resume")
 struct AutoRenameSessionResumeTests {
-    @Test("resuming after a rename still targets the exact same transcript file as before the rename")
+    @Test("resuming after a rename repairs the transcript's header cwd so pi doesn't refuse to resume it")
     func resumeStillTargetsSameTranscriptAfterRename() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
@@ -359,43 +359,63 @@ struct AutoRenameSessionResumeTests {
             awaitingAutoRename: true
         )
 
-        // The transcript's stored path is an absolute path under the pi
-        // sessions root, keyed by the *old* working directory slug — this
-        // never changes when the task's worktree is later renamed.
-        let transcriptPath = root.appendingPathComponent("sessions/some-old-slug/20260101_abc.jsonl").path
+        // A real transcript, as pi would have written it while the task's
+        // worktree was still at its pre-rename path: the header `cwd` names
+        // that original worktree, and the file itself sits under a sessions
+        // subdirectory keyed by that same (now stale) path.
         let sessionID = PiSessionService.newSessionID()
-        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: transcriptPath)
+        let resolvedOldWorktreePath = URL(fileURLWithPath: task.worktreePath).resolvingSymlinksInPath().path
+        let header = "{\"type\":\"session\",\"version\":3,\"id\":\"\(sessionID)\"," +
+            "\"timestamp\":\"2026-09-22T18:47:13.521Z\",\"cwd\":\"\(resolvedOldWorktreePath)\"}"
+        let bodyLine = "{\"type\":\"message\",\"id\":\"e\",\"parentId\":\"d\"," +
+            "\"timestamp\":\"2026-09-22T18:47:14Z\",\"message\":{\"role\":\"user\",\"content\":\"fix the login bug\"}}"
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let originalTranscriptURL = sessionsRoot.appendingPathComponent("--some-old-slug--/20260101_abc.jsonl")
+        try FileManager.default.createDirectory(
+            at: originalTranscriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "\(header)\n\(bodyLine)\n".write(to: originalTranscriptURL, atomically: true, encoding: .utf8)
 
-        let beforeRenameCommand = PiSessionService.launchCommand(
-            locations: PiSessionService.Locations(
-                bundledBinaryPath: "/usr/local/bin/pi",
-                sessionsRoot: root.appendingPathComponent("sessions"),
-                pathBinaryFinder: { nil }
-            ),
-            sessionID: conversation.sessionId,
-            transcriptPath: conversation.transcriptPath,
-            taskName: task.name
+        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: originalTranscriptURL.path)
+        let locations = PiSessionService.Locations(
+            bundledBinaryPath: "/usr/local/bin/pi",
+            sessionsRoot: sessionsRoot,
+            pathBinaryFinder: { nil }
         )
 
         let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: "Fix the login bug")
         #expect(renamed.worktreePath != task.worktreePath)
 
-        let afterRenameCommand = PiSessionService.launchCommand(
-            locations: PiSessionService.Locations(
-                bundledBinaryPath: "/usr/local/bin/pi",
-                sessionsRoot: root.appendingPathComponent("sessions"),
-                pathBinaryFinder: { nil }
-            ),
-            sessionID: conversation.sessionId,
+        // The repair happens at resume time, not during the rename itself —
+        // `applyRename` above must not have touched the transcript at all.
+        #expect(try Data(contentsOf: originalTranscriptURL) == "\(header)\n\(bodyLine)\n".data(using: .utf8))
+
+        let repairedPath = PiSessionService.repairTranscriptForResume(
             transcriptPath: conversation.transcriptPath,
+            currentWorkingDirectory: renamed.worktreePath,
+            locations: locations
+        )
+        let resolvedNewWorktreePath = URL(fileURLWithPath: renamed.worktreePath).resolvingSymlinksInPath().path
+
+        let repairedPathValue = try #require(repairedPath)
+        let repairedContents = try String(contentsOf: URL(fileURLWithPath: repairedPathValue), encoding: .utf8)
+        let repairedLines = repairedContents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let repairedHeaderData = try #require(repairedLines[0].data(using: .utf8))
+        let repairedHeader = try #require(JSONSerialization.jsonObject(with: repairedHeaderData) as? [String: Any])
+
+        #expect(repairedHeader["cwd"] as? String == resolvedNewWorktreePath)
+        #expect(repairedHeader["id"] as? String == sessionID)
+        #expect(repairedHeader["version"] as? Int == 3)
+        // Every remaining line survives the rewrite byte-for-byte.
+        #expect(Array(repairedLines.dropFirst()) == [bodyLine, ""])
+
+        let afterRenameCommand = PiSessionService.launchCommand(
+            locations: locations,
+            sessionID: conversation.sessionId,
+            transcriptPath: repairedPathValue,
             taskName: renamed.name
         )
-
-        #expect(afterRenameCommand.contains("--session '\(transcriptPath)'"))
-        #expect(beforeRenameCommand.contains("--session '\(transcriptPath)'"))
-        // Only the `--name` (display) argument differs after the rename; the
-        // session-selecting flag and its path are untouched.
-        #expect(beforeRenameCommand.replacingOccurrences(of: "'New Task'", with: "PLACEHOLDER")
-            == afterRenameCommand.replacingOccurrences(of: "'Fix the login bug'", with: "PLACEHOLDER"))
+        #expect(afterRenameCommand.contains("--session '\(repairedPathValue)'"))
     }
 }

@@ -122,14 +122,33 @@ struct MainAreaView: View {
         }
 
         let locations = PiSessionService.Locations.standard()
+        let workingDirectory = MainAreaView.resolvedDirectory(forTask: task, project: project)
+
+        // A prior auto-rename may have moved this task's worktree since the
+        // transcript was written, leaving its header `cwd` stale — repair it
+        // (or fall back to a fresh session) before handing `pi` a command
+        // that's guaranteed to exit 1. See `repairTranscriptForResume`'s doc
+        // comment for why this happens here and not at rename time.
+        var transcriptPathForLaunch: String?
+        if !conversation.transcriptPath.isEmpty {
+            transcriptPathForLaunch = PiSessionService.repairTranscriptForResume(
+                transcriptPath: conversation.transcriptPath,
+                currentWorkingDirectory: workingDirectory.path,
+                locations: locations
+            )
+            if let repairedPath = transcriptPathForLaunch, repairedPath != conversation.transcriptPath {
+                try? await store.recordTranscriptPath(repairedPath, for: conversation)
+            }
+        }
+
         let command = PiSessionService.launchCommand(
             locations: locations,
             sessionID: conversation.sessionId,
-            transcriptPath: conversation.transcriptPath.isEmpty ? nil : conversation.transcriptPath,
+            transcriptPath: transcriptPathForLaunch,
             taskName: task.name
         )
         hostsByTaskID[id] = TerminalSurfaceHost(
-            workingDirectory: MainAreaView.resolvedDirectory(forTask: task, project: project),
+            workingDirectory: workingDirectory,
             command: command
         )
 

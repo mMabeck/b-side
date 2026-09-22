@@ -162,6 +162,134 @@ struct PiSessionServiceTests {
         )
         #expect(PiSessionService.resolveBinary(locations: locations) == "/usr/bin/pi")
     }
+
+    @Test("sessions subdirectory naming collapses non-alphanumerics and wraps in --")
+    func sessionsSubdirectoryNamingMatchesObservedRule() throws {
+        #expect(
+            PiSessionService.sessionsSubdirectoryName(forCWD: "/Users/magnusmabeck/Claude/worktrees/new-task-078")
+                == "--Users-magnusmabeck-Claude-worktrees-new-task-078--"
+        )
+    }
+
+    @Test("repair is a no-op when the header cwd already matches the current working directory")
+    func repairIsNoOpWhenCWDAlreadyMatches() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let cwd = root.appendingPathComponent("worktree").path
+        try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+
+        let transcriptURL = sessionsRoot.appendingPathComponent("--slug--/20260101_000000_aaa.jsonl")
+        try writeTranscript(id: "s1", cwd: cwd, at: transcriptURL)
+        let originalContents = try Data(contentsOf: transcriptURL)
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let repaired = PiSessionService.repairTranscriptForResume(
+            transcriptPath: transcriptURL.path,
+            currentWorkingDirectory: cwd,
+            locations: locations
+        )
+
+        #expect(repaired == transcriptURL.path)
+        #expect(try Data(contentsOf: transcriptURL) == originalContents)
+    }
+
+    @Test("repair returns nil and leaves the file untouched for a malformed header")
+    func repairReturnsNilForMalformedHeader() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let transcriptURL = sessionsRoot.appendingPathComponent("proj/20260101_000000_aaa.jsonl")
+        try FileManager.default.createDirectory(
+            at: transcriptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "not json at all\nsome body line\n".write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let originalContents = try Data(contentsOf: transcriptURL)
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let repaired = PiSessionService.repairTranscriptForResume(
+            transcriptPath: transcriptURL.path,
+            currentWorkingDirectory: root.appendingPathComponent("elsewhere").path,
+            locations: locations
+        )
+
+        #expect(repaired == nil)
+        #expect(try Data(contentsOf: transcriptURL) == originalContents)
+    }
+
+    @Test("repair rewrites only the header cwd, relocates the file, and leaves every other line untouched")
+    func repairRewritesHeaderCWDAndRelocates() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let oldCWD = root.appendingPathComponent("old-worktree").path
+        let newCWDURL = root.appendingPathComponent("new-worktree")
+        try FileManager.default.createDirectory(atPath: newCWDURL.path, withIntermediateDirectories: true)
+
+        let header = "{\"type\":\"session\",\"version\":3,\"id\":\"s1\",\"timestamp\":\"2026-09-22T18:47:13.521Z\",\"cwd\":\"\(oldCWD)\"}"
+        let bodyLines = [
+            "{\"type\":\"session_info\",\"id\":\"a\",\"parentId\":null,\"timestamp\":\"2026-09-22T18:47:13Z\",\"name\":null}",
+            "{\"type\":\"message\",\"id\":\"e\",\"parentId\":\"d\",\"timestamp\":\"2026-09-22T18:47:14Z\",\"message\":{\"role\":\"user\",\"content\":\"fix the login bug\"}}",
+        ]
+        let originalPath = sessionsRoot.appendingPathComponent("--old-slug--/20260101_000000_aaa.jsonl")
+        try FileManager.default.createDirectory(
+            at: originalPath.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try (([header] + bodyLines).joined(separator: "\n") + "\n")
+            .write(to: originalPath, atomically: true, encoding: .utf8)
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let repaired = PiSessionService.repairTranscriptForResume(
+            transcriptPath: originalPath.path,
+            currentWorkingDirectory: newCWDURL.path,
+            locations: locations
+        )
+
+        let resolvedNewCWD = newCWDURL.resolvingSymlinksInPath().path
+        let expectedSubdirectory = PiSessionService.sessionsSubdirectoryName(forCWD: resolvedNewCWD)
+        let expectedPath = sessionsRoot
+            .appendingPathComponent(expectedSubdirectory)
+            .appendingPathComponent(originalPath.lastPathComponent)
+            .path
+
+        #expect(repaired == expectedPath)
+        #expect(FileManager.default.fileExists(atPath: originalPath.path) == false)
+
+        let rewrittenContents = try String(contentsOf: URL(fileURLWithPath: repaired!), encoding: .utf8)
+        let rewrittenLines = rewrittenContents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        let headerData = try #require(rewrittenLines[0].data(using: .utf8))
+        let rewrittenHeader = try #require(JSONSerialization.jsonObject(with: headerData) as? [String: Any])
+        #expect(rewrittenHeader["cwd"] as? String == resolvedNewCWD)
+        #expect(rewrittenHeader["id"] as? String == "s1")
+        #expect(rewrittenHeader["version"] as? Int == 3)
+        #expect(rewrittenHeader["timestamp"] as? String == "2026-09-22T18:47:13.521Z")
+
+        // Every line after the header survives the rewrite byte-for-byte.
+        #expect(Array(rewrittenLines.dropFirst()) == bodyLines + [""])
+    }
+
+    @Test("repair returns nil for a transcript file that doesn't exist")
+    func repairReturnsNilForMissingFile() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+
+        let repaired = PiSessionService.repairTranscriptForResume(
+            transcriptPath: sessionsRoot.appendingPathComponent("proj/missing.jsonl").path,
+            currentWorkingDirectory: root.path,
+            locations: locations
+        )
+
+        #expect(repaired == nil)
+    }
 }
 
 @Suite("PiSessionService + ProjectsStore conversation binding")

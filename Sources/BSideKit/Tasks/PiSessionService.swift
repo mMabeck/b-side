@@ -180,4 +180,119 @@ public enum PiSessionService {
         }
         return header.id
     }
+
+    // MARK: - Resume-time transcript repair
+
+    /// Repairs `transcriptPath` so `pi --session <path>` can resume it from
+    /// `currentWorkingDirectory`, and returns the path to hand to
+    /// `launchCommand` afterwards.
+    ///
+    /// `pi` refuses to resume a transcript whose header `cwd` no longer
+    /// matches where it's about to run (it prints "Stored session working
+    /// directory does not exist" and exits 1) — which happens whenever
+    /// `TaskAutoRenameService.applyRename` has moved the task's worktree
+    /// since the transcript was created. This is deliberately called only at
+    /// resume time, never during the rename itself: the rename runs moments
+    /// after the user's first prompt, while `pi` is still the live writer of
+    /// that file, so rewriting it then would race with pi's own appends. By
+    /// resume time no process owns the file.
+    ///
+    /// Compares paths with symlinks resolved, since macOS reports `/tmp/x`
+    /// as `/private/tmp/x` and pi stores the resolved form. A no-op (returns
+    /// `transcriptPath` unchanged) when the header already matches.
+    /// Otherwise rewrites only the header line's `cwd` field — every other
+    /// field and every other line is preserved byte-for-byte — and moves the
+    /// file into the sessions subdirectory for the new cwd (see
+    /// `sessionsSubdirectoryName(forCWD:)`).
+    ///
+    /// Returns `nil` when `transcriptPath` doesn't exist, can't be read, or
+    /// doesn't start with a parseable `{"type":"session",...}` header —
+    /// callers should treat that as "no usable transcript" and fall back to
+    /// starting a fresh session rather than launching a command that's
+    /// guaranteed to exit 1.
+    public static func repairTranscriptForResume(
+        transcriptPath: String,
+        currentWorkingDirectory: String,
+        locations: Locations
+    ) -> String? {
+        let fileManager = FileManager.default
+        let originalURL = URL(fileURLWithPath: transcriptPath)
+        guard fileManager.fileExists(atPath: originalURL.path),
+              let data = try? Data(contentsOf: originalURL),
+              !data.isEmpty
+        else {
+            return nil
+        }
+
+        let headerData: Data
+        let restData: Data
+        if let newlineIndex = data.firstIndex(of: UInt8(ascii: "\n")) {
+            headerData = data[data.startIndex..<newlineIndex]
+            restData = data[data.index(after: newlineIndex)...]
+        } else {
+            headerData = data
+            restData = Data()
+        }
+
+        guard var header = (try? JSONSerialization.jsonObject(with: headerData)) as? [String: Any],
+              header["type"] as? String == "session",
+              let existingCWD = header["cwd"] as? String
+        else {
+            return nil
+        }
+
+        let resolvedExisting = URL(fileURLWithPath: existingCWD).resolvingSymlinksInPath().path
+        let resolvedCurrent = URL(fileURLWithPath: currentWorkingDirectory).resolvingSymlinksInPath().path
+        guard resolvedExisting != resolvedCurrent else { return transcriptPath }
+
+        header["cwd"] = resolvedCurrent
+        guard let newHeaderData = try? JSONSerialization.data(withJSONObject: header) else { return nil }
+
+        var newFileData = newHeaderData
+        newFileData.append(UInt8(ascii: "\n"))
+        newFileData.append(restData)
+
+        let destinationDirectory = locations.sessionsRoot.appendingPathComponent(
+            sessionsSubdirectoryName(forCWD: resolvedCurrent),
+            isDirectory: true
+        )
+        let destinationURL = destinationDirectory.appendingPathComponent(originalURL.lastPathComponent)
+
+        do {
+            try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+            try newFileData.write(to: destinationURL, options: .atomic)
+            if destinationURL.path != originalURL.path {
+                try? fileManager.removeItem(at: originalURL)
+            }
+        } catch {
+            return nil
+        }
+
+        return destinationURL.path
+    }
+
+    /// Pi's sessions-subdirectory naming rule for a working directory,
+    /// observed empirically: `--` + `cwd` with every run of non-alphanumeric
+    /// characters collapsed to a single `-` and leading/trailing `-` trimmed
+    /// + `--`, e.g. `/Users/me/worktrees/task-1` →
+    /// `--Users-me-worktrees-task-1--`.
+    ///
+    /// Only used to know where to *relocate* a repaired transcript to —
+    /// `locateTranscript` never trusts this to *find* one, since an
+    /// imprecise slug here must never be able to break resume.
+    static func sessionsSubdirectoryName(forCWD cwd: String) -> String {
+        var result = ""
+        var lastWasHyphen = true
+        for scalar in cwd.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                result.unicodeScalars.append(scalar)
+                lastWasHyphen = false
+            } else if !lastWasHyphen {
+                result.append("-")
+                lastWasHyphen = true
+            }
+        }
+        while result.hasSuffix("-") { result.removeLast() }
+        return "--\(result)--"
+    }
 }
