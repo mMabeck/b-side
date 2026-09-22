@@ -19,6 +19,13 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     public var teardownCommand: String?
     public var archived: Bool
     public var sortPosition: Int
+    /// Set at creation when the task's name was left blank (it fell back to
+    /// the "New Task" placeholder). Watched by `TaskAutoRenameService`/
+    /// `MainAreaView` for the task's first pi prompt, which becomes its name
+    /// exactly once; cleared as soon as that rename is applied or
+    /// definitively skipped (no usable prompt text). Never set for a task
+    /// the user named explicitly.
+    public var awaitingAutoRename: Bool
 
     public init(
         id: Int64? = nil,
@@ -33,7 +40,8 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         setupCommand: String? = nil,
         teardownCommand: String? = nil,
         archived: Bool = false,
-        sortPosition: Int = 0
+        sortPosition: Int = 0,
+        awaitingAutoRename: Bool = false
     ) {
         self.id = id
         self.projectId = projectId
@@ -48,6 +56,7 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         self.teardownCommand = teardownCommand
         self.archived = archived
         self.sortPosition = sortPosition
+        self.awaitingAutoRename = awaitingAutoRename
     }
 }
 
@@ -68,6 +77,7 @@ extension TaskRecord: FetchableRecord, MutablePersistableRecord {
         public static let teardownCommand = Column(CodingKeys.teardownCommand)
         public static let archived = Column(CodingKeys.archived)
         public static let sortPosition = Column(CodingKeys.sortPosition)
+        public static let awaitingAutoRename = Column(CodingKeys.awaitingAutoRename)
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {

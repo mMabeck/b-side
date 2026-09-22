@@ -31,6 +31,12 @@ extension GitCLI {
         _ = try await run(["branch", branch, baseRef], in: path)
     }
 
+    /// Renames a local branch from `branch` to `newName`. Fails if `newName`
+    /// already exists — callers that need uniqueness pick a free name first.
+    public static func renameBranch(_ branch: String, to newName: String, at path: URL) async throws {
+        _ = try await run(["branch", "-m", branch, newName], in: path)
+    }
+
     /// Deletes a local branch. `force` uses `-D` instead of `-d`.
     public static func deleteLocalBranch(_ branch: String, at path: URL, force: Bool = false) async throws {
         _ = try await run(["branch", force ? "-D" : "-d", branch], in: path)

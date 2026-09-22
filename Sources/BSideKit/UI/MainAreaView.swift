@@ -133,8 +133,14 @@ struct MainAreaView: View {
             command: command
         )
 
-        guard conversation.transcriptPath.isEmpty else { return }
-        Task { await Self.resolveTranscriptPath(for: conversation, locations: locations, store: store) }
+        if conversation.transcriptPath.isEmpty {
+            Task { await Self.resolveTranscriptPath(for: conversation, locations: locations, store: store) }
+        }
+        if task.awaitingAutoRename {
+            Task {
+                await Self.watchForAutoRename(taskId: id, project: project, conversation: conversation, locations: locations, store: store)
+            }
+        }
     }
 
     /// Polls the sessions directory for the transcript pi creates shortly
@@ -152,6 +158,39 @@ struct MainAreaView: View {
                 return
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+    }
+
+    /// Watches `conversation`'s transcript for the task's first user prompt
+    /// and, once found, applies the once-only automatic rename it drives
+    /// (see `TaskAutoRenameService`). Only ever started for a task created
+    /// with a blank name (`task.awaitingAutoRename`); stops polling as soon
+    /// as the rename resolves — successfully or not — since
+    /// `ProjectsStore.applyAutoRename` always clears that flag, which this
+    /// loop rechecks against the freshest known task state on every poll.
+    @MainActor
+    private static func watchForAutoRename(
+        taskId: Int64,
+        project: Project,
+        conversation: Conversation,
+        locations: PiSessionService.Locations,
+        store: ProjectsStore
+    ) async {
+        while !Task.isCancelled {
+            guard let task = store.task(withId: taskId), task.awaitingAutoRename else { return }
+
+            if let url = PiSessionService.locateTranscript(sessionID: conversation.sessionId, locations: locations),
+                let data = try? Data(contentsOf: url),
+                let text = String(data: data, encoding: .utf8)
+            {
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+                if let prompt = TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) {
+                    await store.applyAutoRename(task: task, project: project, prompt: prompt)
+                    return
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: 750_000_000)
         }
     }
 
