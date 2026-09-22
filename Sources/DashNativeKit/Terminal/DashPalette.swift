@@ -96,9 +96,18 @@ public struct DashPalette: Equatable, Sendable {
         let selectionBg = definition.selectionBackground.map(RGBColor.init(hex:)) ?? accentColor
         let selectionFg = definition.selectionForeground.map(RGBColor.init(hex:)) ?? background
 
-        let secondaryText = definition.palette[8].map(RGBColor.init(hex:))
-            ?? foreground.blended(toward: background, amount: 0.25)
-        let disabledText = foreground.blended(toward: background, amount: 0.45)
+        // Derived from the theme's own foreground/background, never from a
+        // raw palette slot (ANSI "bright black", palette[8], is meant for
+        // terminal text on the terminal's own background and is sometimes
+        // barely distinguishable from it — see native-rewrite.md's chrome
+        // audit). `ensuringContrast` then guarantees legibility even if this
+        // theme's foreground/background pair is itself unusually close.
+        let secondaryText = foreground
+            .blended(toward: background, amount: 0.25)
+            .ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 4.5)
+        let disabledText = foreground
+            .blended(toward: background, amount: 0.45)
+            .ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 3.0)
 
         func status(base: Int, bright: Int) -> Color {
             let hex = (dark ? definition.palette[bright] : nil) ?? definition.palette[base]
@@ -169,5 +178,31 @@ struct RGBColor: Equatable {
             g: g + (other.g - g) * amount,
             b: b + (other.b - b) * amount
         )
+    }
+
+    /// WCAG contrast ratio between two colours: `(lighter + 0.05) / (darker + 0.05)`,
+    /// always ≥ 1. 4.5:1 is the WCAG AA floor for normal text, 3:1 for large or
+    /// de-emphasised text.
+    func contrastRatio(with other: RGBColor) -> Double {
+        let (lighter, darker) = relativeLuminance >= other.relativeLuminance
+            ? (relativeLuminance, other.relativeLuminance)
+            : (other.relativeLuminance, relativeLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    /// Nudges `self` toward `foreground` until its contrast ratio against
+    /// `background` reaches `minimumRatio`, or until it has all but reached
+    /// `foreground` itself. This is the contrast guarantee for derived chrome
+    /// text: no matter how close together a theme's foreground and background
+    /// are, the text tones this app derives from them cannot land below a
+    /// readable floor — the worst case is that they converge on the theme's
+    /// own foreground colour instead of vanishing into the background.
+    func ensuringContrast(against background: RGBColor, pulledToward foreground: RGBColor, minimumRatio: Double) -> RGBColor {
+        var candidate = self
+        for _ in 0..<24 {
+            guard candidate.contrastRatio(with: background) < minimumRatio else { break }
+            candidate = candidate.blended(toward: foreground, amount: 0.15)
+        }
+        return candidate
     }
 }

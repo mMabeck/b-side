@@ -26,5 +26,8 @@ struct DashNativeApp: App {
         Settings {
             SettingsView()
         }
+        .commands {
+            WindowLayoutCommands()
+        }
     }
 }

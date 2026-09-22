@@ -55,7 +55,7 @@ struct SidebarView: View {
         .scrollContentBackground(.hidden)
         .background(theme.palette.surfaceBackground)
         .toolbar {
-            ToolbarItem {
+            ToolbarItem(placement: .navigation) {
                 Button(action: addProject) {
                     Label("Add Project", systemImage: "plus")
                 }
@@ -126,10 +126,12 @@ struct SidebarView: View {
                     .foregroundStyle(secondary)
             }
             .padding(.vertical, 3)
+            .padding(.horizontal, 4)
             .contentShape(Rectangle())
+            .background(selectionFill(isSelected: isSelected, in: theme.palette))
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? theme.palette.selectionBackground : Color.clear)
+        .listRowBackground(Color.clear)
         .contextMenu {
             Button("New Task…") {
                 taskCreationProject = project
@@ -198,10 +200,12 @@ struct SidebarView: View {
                 }
             }
             .padding(.leading, 4)
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
+            .background(selectionFill(isSelected: isSelected, in: theme.palette))
         }
         .buttonStyle(.plain)
-        .listRowBackground(isSelected ? theme.palette.selectionBackground : Color.clear)
+        .listRowBackground(Color.clear)
         .contextMenu {
             Button("Archive") {
                 Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
@@ -213,6 +217,19 @@ struct SidebarView: View {
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
         }
+    }
+
+    /// The selected row's fill, painted directly on the row's own content
+    /// rather than via `.listRowBackground`/`List`'s built-in selection
+    /// styling — under `.listStyle(.sidebar)` that styling did not reliably
+    /// paint behind these custom `Button` rows, which is how a
+    /// `selectionForeground` meant to sit on `selectionBackground` ended up on
+    /// the bare (and, for some themes, near-black) row background instead.
+    /// Painting the fill ourselves keeps the pairing intact regardless of
+    /// `List`'s internal rendering.
+    private func selectionFill(isSelected: Bool, in palette: DashPalette) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(isSelected ? palette.selectionBackground : Color.clear)
     }
 
     private func addProject() {

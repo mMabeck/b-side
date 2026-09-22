@@ -95,12 +95,100 @@ struct DashPaletteTests {
         let accent = try #require(NSColor(palette.accent).usingColorSpace(.deviceRGB))
         #expect(componentsAreClose(selection, accent, tolerance: 0.01))
     }
+
+    // MARK: - Secondary/disabled text derivation and contrast guarantee
+
+    @Test("Secondary text is not the theme's palette[8], even when that slot is nearly invisible on its background")
+    func secondaryTextIgnoresPaletteIndexEight() throws {
+        // Ayu Mirage: palette[8] ("bright black") is 686868, barely off its
+        // 1f2430 background. If textSecondary were still reading palette[8]
+        // this would land close to it; deriving from foreground instead
+        // should not.
+        let ayuMirage = try #require(GhosttyThemeCatalog.theme(named: "Ayu Mirage"))
+        #expect(ayuMirage.palette[8] == "686868")
+
+        let palette = DashPalette.themed(from: ayuMirage)
+        let secondary = try #require(NSColor(palette.textSecondary).usingColorSpace(.deviceRGB))
+        let bright8 = try #require(NSColor(Color(hex: "686868")).usingColorSpace(.deviceRGB))
+
+        #expect(!componentsAreClose(secondary, bright8, tolerance: 0.05))
+    }
+
+    @Test("Secondary and disabled text meet a readable contrast floor against the background, even for a hostile theme")
+    func hostileThemeStillProducesReadableSecondaryAndDisabledText() throws {
+        // A deliberately hostile theme: foreground and background contrast
+        // normally (like any usable terminal theme), but every ANSI slot,
+        // including index 8, sits right next to the background — exactly the
+        // shape of theme that broke chrome text before this fix, so any
+        // derivation that still trusted the palette instead of deriving from
+        // foreground (backed by the contrast guarantee) would fail here.
+        let hostile = GhosttyThemeDefinition(
+            name: "Hostile",
+            background: "1a1a1a",
+            foreground: "f0f0f0",
+            palette: [8: "1f1f1f"]
+        )
+        let palette = DashPalette.themed(from: hostile)
+        let background = RGBColor(hex: hostile.background)
+        let secondary = rgbColor(from: palette.textSecondary)
+        let disabled = rgbColor(from: palette.textDisabled)
+
+        #expect(secondary.contrastRatio(with: background) >= 4.5 - 0.01)
+        #expect(disabled.contrastRatio(with: background) >= 3.0 - 0.01)
+    }
+
+    // MARK: - Contrast-guarantee helper
+
+    @Test("ensuringContrast leaves a colour untouched once it already clears the minimum ratio")
+    func ensuringContrastNoOpWhenAlreadyReadable() {
+        let background = RGBColor(hex: "000000")
+        let foreground = RGBColor(hex: "ffffff")
+        let alreadyReadable = RGBColor(hex: "aaaaaa")
+
+        let result = alreadyReadable.ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 3.0)
+        #expect(result == alreadyReadable)
+    }
+
+    @Test("ensuringContrast pulls a too-close colour toward the foreground until it clears the minimum ratio")
+    func ensuringContrastPullsTowardForegroundUntilReadable() {
+        let background = RGBColor(hex: "1f2430")
+        let foreground = RGBColor(hex: "cbccc6")
+        let tooClose = RGBColor(hex: "242938")
+
+        #expect(tooClose.contrastRatio(with: background) < 4.5)
+
+        let result = tooClose.ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 4.5)
+        #expect(result.contrastRatio(with: background) >= 4.5 - 0.01)
+    }
+
+    @Test("ensuringContrast still terminates and does no worse when even the foreground can't clear the floor")
+    func ensuringContrastBestEffortWhenForegroundItselfIsUnreadable() {
+        // foreground and background are near-identical: no amount of pulling
+        // toward foreground can reach an unreasonably high floor, but the
+        // helper must still terminate and never end up less readable than
+        // where it started.
+        let background = RGBColor(hex: "202020")
+        let foreground = RGBColor(hex: "212121")
+        let candidate = RGBColor(hex: "202020")
+        let startingRatio = candidate.contrastRatio(with: background)
+
+        let result = candidate.ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 21.0)
+        #expect(result.contrastRatio(with: background) >= startingRatio)
+    }
 }
 
 private func componentsAreClose(_ a: NSColor, _ b: NSColor, tolerance: CGFloat) -> Bool {
     abs(a.redComponent - b.redComponent) < tolerance
         && abs(a.greenComponent - b.greenComponent) < tolerance
         && abs(a.blueComponent - b.blueComponent) < tolerance
+}
+
+/// Recovers an `RGBColor` (this module's internal blend/contrast type) from a
+/// resolved `Color`, for asserting on palette output without exposing test
+/// plumbing in the palette's own API.
+private func rgbColor(from color: Color) -> DashNativeKit.RGBColor {
+    let ns = NSColor(color).usingColorSpace(.deviceRGB) ?? NSColor(color)
+    return DashNativeKit.RGBColor(r: Double(ns.redComponent), g: Double(ns.greenComponent), b: Double(ns.blueComponent))
 }
 
 private extension Color {
