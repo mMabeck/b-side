@@ -1,3 +1,4 @@
+import AppKit
 import GhosttyTheme
 import Foundation
 import Testing
@@ -68,6 +69,41 @@ struct ThemeOverrideTests {
         defaults.set("Ayu Mirage", forKey: AppearanceSettingsKeys.singleThemeName)
 
         #expect(ThemeOverride.currentDirective(defaults: defaults) == .fixed("Ayu Mirage"))
+    }
+
+    @Test("systemPrefersDarkAppearance reads the system's own AppleInterfaceStyle, not NSApp's pinned appearance")
+    func systemPrefersDarkAppearanceIgnoresPinnedAppearance() throws {
+        let suiteName = "ThemeOverrideTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // Pin NSApp to light, exactly as `GhosttyThemeController.reapply()`
+        // does for every resolved theme. If this read went through
+        // `NSApp.effectiveAppearance` instead of `defaults`, it would report
+        // light forever regardless of what the system actually switched to.
+        let previousAppearance = NSApplication.shared.appearance
+        NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        defer { NSApplication.shared.appearance = previousAppearance }
+
+        defaults.set("Dark", forKey: "AppleInterfaceStyle")
+        #expect(GhosttyBridge.systemPrefersDarkAppearance(defaults: defaults) == true)
+
+        defaults.removeObject(forKey: "AppleInterfaceStyle")
+        #expect(GhosttyBridge.systemPrefersDarkAppearance(defaults: defaults) == false)
+    }
+
+    @Test("Adaptive resolution flips with preferDark even while NSApp's appearance is pinned to the opposite value")
+    func adaptiveResolutionFlipsWithPreferDarkWhilePinned() {
+        let previousAppearance = NSApplication.shared.appearance
+        NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        defer { NSApplication.shared.appearance = previousAppearance }
+
+        let directive = GhosttyBridge.ThemeDirective.adaptive(light: "Ayu Light", dark: "Ayu Mirage")
+        let lightResolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: false)
+        let darkResolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: true)
+
+        #expect(lightResolved?.name == "Ayu Light")
+        #expect(darkResolved?.name == "Ayu Mirage")
     }
 
     @Test("An override replaces the config file's own theme directive, keeping the rest of the config")
