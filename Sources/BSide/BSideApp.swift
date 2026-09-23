@@ -54,6 +54,7 @@ struct BSideApp: App {
             WindowLayoutCommands()
             ProjectCommands(store: store)
             NavigationCommands(store: store)
+            TerminalCommands(store: store)
         }
 
         Settings {

@@ -135,25 +135,63 @@ struct SidebarView: View {
         }
     }
 
-    /// A row in the "Active" section: the task's ⌘-digit hint (only the
+    /// A task's derived status and the trailing-edge bits `taskRow` and
+    /// `activeTaskRow` both show alongside it — the single place that combines
+    /// `TaskStatus.derive`'s inputs (subagent summary, vanished-worktree,
+    /// branch sync, needs-attention) so the two rows can never derive a
+    /// task's status differently from one another.
+    private struct TaskStatusInfo {
+        let status: TaskStatus
+        let summary: TaskChildSummary
+        let isVanished: Bool
+        let isMerged: Bool
+        /// `nil` when `isMerged` — the merged pill already covers that case,
+        /// and this is reserved for ahead/behind counts so the two never say
+        /// the same thing twice.
+        let syncText: String?
+    }
+
+    private func taskStatusInfo(for task: TaskRecord) -> TaskStatusInfo {
+        let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
+        let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
+        let syncStatus = task.id.flatMap { store.syncStatusByTask[$0] }
+        let status = TaskStatus.derive(
+            merged: syncStatus?.merged ?? false,
+            isBlocked: summary.isBlocked,
+            isVanished: isVanished,
+            activeChildCount: summary.activeCount,
+            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false
+        )
+        let isMerged = syncStatus?.merged ?? false
+        let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.text(for:))
+        return TaskStatusInfo(status: status, summary: summary, isVanished: isVanished, isMerged: isMerged, syncText: syncText)
+    }
+
+    /// A row in the "Active" section: the same status dot `taskRow` shows,
+    /// its name, and its project's name, since "Active" spans every project
+    /// rather than nesting under one. Selecting it behaves exactly like the
+    /// matching row under its project below. The ⌘-digit shortcut (only the
     /// first 9 entries have one — `NavigationShortcuts` can't address past
-    /// index 8), its name, and its project's name, since "Active" spans
-    /// every project rather than nesting under one. Selecting it behaves
-    /// exactly like the matching row under its project below.
+    /// index 8) is still discoverable, just not via a visible label: it stays
+    /// live in the "Go" menu (`NavigationCommands`) and surfaces here only as
+    /// a `.help` tooltip, so this row's leading column can show status
+    /// instead of a shortcut hint.
     private func activeTaskRow(_ task: TaskRecord, project: Project, shortcutIndex: Int) -> some View {
         let isSelected = store.selectedTaskID == task.id
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
+        let tertiary = theme.palette.textDisabled
         let hint = shortcutIndex < NavigationShortcuts.digitCount ? "⌘\(shortcutIndex + 1)" : nil
+        let info = taskStatusInfo(for: task)
 
         return Button {
             store.selectTask(task, project: project)
         } label: {
             HStack(spacing: 8) {
-                Text(hint ?? "")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(secondary)
-                    .frame(width: 22, alignment: .leading)
+                Circle()
+                    .fill(info.status.color(in: theme.palette))
+                    .frame(width: TaskRowLayout.statusDotDiameter, height: TaskRowLayout.statusDotDiameter)
+                    .frame(width: TaskRowLayout.statusDotColumnWidth, alignment: .center)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.name)
@@ -167,6 +205,15 @@ struct SidebarView: View {
                 }
 
                 Spacer()
+
+                if info.isMerged {
+                    mergedBadge(isSelected: isSelected)
+                } else if let syncText = info.syncText {
+                    Text(syncText)
+                        .font(.caption2)
+                        .foregroundStyle(tertiary)
+                        .lineLimit(1)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -175,6 +222,10 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
+        .help(hint ?? "")
+        .task(id: task.id) {
+            await store.refreshSyncStatus(for: task, project: project)
+        }
     }
 
     /// A project row: just the project's folder name, bold, with the
@@ -275,21 +326,12 @@ struct SidebarView: View {
     /// with a low-opacity guide line, so tasks read as the project's children
     /// rather than its peers — a project is a container, never a terminal.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
-        let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
-        let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
-        let syncStatus = task.id.flatMap { store.syncStatusByTask[$0] }
-        let status = TaskStatus.derive(
-            merged: syncStatus?.merged ?? false,
-            isBlocked: summary.isBlocked,
-            isVanished: isVanished,
-            activeChildCount: summary.activeCount,
-            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false
-        )
-        let isMerged = syncStatus?.merged ?? false
-        // The "merged" pill below already covers the merged case; the
-        // caption text is reserved for ahead/behind counts so the two never
-        // say the same thing twice.
-        let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.text(for:))
+        let info = taskStatusInfo(for: task)
+        let summary = info.summary
+        let isVanished = info.isVanished
+        let status = info.status
+        let isMerged = info.isMerged
+        let syncText = info.syncText
         let isSelected = store.selectedTaskID == task.id
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary

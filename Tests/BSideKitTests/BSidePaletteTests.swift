@@ -137,6 +137,25 @@ struct BSidePaletteTests {
         #expect(disabled.contrastRatio(with: background) >= 3.0 - 0.01)
     }
 
+    // MARK: - statusSuccess hue
+
+    @Test("statusSuccess is pulled into a true-green hue for Ayu Mirage's yellowish-lime ANSI green")
+    func statusSuccessIsGreenForAyuMirage() throws {
+        let ayuMirage = try #require(GhosttyThemeCatalog.theme(named: "Ayu Mirage"))
+        // The raw ANSI bright green this palette would otherwise use —
+        // confirms the fixture actually exercises a yellowish-lime hue
+        // (~80°), not something already green.
+        #expect(ayuMirage.palette[10] == "d5ff80")
+        let rawHue = RGBColor(hex: "d5ff80").hsl.hue
+        #expect(rawHue < 100)
+
+        let palette = BSidePalette.themed(from: ayuMirage)
+        let success = rgbColor(from: palette.statusSuccess)
+        let hue = success.hsl.hue
+
+        #expect(hue >= 120 && hue <= 135)
+    }
+
     // MARK: - Contrast-guarantee helper
 
     @Test("ensuringContrast leaves a colour untouched once it already clears the minimum ratio")

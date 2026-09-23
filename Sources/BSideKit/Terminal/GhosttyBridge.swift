@@ -215,12 +215,42 @@ public enum GhosttyBridge {
     /// project" digit shortcuts before the app's own menu ever saw them.
     /// Ctrl+digits are unbound too on the same defensive basis as `cmd+b`
     /// above, even though Ghostty has no built-in binding for them today.
+    ///
+    /// Cmd+Q and Cmd+W are released for the same underlying reason as every
+    /// entry above: Ghostty's macOS defaults bind `cmd+q` to `quit` and
+    /// `cmd+w` to `close_surface`, which the *terminal surface itself* would
+    /// act on — quitting or tearing down libghostty's own state — before
+    /// AppKit's menu (the standard Quit item, and `TerminalCommands`' own
+    /// Cmd+W) ever sees the key. Left un-unbound, that's exactly the "Cmd+Q
+    /// doesn't quit" symptom: no app code was ignoring the shortcut, the
+    /// surface consumed it first.
+    ///
+    /// Cmd+N and Cmd+Shift+N are released too: Ghostty binds `cmd+n` to
+    /// `new_window` by default, which would otherwise swallow
+    /// `ProjectCommands`' "New Task"/"Add Project…" shortcuts the same way;
+    /// `cmd+shift+n` is unbound defensively alongside it, on the same basis
+    /// as `cmd+opt+b` above, even with no confirmed Ghostty default for it.
+    /// Cmd+H (hide) and Cmd+M (minimize) are standard window/app shortcuts
+    /// with no app menu item of their own here, but are released
+    /// defensively for the same reason — both are exactly the shape of
+    /// standard AppKit shortcut a terminal emulator's defaults are prone to
+    /// binding out from under an embedding app.
+    ///
+    /// Copy/paste/select-all/find (`cmd+c`/`cmd+v`/`cmd+a`/`cmd+f`) are
+    /// deliberately left bound to the terminal: those are exactly the keys a
+    /// focused terminal surface should keep handling itself.
     static let appOwnedKeybinds = """
 
     # Appended by B-Side: see GhosttyBridge.appOwnedKeybinds.
     keybind = cmd+,=unbind
     keybind = cmd+b=unbind
     keybind = cmd+opt+b=unbind
+    keybind = cmd+q=unbind
+    keybind = cmd+w=unbind
+    keybind = cmd+n=unbind
+    keybind = cmd+shift+n=unbind
+    keybind = cmd+h=unbind
+    keybind = cmd+m=unbind
     \(digitUnbinds)
 
     """
