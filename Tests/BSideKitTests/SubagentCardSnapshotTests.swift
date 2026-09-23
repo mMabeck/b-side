@@ -19,14 +19,17 @@ struct SubagentCardSnapshotTests {
 
         let active = ChildRun(id: "active", taskId: 1, agent: "explorer", taskLabel: "Map cache callers", openingLine: "Find every caller of the cache key builder.")
         var activeRun = active
-        activeRun.toolLines = ["search /cacheKey/", "read src/cache/store.ts"]
+        activeRun.toolLines = ["search /cacheKey/", "read src/cache/store.ts", "read src/cache/index.ts", "search invalidate(", "read src/api/handlers.ts", "bash rg -n cacheKey src"]
+        activeRun.latestAssistantText = "Two call sites build the key by hand; checking whether the handlers share the same prefix."
+        activeRun.statistics = RunStatistics(turns: 5, input: 40, output: 1200, contextTokens: 21000, model: "claude-opus-5")
 
         var blockedRun = ChildRun(id: "blocked", taskId: 1, agent: "builder", taskLabel: "Add retry logic", openingLine: "Retry transient failures.")
         blockedRun.toolLines = ["read src/net/client.ts"]
         blockedRun.state = .blocked
 
         var finishedRun = ChildRun(id: "finished", taskId: 1, agent: "reviewer", taskLabel: "Audit recent commits", openingLine: "Check the last three commits.")
-        finishedRun.toolLines = ["bash git log -3", "read CHANGELOG.md"]
+        finishedRun.toolLines = ["bash git log -3", "read CHANGELOG.md", "bash git diff HEAD~3 --stat"]
+        finishedRun.latestAssistantText = "LGTM with nits: one stale comment in store.ts."
         finishedRun.state = .completed
         finishedRun.statistics = RunStatistics(turns: 4, input: 120, output: 900, contextTokens: 8000, model: "claude-bridge/claude-sonnet-5")
 
@@ -40,7 +43,7 @@ struct SubagentCardSnapshotTests {
         .background(theme.palette.windowBackground)
 
         let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 320, height: 560),
+            contentRect: NSRect(x: -20000, y: -20000, width: 320, height: 900),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -50,7 +53,7 @@ struct SubagentCardSnapshotTests {
         // process-global `NSApp.appearance`.
         window.appearance = theme.palette.preferredAppearance
         let hostingView = NSHostingView(rootView: content)
-        hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 560)
+        hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 900)
         window.contentView = hostingView
         window.setIsVisible(true)
         try await Task.sleep(for: .milliseconds(300))

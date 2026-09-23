@@ -18,7 +18,7 @@ struct SubagentCardView: View {
     @State private var isExpanded = false
     @State private var titleSize: CGSize = .zero
 
-    private static let tailLineCount = 5
+    private static let tailLineCount = 8
     /// Horizontal distance from the card's left edge to where the title
     /// chip starts, clearing the rounded corner and leaving the short
     /// `┌─` lead-in segment of stroke visible before it.
@@ -56,13 +56,13 @@ struct SubagentCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             toolLinesView
             statusFooter
         }
         .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -109,7 +109,7 @@ struct SubagentCardView: View {
     }
 
     private var toolLinesView: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             if let openingLine = run.openingLine, !openingLine.isEmpty {
                 Text(openingLine)
                     .font(.system(.caption, design: .monospaced))
@@ -135,15 +135,16 @@ struct SubagentCardView: View {
                 Text(latestText.replacingOccurrences(of: "\n", with: " "))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(isFinished ? dimColor : foregroundColor)
-                    .lineLimit(1)
+                    .lineLimit(isExpanded ? nil : 3)
                     .truncationMode(.tail)
+                    .padding(.top, 2)
             }
         }
     }
 
     private var statusFooter: some View {
         TimelineView(.periodic(from: run.startedAt, by: 1)) { context in
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     statusGlyph
                     Text(statusLabel)
@@ -160,7 +161,7 @@ struct SubagentCardView: View {
                     Text(errorMessage)
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(theme.palette.statusError)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.tail)
                 }
 
