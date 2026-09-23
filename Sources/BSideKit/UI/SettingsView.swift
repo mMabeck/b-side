@@ -72,19 +72,17 @@ private struct AppearanceSettingsTab: View {
             }
 
             if mode == .single {
-                Section("Theme") {
-                    ThemePickerField(selection: $singleThemeName)
+                Section {
+                    ThemePickerField(title: "Theme", selection: $singleThemeName)
                         .onChange(of: singleThemeName) { _, _ in GhosttyThemeController.reapply() }
                 }
             }
 
             if mode == .matchSystem {
-                Section("Light Theme") {
-                    ThemePickerField(selection: $lightThemeName)
+                Section {
+                    ThemePickerField(title: "Light Theme", selection: $lightThemeName)
                         .onChange(of: lightThemeName) { _, _ in GhosttyThemeController.reapply() }
-                }
-                Section("Dark Theme") {
-                    ThemePickerField(selection: $darkThemeName)
+                    ThemePickerField(title: "Dark Theme", selection: $darkThemeName)
                         .onChange(of: darkThemeName) { _, _ in GhosttyThemeController.reapply() }
                 }
             }
