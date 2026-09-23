@@ -62,7 +62,7 @@ struct SubagentEventLineParserTests {
         let line = #"{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"boom"}}"# + "\n"
         let events = parser.consume(Data(line.utf8))
         #expect(events.count == 1)
-        if case let .messageEnd(role, stopReason, errorMessage, toolCalls, text) = events[0] {
+        if case let .messageEnd(role, stopReason, errorMessage, toolCalls, text, _) = events[0] {
             #expect(role == "assistant")
             #expect(stopReason == "error")
             #expect(errorMessage == "boom")
@@ -79,7 +79,7 @@ struct SubagentEventLineParserTests {
         let line = #"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Looking now."},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"ls"}}]}}"# + "\n"
         let events = parser.consume(Data(line.utf8))
         #expect(events.count == 1)
-        if case let .messageEnd(role, _, _, toolCalls, text) = events[0] {
+        if case let .messageEnd(role, _, _, toolCalls, text, _) = events[0] {
             #expect(role == "assistant")
             #expect(text == "Looking now.")
             #expect(toolCalls.count == 1)
