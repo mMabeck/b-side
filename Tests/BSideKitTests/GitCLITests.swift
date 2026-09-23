@@ -22,6 +22,28 @@ struct GitCLITests {
         #expect(worktrees.contains { $0.path.hasSuffix("/wt") && $0.branch == "feature" })
     }
 
+    @Test("remoteTrackingBranches lists remote refs and skips the HEAD symref")
+    func listsRemoteTrackingBranches() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let remoteURL = root.appendingPathComponent("remote.git")
+        _ = try await GitCLI.run(["init", "--bare", remoteURL.path], in: root)
+        _ = try await GitCLI.run(["remote", "add", "origin", remoteURL.path], in: repoURL)
+        _ = try await GitCLI.run(["push", "origin", "main"], in: repoURL)
+        try await GitCLI.createBranch("feature", from: "main", at: repoURL)
+        _ = try await GitCLI.run(["push", "origin", "feature"], in: repoURL)
+        _ = try await GitCLI.run(["fetch", "origin"], in: repoURL)
+        _ = try await GitCLI.run(["remote", "set-head", "origin", "main"], in: repoURL)
+
+        let remoteBranches = try await GitCLI.remoteTrackingBranches(at: repoURL)
+
+        #expect(remoteBranches.contains("origin/main"))
+        #expect(remoteBranches.contains("origin/feature"))
+        #expect(!remoteBranches.contains("origin/HEAD"))
+    }
+
     @Test("branchExists reflects created and deleted branches")
     func branchExistsTracksLifecycle() async throws {
         let root = try TestRepo.makeTempDirectory()
