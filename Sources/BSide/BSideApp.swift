@@ -26,6 +26,11 @@ struct BSideApp: App {
         // first frame.
         NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
 
+        // Cmd+1…9/Ctrl+1…9/Cmd+B/etc. must fire even while a Ghostty terminal
+        // running Pi is first responder — see `MainMenuKeyRouter`'s doc comment
+        // for why `GhosttyBridge.appOwnedKeybinds` alone isn't enough.
+        MainMenuKeyRouter.install()
+
         do {
             let database = try AppDatabase.openStandard()
             store = ProjectsStore(database: database)

@@ -67,6 +67,23 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedTaskID == nil)
     }
 
+    @Test("Reselecting the already-selected task still bumps focusRequestToken")
+    func reselectingSameTaskBumpsFocusToken() async throws {
+        let (store, projectA, _, taskA) = try await makeStore()
+
+        store.selectTask(taskA, project: projectA)
+        let tokenAfterFirstSelect = store.focusRequestToken
+
+        // Same task, same project — selectedTaskID doesn't change value, but
+        // MainAreaView still needs a signal to re-run syncFocus() so a
+        // sidebar click while focus sits elsewhere (see MainAreaView's
+        // FocusRequestKey doc comment) actually moves focus to the terminal.
+        store.selectTask(taskA, project: projectA)
+
+        #expect(store.selectedTaskID == taskA.id)
+        #expect(store.focusRequestToken == tokenAfterFirstSelect + 1)
+    }
+
     @Test("Selecting a task also selects its project")
     func selectingTaskSelectsProject() async throws {
         let (store, projectA, _, taskA) = try await makeStore()

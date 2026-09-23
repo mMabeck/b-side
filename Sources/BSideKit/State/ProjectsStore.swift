@@ -73,6 +73,17 @@ public final class ProjectsStore {
     /// terminal.
     public var selectedTaskID: Int64?
 
+    /// Bumped by every `selectTask(_:project:)`/`selectProject(_:)` call,
+    /// including a reselection of whatever is already selected. `MainAreaView`
+    /// folds this into the id its `.task(id:)` modifier keys off of
+    /// (alongside `selectedTaskID` itself) so `syncFocus()` runs on every
+    /// explicit selection, not only ones that change `selectedTaskID`'s
+    /// value — without it, clicking an already-selected sidebar row while
+    /// focus sits elsewhere (the sidebar list itself, another window, ...)
+    /// would leave keyboard focus wherever it was, since SwiftUI's
+    /// `.task(id:)` only re-runs when its id actually changes.
+    public private(set) var focusRequestToken: Int = 0
+
     /// The project a task-creation sheet should be presented for, or `nil`
     /// when no sheet should be showing. Every trigger — the sidebar's
     /// per-project "+", its context menu, the dashboard's "New Task" button,
@@ -196,6 +207,7 @@ public final class ProjectsStore {
     public func selectProject(_ project: Project) {
         selectedProjectID = project.id
         selectedTaskID = nil
+        focusRequestToken += 1
     }
 
     /// Selects `task` and, since a task's terminal is meaningless without
@@ -207,6 +219,7 @@ public final class ProjectsStore {
         if let id = task.id {
             taskIDsNeedingAttention.remove(id)
         }
+        focusRequestToken += 1
     }
 
     // MARK: - Terminal alerts

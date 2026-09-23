@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -14,6 +15,17 @@ import SwiftUI
 /// switching from task A to task B and back must not kill A's shell. Hosts
 /// are only ever removed from the cache in `purgeHosts`, once their task has
 /// actually been deleted or archived out of `tasksByProject`.
+/// `MainAreaView`'s `.task(id:)` key: `selectedTaskID` alone would skip a
+/// reselection of the already-selected task (SwiftUI's `.task(id:)` only
+/// re-runs when its id's value actually changes), so `token` —
+/// `ProjectsStore.focusRequestToken`, bumped on every `selectTask`/
+/// `selectProject` call — rides along to force a rerun (and so a
+/// `syncFocus()`) every time, not just when the selected task changes.
+private struct FocusRequestKey: Equatable {
+    let taskID: Int64?
+    let token: Int
+}
+
 struct MainAreaView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
@@ -70,7 +82,7 @@ struct MainAreaView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.windowBackground)
-        .task(id: store.selectedTaskID) {
+        .task(id: FocusRequestKey(taskID: store.selectedTaskID, token: store.focusRequestToken)) {
             if case .task(let task, let project) = store.mainSelection {
                 await ensureHost(for: task, project: project)
             }
@@ -84,6 +96,15 @@ struct MainAreaView: View {
             guard let closedID else { return }
             closeHost(taskID: closedID)
             store.acknowledgeTerminalClosed(closedID)
+        }
+        // A task's surface only holds first responder while its window is
+        // key; switching away to another app or window and back leaves the
+        // outgoing responder wherever AppKit put it (often nowhere, or the
+        // window itself) rather than the visible task's terminal — refocus
+        // it deterministically the same way `syncFocus()` does for an
+        // explicit selection change.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            syncFocus()
         }
     }
 
