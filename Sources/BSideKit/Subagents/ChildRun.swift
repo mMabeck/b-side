@@ -39,6 +39,9 @@ public struct ChildRun: Identifiable, Sendable, Equatable {
     public var state: ChildRunState = .active
     public var statistics = RunStatistics()
     public var errorMessage: String?
+    /// The most recent `text` part from an assistant `message_end`, shown in
+    /// the card as a single truncated line beneath the tool calls.
+    public var latestAssistantText: String?
     public let startedAt: Date
     public var endedAt: Date?
 

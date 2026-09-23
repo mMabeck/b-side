@@ -388,14 +388,52 @@ public final class ProjectsStore {
             try await server.start()
             subagentServer = server
             Self.logger.info("Subagent event server listening on \(server.address ?? "?", privacy: .public)")
+            if let address = server.address, let fileURL = Self.subagentEndpointFileURL() {
+                Self.writeSubagentEndpointFile(address: address, to: fileURL)
+            }
         } catch {
             Self.logger.error("Failed to start subagent event server: \(error, privacy: .public)")
         }
     }
 
+    /// The port `subagentServer` binds to changes on every app launch, so
+    /// the Pi-side spawner reads this file (once, per child spawn, after
+    /// checking `BSIDE_SUBAGENT_ENDPOINT`) to find it whenever a task agent
+    /// terminal was already running before the server finished starting.
+    /// `~/Library/Application Support/B-Side/subagent-endpoint`, created
+    /// alongside the app's database directory.
+    static func subagentEndpointFileURL() -> URL? {
+        guard let appSupport = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else { return nil }
+        return appSupport.appendingPathComponent("B-Side", isDirectory: true)
+            .appendingPathComponent("subagent-endpoint", isDirectory: false)
+    }
+
+    static func writeSubagentEndpointFile(address: String, to fileURL: URL) {
+        do {
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try address.write(to: fileURL, atomically: true, encoding: .utf8)
+        } catch {
+            logger.error("Failed to write subagent endpoint file: \(error, privacy: .public)")
+        }
+    }
+
+    static func removeSubagentEndpointFile(at fileURL: URL) {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
     public func stop() {
         observationTask?.cancel()
         observationTask = nil
+        subagentServer?.stop()
+        subagentServer = nil
+        if let fileURL = Self.subagentEndpointFileURL() {
+            Self.removeSubagentEndpointFile(at: fileURL)
+        }
     }
 
     /// Adds `path` as a project. If it is not already a git repository, `git init`s it.

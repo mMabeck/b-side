@@ -389,7 +389,12 @@ public final class TerminalSurfaceHost: ObservableObject {
     ///     the place of `shell -l`. The task agent terminal passes a
     ///     `PiSessionService.launchCommand(...)` here; the bottom drawer's
     ///     scratch terminal leaves this `nil` to keep the plain login shell.
-    public init(workingDirectory: URL, shell: String? = nil, command: String? = nil) {
+    ///   - envVars: Extra environment variables the spawned process (and
+    ///     everything it forks) inherits. The task agent terminal passes
+    ///     `PiSessionService.launchEnvironment(...)` here so its `pi`
+    ///     process can find `SubagentEventServer`; the scratch terminal
+    ///     leaves this empty.
+    public init(workingDirectory: URL, shell: String? = nil, command: String? = nil, envVars: [String: String] = [:]) {
         let resolvedConfig = GhosttyBridge.resolveUserConfig()
         state = TerminalViewState(
             configSource: resolvedConfig.configSource,
@@ -401,6 +406,7 @@ public final class TerminalSurfaceHost: ObservableObject {
         state.configuration = TerminalSurfaceOptions(
             backend: .exec,
             workingDirectory: workingDirectory.path,
+            envVars: envVars,
             command: command ?? "\(resolvedShell) -l"
         )
 

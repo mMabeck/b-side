@@ -186,7 +186,8 @@ struct MainAreaView: View {
         guard hostsByTaskID[id] == nil else { return }
         hostsByTaskID[id] = TerminalSurfaceHost(
             workingDirectory: workingDirectory,
-            command: command
+            command: command,
+            envVars: PiSessionService.launchEnvironment(taskId: id, subagentEndpoint: store.subagentServer?.address)
         )
         store.noteTerminalOpened(taskID: id)
 

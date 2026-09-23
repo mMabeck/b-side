@@ -87,6 +87,17 @@ struct SubagentFeedStoreTests {
         #expect(store.runs(forTask: 1).first?.toolLines == ["$ ls"])
     }
 
+    @Test("An assistant message_end text part is kept as the run's latest assistant text")
+    func messageEndTextUpdatesLatestAssistantText() {
+        let store = SubagentFeedStore()
+        store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
+        store.ingest(taskId: 1, childId: "c1", event: .messageEnd(role: "assistant", stopReason: nil, errorMessage: nil, toolCalls: [], text: "Found the caller."))
+        #expect(store.runs(forTask: 1).first?.latestAssistantText == "Found the caller.")
+
+        store.ingest(taskId: 1, childId: "c1", event: .messageEnd(role: "assistant", stopReason: nil, errorMessage: nil, toolCalls: [], text: "Checked a second file too."))
+        #expect(store.runs(forTask: 1).first?.latestAssistantText == "Checked a second file too.")
+    }
+
     @Test("A tool_execution_end for a toolCallId with no prior message_end does not fabricate a row")
     func executionEventAloneDoesNotFabricateRow() {
         let store = SubagentFeedStore()

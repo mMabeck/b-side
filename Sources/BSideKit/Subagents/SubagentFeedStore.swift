@@ -64,8 +64,11 @@ public final class SubagentFeedStore {
     public func ingest(taskId: Int64, childId: String, event: SubagentEvent) {
         mutate(taskId: taskId, childId: childId) { run in
             switch event {
-            case let .messageEnd(role, stopReason, errorMessage, toolCalls, _):
+            case let .messageEnd(role, stopReason, errorMessage, toolCalls, text):
                 if role == "assistant" {
+                    if let text, !text.isEmpty {
+                        run.latestAssistantText = text
+                    }
                     for call in toolCalls {
                         guard let id = call.id, let name = call.name else { continue }
                         let line = ToolCallLineFormatter.format(toolName: name, args: call.arguments)

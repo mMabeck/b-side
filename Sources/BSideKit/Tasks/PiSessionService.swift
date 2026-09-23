@@ -108,6 +108,23 @@ public enum PiSessionService {
         return "\(shellQuote(binary)) \(sessionFlag) --name \(shellQuote(taskName))"
     }
 
+    /// The environment the task agent terminal's `pi` process needs to find
+    /// this app's `SubagentEventServer` (native-rewrite.md §"Subagents, and
+    /// replacing tmux"): `BSIDE_TASK_ID`, the same `Int64` id
+    /// `SubagentFeedStore`/`SubagentsTabView` key runs by, always set; and
+    /// `BSIDE_SUBAGENT_ENDPOINT`, set only when the server is already
+    /// listening at launch (the Pi-side spawner falls back to reading the
+    /// address file `ProjectsStore` maintains when this is absent — see its
+    /// doc comment). Only the task agent terminal passes this to
+    /// `TerminalSurfaceHost`; the scratch drawer does not.
+    public static func launchEnvironment(taskId: Int64, subagentEndpoint: String?) -> [String: String] {
+        var environment = ["BSIDE_TASK_ID": String(taskId)]
+        if let subagentEndpoint, !subagentEndpoint.isEmpty {
+            environment["BSIDE_SUBAGENT_ENDPOINT"] = subagentEndpoint
+        }
+        return environment
+    }
+
     /// The bottom drawer's scratch terminal keeps this as its default
     /// command; the task agent terminal uses it only as `launchCommand`'s
     /// fallback when no `pi` binary can be found.

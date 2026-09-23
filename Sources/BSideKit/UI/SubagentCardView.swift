@@ -18,7 +18,7 @@ struct SubagentCardView: View {
     @State private var isExpanded = false
     @State private var titleSize: CGSize = .zero
 
-    private static let tailLineCount = 4
+    private static let tailLineCount = 5
     /// Horizontal distance from the card's left edge to where the title
     /// chip starts, clearing the rounded corner and leaving the short
     /// `┌─` lead-in segment of stroke visible before it.
@@ -29,6 +29,10 @@ struct SubagentCardView: View {
     private var foregroundColor: Color { theme.palette.textPrimary }
     private var dimColor: Color { theme.palette.textSecondary }
     private var backgroundColor: Color { theme.palette.elevatedSurfaceBackground.opacity(0.6) }
+
+    /// Header agent name: accent only while the run is actively working, so
+    /// a glance at colour alone tells running cards from finished ones.
+    private var agentNameColor: Color { run.state == .active ? accentColor : foregroundColor }
 
     /// The title patch must be fully opaque. A translucent one lets the border
     /// stroke underneath show through the text, which reads as strikethrough.
@@ -85,7 +89,7 @@ struct SubagentCardView: View {
         HStack(spacing: 4) {
             Text(run.agent)
                 .font(.system(.caption, design: .monospaced, weight: .semibold))
-                .foregroundStyle(accentColor)
+                .foregroundStyle(agentNameColor)
             Text("· \(run.taskLabel)")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(dimColor)
@@ -127,31 +131,57 @@ struct SubagentCardView: View {
                         .textSelection(.enabled)
                 }
             }
+            if let latestText = run.latestAssistantText, !latestText.isEmpty {
+                Text(latestText.replacingOccurrences(of: "\n", with: " "))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(isFinished ? dimColor : foregroundColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
     }
 
     private var statusFooter: some View {
         TimelineView(.periodic(from: run.startedAt, by: 1)) { context in
-            HStack(spacing: 6) {
-                statusGlyph
-                Text(statusLabel)
-                    .font(.system(.caption2, design: .monospaced, weight: run.state == .blocked ? .bold : .regular))
-                    .foregroundStyle(run.state == .blocked ? theme.palette.statusNeedsAttention : dimColor)
-                Text(RunStatisticsFormatter.formatDuration(elapsed(at: context.date)))
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(dimColor)
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    statusGlyph
+                    Text(statusLabel)
+                        .font(.system(.caption2, design: .monospaced, weight: run.state == .blocked ? .bold : .regular))
+                        .foregroundStyle(statusLabelColor)
+                    Text(RunStatisticsFormatter.formatDuration(elapsed(at: context.date)))
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(statusLabelColor)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 2)
 
-            let statsLine = RunStatisticsFormatter.format(run.statistics)
-            if !statsLine.isEmpty && statsLine != "0 turns" {
-                Text(statsLine)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(dimColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                if run.state == .failed, let errorMessage = run.errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(theme.palette.statusError)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                let statsLine = RunStatisticsFormatter.format(run.statistics)
+                if !statsLine.isEmpty && statsLine != "0 turns" {
+                    Text(statsLine)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(dimColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
+        }
+    }
+
+    private var statusLabelColor: Color {
+        switch run.state {
+        case .active: return accentColor
+        case .blocked: return theme.palette.statusNeedsAttention
+        case .failed: return theme.palette.statusError
+        case .completed: return dimColor
         }
     }
 
@@ -178,8 +208,8 @@ struct SubagentCardView: View {
     private var statusLabel: String {
         switch run.state {
         case .active: return "working"
-        case .blocked: return "blocked — needs you"
-        case .completed: return "finished"
+        case .blocked: return "waiting for answer"
+        case .completed: return "done"
         case .failed: return "failed"
         }
     }

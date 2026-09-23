@@ -144,6 +144,18 @@ struct PiSessionServiceTests {
         #expect(command == "/bin/zsh -l")
     }
 
+    @Test("launchEnvironment always sets BSIDE_TASK_ID, and BSIDE_SUBAGENT_ENDPOINT only when an endpoint is given")
+    func launchEnvironmentSetsTaskIdAndOptionalEndpoint() throws {
+        let withEndpoint = PiSessionService.launchEnvironment(taskId: 42, subagentEndpoint: "127.0.0.1:53123")
+        #expect(withEndpoint == ["BSIDE_TASK_ID": "42", "BSIDE_SUBAGENT_ENDPOINT": "127.0.0.1:53123"])
+
+        let withoutEndpoint = PiSessionService.launchEnvironment(taskId: 42, subagentEndpoint: nil)
+        #expect(withoutEndpoint == ["BSIDE_TASK_ID": "42"])
+
+        let withEmptyEndpoint = PiSessionService.launchEnvironment(taskId: 7, subagentEndpoint: "")
+        #expect(withEmptyEndpoint == ["BSIDE_TASK_ID": "7"])
+    }
+
     @Test("resolveBinary prefers the bundled binary over $PATH")
     func resolveBinaryPrefersBundled() throws {
         let locations = PiSessionService.Locations(

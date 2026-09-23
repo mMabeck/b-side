@@ -187,4 +187,39 @@ struct GeneratedKeybindConfigTests {
         }
         #expect(issue == nil)
     }
+
+    /// `envVars` (what `MainAreaView.ensureHost` fills with
+    /// `PiSessionService.launchEnvironment`) must actually reach the
+    /// spawned process's environment, not just get threaded through to
+    /// `TerminalSurfaceOptions` and dropped.
+    @Test func envVarsReachTheSpawnedProcess() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("terminal-host-env-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let marker = dir.appendingPathComponent("env-marker")
+
+        let host = TerminalSurfaceHost(
+            workingDirectory: dir,
+            shell: "/bin/zsh",
+            envVars: PiSessionService.launchEnvironment(taskId: 99, subagentEndpoint: "127.0.0.1:12345")
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 800, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: TerminalHostView(host: host))
+        window.setIsVisible(true)
+        try await Task.sleep(for: .seconds(2))
+
+        _ = host.paste("echo \"$BSIDE_TASK_ID:$BSIDE_SUBAGENT_ENDPOINT\" > \(marker.path)\r")
+        _ = host.sendReturn()
+        try await Task.sleep(for: .seconds(1))
+
+        let contents = try? String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(contents == "99:127.0.0.1:12345")
+
+        window.orderOut(nil)
+    }
 }
