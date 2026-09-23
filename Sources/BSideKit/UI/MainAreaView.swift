@@ -106,6 +106,7 @@ struct MainAreaView: View {
     private func ensureHost(for task: TaskRecord, project: Project) {
         guard let id = task.id, hostsByTaskID[id] == nil else { return }
         hostsByTaskID[id] = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(forTask: task, project: project))
+        store.noteTerminalOpened(taskID: id)
     }
 
     /// Marks the active task's host visible and every other cached host not
@@ -151,9 +152,11 @@ struct MainAreaView: View {
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
-        for id in MainAreaView.idsToPurge(cachedIDs: Set(hostsByTaskID.keys), liveTaskIDs: liveTaskIDs) {
+        let purged = MainAreaView.idsToPurge(cachedIDs: Set(hostsByTaskID.keys), liveTaskIDs: liveTaskIDs)
+        for id in purged {
             hostsByTaskID.removeValue(forKey: id)
         }
+        store.pruneOpenTerminals(removing: purged)
     }
 
     /// Pure so it's directly testable: cached host ids no longer present
