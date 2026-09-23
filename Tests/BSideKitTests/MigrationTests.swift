@@ -12,7 +12,7 @@ struct MigrationTests {
         var migrator = DatabaseMigrator()
         Migrations.register(in: &migrator)
 
-        #expect(migrator.migrations == ["v1_initial_schema"])
+        #expect(migrator.migrations == ["v1_initial_schema", "v2_conversation_session_id", "v3_task_awaiting_auto_rename"])
         try migrator.migrate(dbQueue)
 
         try dbQueue.read { db in
@@ -34,7 +34,7 @@ struct MigrationTests {
         let appliedCount = try dbQueue.read { db in
             try migrator.appliedMigrations(db).count
         }
-        #expect(appliedCount == 1)
+        #expect(appliedCount == 3)
     }
 }
 

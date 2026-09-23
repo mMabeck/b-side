@@ -354,8 +354,12 @@ public final class TerminalSurfaceHost: ObservableObject {
     ///     directory when nothing is selected.
     ///   - shell: Overrides `$SHELL` for testing. Defaults to the user's
     ///     login shell, invoked with `-l` so it reads the same profile files
-    ///     an interactive terminal would.
-    public init(workingDirectory: URL, shell: String? = nil) {
+    ///     an interactive terminal would. Ignored when `command` is given.
+    ///   - command: Overrides the process spawned in the surface, taking
+    ///     the place of `shell -l`. The task agent terminal passes a
+    ///     `PiSessionService.launchCommand(...)` here; the bottom drawer's
+    ///     scratch terminal leaves this `nil` to keep the plain login shell.
+    public init(workingDirectory: URL, shell: String? = nil, command: String? = nil) {
         let resolvedConfig = GhosttyBridge.resolveUserConfig()
         state = TerminalViewState(
             configSource: resolvedConfig.configSource,
@@ -367,7 +371,7 @@ public final class TerminalSurfaceHost: ObservableObject {
         state.configuration = TerminalSurfaceOptions(
             backend: .exec,
             workingDirectory: workingDirectory.path,
-            command: "\(resolvedShell) -l"
+            command: command ?? "\(resolvedShell) -l"
         )
 
         state.onClose = { processAlive in
