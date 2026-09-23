@@ -21,7 +21,8 @@ public struct SettingsView: View {
             NotificationsSettingsTab(theme: theme)
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
-        .frame(width: 560, height: 560)
+        // No shared frame: each tab sets its own size, and the Settings
+        // window resizes per tab like standard macOS preference panes.
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
     }
@@ -38,7 +39,7 @@ private struct GeneralSettingsTab: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: 480, height: 420, alignment: .top)
     }
 }
 
@@ -53,48 +54,78 @@ private struct AppearanceSettingsTab: View {
         ThemeOverrideMode(rawValue: modeRaw) ?? .useConfig
     }
 
+    /// Which slot the theme list edits in ``ThemeOverrideMode/matchSystem``.
+    @State private var editingDark = true
+
+    /// The theme list's selection, routed to whichever stored name the
+    /// current mode uses. Picking a theme while following the Ghostty
+    /// config switches to a single-theme override.
+    private var listSelection: Binding<String?> {
+        Binding(
+            get: {
+                let name = switch mode {
+                case .useConfig: theme.definition?.name ?? ""
+                case .single: singleThemeName
+                case .matchSystem: editingDark ? darkThemeName : lightThemeName
+                }
+                return name.isEmpty ? nil : name
+            },
+            set: { newValue in
+                guard let newValue else { return }
+                switch mode {
+                case .useConfig:
+                    singleThemeName = newValue
+                    modeRaw = ThemeOverrideMode.single.rawValue
+                case .single:
+                    singleThemeName = newValue
+                case .matchSystem:
+                    if editingDark { darkThemeName = newValue } else { lightThemeName = newValue }
+                }
+                GhosttyThemeController.reapply()
+            }
+        )
+    }
+
     var body: some View {
-        Form {
-            Section {
-                Picker("Theme Source", selection: $modeRaw) {
-                    ForEach(ThemeOverrideMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.label).tag(mode.rawValue)
+        HStack(spacing: 0) {
+            ThemeList(selection: listSelection)
+                .frame(width: 220)
+            Divider()
+            Form {
+                Section {
+                    Picker("Theme Source", selection: $modeRaw) {
+                        ForEach(ThemeOverrideMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.label).tag(mode.rawValue)
+                        }
+                    }
+                    .onChange(of: modeRaw) { _, _ in GhosttyThemeController.reapply() }
+
+                    switch mode {
+                    case .useConfig:
+                        LabeledContent("Resolved Theme") {
+                            Text(theme.definition?.name ?? "none (system colours)")
+                                .foregroundStyle(theme.palette.textSecondary)
+                        }
+                    case .single:
+                        LabeledContent("Theme", value: singleThemeName.isEmpty ? "—" : singleThemeName)
+                    case .matchSystem:
+                        Picker("List Edits", selection: $editingDark) {
+                            Text("Light").tag(false)
+                            Text("Dark").tag(true)
+                        }
+                        .pickerStyle(.segmented)
                     }
                 }
-                .onChange(of: modeRaw) { _, _ in GhosttyThemeController.reapply() }
 
-                if mode == .useConfig {
-                    LabeledContent("Resolved Theme") {
-                        Text(theme.definition?.name ?? "none (system colours)")
-                            .foregroundStyle(theme.palette.textSecondary)
-                    }
+                Section("Preview") {
+                    previewContent
                 }
             }
-
-            if mode == .single {
-                Section {
-                    ThemePickerField(title: "Theme", selection: $singleThemeName)
-                        .onChange(of: singleThemeName) { _, _ in GhosttyThemeController.reapply() }
-                }
-            }
-
-            if mode == .matchSystem {
-                Section {
-                    ThemePickerField(title: "Light Theme", selection: $lightThemeName)
-                        .onChange(of: lightThemeName) { _, _ in GhosttyThemeController.reapply() }
-                    ThemePickerField(title: "Dark Theme", selection: $darkThemeName)
-                        .onChange(of: darkThemeName) { _, _ in GhosttyThemeController.reapply() }
-                }
-            }
-
-            Section("Preview") {
-                previewContent
-            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: 720, height: 460)
     }
 
     @ViewBuilder
@@ -112,7 +143,7 @@ private struct AppearanceSettingsTab: View {
             if let definition = ThemeCatalogSource.theme(named: singleThemeName) {
                 ThemePreviewView(definition: definition)
             } else {
-                Text("Pick a theme above to preview it.")
+                Text("Pick a theme from the list to preview it.")
                     .font(.caption)
                     .foregroundStyle(theme.palette.textSecondary)
             }
@@ -133,7 +164,7 @@ private struct AppearanceSettingsTab: View {
             if let definition = ThemeCatalogSource.theme(named: themeName) {
                 ThemePreviewView(definition: definition, scale: 0.52)
             } else {
-                Text("Pick a theme above to preview it.")
+                Text("Pick a theme from the list to preview it.")
                     .font(.caption2)
                     .foregroundStyle(theme.palette.textSecondary)
             }
@@ -152,7 +183,7 @@ private struct AgentSettingsTab: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: 480, height: 420, alignment: .top)
     }
 }
 
@@ -167,7 +198,7 @@ private struct GitSettingsTab: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: 480, height: 420, alignment: .top)
     }
 }
 
@@ -182,7 +213,7 @@ private struct TerminalSettingsTab: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: 480, height: 420, alignment: .top)
     }
 }
 
@@ -245,6 +276,6 @@ private struct NotificationsSettingsTab: View {
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: 480, height: 420, alignment: .top)
     }
 }
