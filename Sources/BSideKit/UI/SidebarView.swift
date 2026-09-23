@@ -134,8 +134,8 @@ struct SidebarView: View {
     /// exactly like the matching row under its project below.
     private func activeTaskRow(_ task: TaskRecord, project: Project, shortcutIndex: Int) -> some View {
         let isSelected = store.selectedTaskID == task.id
-        let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
-        let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
+        let primary = theme.palette.textPrimary
+        let secondary = theme.palette.textSecondary
         let hint = shortcutIndex < NavigationShortcuts.digitCount ? "⌘\(shortcutIndex + 1)" : nil
 
         return Button {
@@ -176,8 +176,8 @@ struct SidebarView: View {
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
         let info = gitInfo.info(forProject: project.id)
         let isSelected = store.selectedProjectID == project.id && store.selectedTaskID == nil
-        let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
-        let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
+        let primary = theme.palette.textPrimary
+        let secondary = theme.palette.textSecondary
 
         return Button {
             store.selectProject(project)
@@ -283,9 +283,9 @@ struct SidebarView: View {
         // say the same thing twice.
         let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.text(for:))
         let isSelected = store.selectedTaskID == task.id
-        let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
-        let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
-        let tertiary = isSelected ? theme.palette.selectionForeground.opacity(0.7) : theme.palette.textDisabled
+        let primary = theme.palette.textPrimary
+        let secondary = theme.palette.textSecondary
+        let tertiary = theme.palette.textDisabled
 
         return Button {
             store.selectTask(task, project: project)
@@ -366,7 +366,7 @@ struct SidebarView: View {
     /// to) tinted into its own background rather than the selection fill,
     /// so it stays legible in both the selected and unselected row states.
     private func mergedBadge(isSelected: Bool) -> some View {
-        let tint = isSelected ? theme.palette.selectionForeground : theme.palette.statusSuccess
+        let tint = theme.palette.statusSuccess
         return HStack(spacing: 2) {
             Image(systemName: "checkmark")
                 .font(.system(size: 8, weight: .bold))
@@ -388,11 +388,14 @@ struct SidebarView: View {
     /// paint behind these custom `Button` rows, which is how a
     /// `selectionForeground` meant to sit on `selectionBackground` ended up on
     /// the bare (and, for some themes, near-black) row background instead.
-    /// Painting the fill ourselves keeps the pairing intact regardless of
-    /// `List`'s internal rendering.
+    /// Painting the fill ourselves keeps it independent of `List`'s internal
+    /// rendering. The fill is a faint wash of the theme's own text colour
+    /// (white-ish on dark themes, dark on light ones) rather than the theme's
+    /// often saturated `selectionBackground`, so selected rows keep their
+    /// normal text colours.
     private func selectionFill(isSelected: Bool, in palette: BSidePalette) -> some View {
         RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(isSelected ? palette.selectionBackground : Color.clear)
+            .fill(isSelected ? palette.textPrimary.opacity(0.12) : Color.clear)
     }
 
     /// The persistent "Add Project" row pinned below the list — not a `List`
