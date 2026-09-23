@@ -30,6 +30,19 @@ struct SidebarView: View {
                 emptyProjectsState
             } else {
                 List {
+                    if !activeTaskEntries.isEmpty {
+                        Section {
+                            ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
+                                activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
+                            }
+                        } header: {
+                            Text("Active")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(theme.palette.textSecondary)
+                                .textCase(.uppercase)
+                        }
+                    }
+
                     ForEach(store.projects) { project in
                         let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
                         let isExpandedBinding = Binding<Bool>(
@@ -100,6 +113,62 @@ struct SidebarView: View {
         }
     }
 
+    /// Open task terminals in the order they were opened, paired with the
+    /// task and owning project each id resolves to — the same order
+    /// `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes into, so a
+    /// row's position here always matches the ⌘-digit that selects it.
+    /// Entries whose task has since been archived/deleted resolve to `nil`
+    /// and are dropped rather than shown as a dead row; `MainAreaView`
+    /// prunes `openTerminalTaskIDs` on the same event, so that's normally
+    /// momentary at most.
+    private var activeTaskEntries: [(taskID: Int64, task: TaskRecord, project: Project)] {
+        store.openTerminalTaskIDs.compactMap { id in
+            store.taskAndProject(forID: id).map { (taskID: id, task: $0.task, project: $0.project) }
+        }
+    }
+
+    /// A row in the "Active" section: the task's ⌘-digit hint (only the
+    /// first 9 entries have one — `NavigationShortcuts` can't address past
+    /// index 8), its name, and its project's name, since "Active" spans
+    /// every project rather than nesting under one. Selecting it behaves
+    /// exactly like the matching row under its project below.
+    private func activeTaskRow(_ task: TaskRecord, project: Project, shortcutIndex: Int) -> some View {
+        let isSelected = store.selectedTaskID == task.id
+        let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
+        let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
+        let hint = shortcutIndex < NavigationShortcuts.digitCount ? "⌘\(shortcutIndex + 1)" : nil
+
+        return Button {
+            store.selectTask(task, project: project)
+        } label: {
+            HStack(spacing: 8) {
+                Text(hint ?? "")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(secondary)
+                    .frame(width: 22, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(task.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(primary)
+                        .lineLimit(1)
+                    Text(project.displayName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(selectionFill(isSelected: isSelected, in: theme.palette))
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(Color.clear)
+    }
+
     /// A project row: name, branch (with a `*` if dirty), and path in
     /// progressively dimmer text, styled after cmux's project list (e.g.
     /// `dotfiles` / `main*` / `~/Claude/dotfiles`). Selection reads as a
@@ -130,11 +199,12 @@ struct SidebarView: View {
                     .font(.caption)
                     .foregroundStyle(secondary)
             }
-            .padding(.vertical, 5)
+            .padding(.vertical, 8)
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
         }
+        .padding(.top, 6)
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
         .contextMenu {
@@ -207,7 +277,11 @@ struct SidebarView: View {
             isVanished: isVanished,
             activeChildCount: summary.activeCount
         )
-        let syncText = syncStatus.flatMap(BranchSyncSummary.text(for:))
+        let isMerged = syncStatus?.merged ?? false
+        // The "merged" pill below already covers the merged case; the
+        // caption text is reserved for ahead/behind counts so the two never
+        // say the same thing twice.
+        let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.text(for:))
         let isSelected = store.selectedTaskID == task.id
         let primary = isSelected ? theme.palette.selectionForeground : theme.palette.textPrimary
         let secondary = isSelected ? theme.palette.selectionForeground.opacity(0.85) : theme.palette.textSecondary
@@ -243,6 +317,10 @@ struct SidebarView: View {
                         .foregroundStyle(secondary)
                 }
 
+                if isMerged {
+                    mergedBadge(isSelected: isSelected)
+                }
+
                 if let syncText {
                     Text(syncText)
                         .font(.caption2)
@@ -250,7 +328,8 @@ struct SidebarView: View {
                 }
             }
             .padding(.leading, Self.taskLeadingIndent)
-            .padding(.vertical, 2)
+            .padding(.trailing, 8)
+            .padding(.vertical, 9)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
             .overlay(alignment: .leading) {
@@ -277,6 +356,30 @@ struct SidebarView: View {
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
         }
+    }
+
+    /// A small "Merged" pill for a task whose branch is already merged —
+    /// the status dot alone (a green dot, same colour family as "running"'s
+    /// blue) and the tiny caption2 "merged" text it used to share the
+    /// trailing edge with were both too quiet to read at a glance. Uses
+    /// `statusSuccess` (the same colour `TaskStatus.finished` already maps
+    /// to) tinted into its own background rather than the selection fill,
+    /// so it stays legible in both the selected and unselected row states.
+    private func mergedBadge(isSelected: Bool) -> some View {
+        let tint = isSelected ? theme.palette.selectionForeground : theme.palette.statusSuccess
+        return HStack(spacing: 2) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 8, weight: .bold))
+            Text("Merged")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tint.opacity(isSelected ? 0.22 : 0.15))
+        )
     }
 
     /// The selected row's fill, painted directly on the row's own content
