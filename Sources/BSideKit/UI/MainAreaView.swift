@@ -139,8 +139,8 @@ struct MainAreaView: View {
         let locations = PiSessionService.Locations.standard()
         let workingDirectory = MainAreaView.resolvedDirectory(forTask: task, project: project)
 
-        // A prior auto-rename may have moved this task's worktree since the
-        // transcript was written, leaving its header `cwd` stale, and/or the
+        // A task renamed before this worktree directory stopped moving may
+        // still have a transcript whose header `cwd` is stale, and/or the
         // bounded poll in `resolveTranscriptPath` below may never have caught
         // up with a transcript pi already wrote — `resolveTranscriptForResume`
         // handles both by scanning for the transcript by session id and

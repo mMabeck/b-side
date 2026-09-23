@@ -117,6 +117,18 @@ public enum TaskWorktreeService {
     /// state can't spin the dedupe loop forever.
     static let maxUniqueSlugAttempts = 1000
 
+    /// A stable, neutral slug for a task created with a blank name —
+    /// `new-task-<4 hex chars>` — rather than one derived from the
+    /// placeholder "New Task" title. Its worktree directory is never renamed
+    /// (see `TaskAutoRenameService`), so this name has to be a permanent,
+    /// content-free identifier from the start instead of something that
+    /// would read oddly once the task's real name is applied later.
+    static func randomNewTaskSlug() -> String {
+        let hexDigits = Array("0123456789abcdef")
+        let suffix = String((0..<4).map { _ in hexDigits.randomElement()! })
+        return "new-task-\(suffix)"
+    }
+
     /// A variant of `baseSlug` whose worktree directory and `task/`-prefixed
     /// branch name are both free, suffixing with `-2`, `-3`, … so repeated task
     /// names — notably the blank-name placeholder "New Task" — get distinct
@@ -144,6 +156,12 @@ public enum TaskWorktreeService {
     ///
     /// If `useWorktree` is false, the task runs in-place: no branch or worktree is
     /// created, and the project's own path and current branch are used.
+    ///
+    /// `baseSlugOverride`, when given, is used as the base slug for the
+    /// worktree directory and branch instead of one derived from `taskName`
+    /// — used for tasks created with a blank name so their worktree
+    /// directory gets a stable, neutral name (`new-task-<hex>`) rather than
+    /// one derived from the "New Task" placeholder title.
     @discardableResult
     public static func createWorktree(
         for project: Project,
@@ -152,6 +170,7 @@ public enum TaskWorktreeService {
         existingBranch: String? = nil,
         useWorktree: Bool = true,
         setupCommand: String? = nil,
+        baseSlugOverride: String? = nil,
         onOutput: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> WorktreeSetupResult {
         let projectURL = URL(fileURLWithPath: project.path)
@@ -166,7 +185,7 @@ public enum TaskWorktreeService {
             )
         }
 
-        let baseSlug = slug(forTaskName: taskName)
+        let baseSlug = baseSlugOverride ?? slug(forTaskName: taskName)
         let taskSlug = await uniqueSlug(forProjectAt: project.path, baseSlug: baseSlug)
         let worktreePathString = worktreePath(forProjectAt: project.path, slug: taskSlug)
         let worktreeURL = URL(fileURLWithPath: worktreePathString)

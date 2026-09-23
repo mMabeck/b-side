@@ -118,8 +118,8 @@ struct TaskAutoRenameServiceTitleTests {
 
 @Suite("TaskAutoRenameService applyRename")
 struct TaskAutoRenameServiceApplyRenameTests {
-    @Test("renames the branch and moves the worktree, persisting the new paths")
-    func renamesBranchAndMovesWorktree() async throws {
+    @Test("renames the branch but never moves the worktree directory")
+    func renamesBranchButKeepsWorktreePath() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
 
@@ -149,64 +149,17 @@ struct TaskAutoRenameServiceApplyRenameTests {
         #expect(renamed.name == "Fix the login bug")
         #expect(renamed.awaitingAutoRename == false)
         #expect(renamed.branchName == "task/fix-the-login-bug")
-        #expect(renamed.worktreePath == "\(repoURL.path)-worktrees/fix-the-login-bug")
 
-        #expect(FileManager.default.fileExists(atPath: renamed.worktreePath))
-        #expect(!FileManager.default.fileExists(atPath: task.worktreePath))
-
-        let currentBranch = await GitCLI.currentBranch(at: URL(fileURLWithPath: renamed.worktreePath))
-        #expect(currentBranch == "task/fix-the-login-bug")
-
-        let oldBranchExists = try await GitCLI.branchExists(task.branchName, at: repoURL)
-        #expect(oldBranchExists == false)
-    }
-
-    @Test("a worktree move failure after a successful branch rename still persists the new branch name")
-    func persistsBranchRenameWhenWorktreeMoveFails() async throws {
-        let root = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(root) }
-
-        let repoURL = try await TestRepo.makeRepo(in: root)
-        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
-
-        let setupResult = try await TaskWorktreeService.createWorktree(
-            for: project,
-            taskName: "New Task",
-            baseRef: "main"
-        )
-
-        let task = TaskRecord(
-            id: 1,
-            projectId: 1,
-            name: "New Task",
-            branchName: setupResult.branchName,
-            branchCreatedByApp: setupResult.branchCreatedByApp,
-            worktreePath: setupResult.worktreePath,
-            harness: "claude",
-            permissionLevel: "default",
-            awaitingAutoRename: true
-        )
-
-        // `git worktree move` refuses to move a locked worktree, so locking it
-        // makes the move fail while the branch rename (a separate, already-
-        // applied git step) still succeeds.
-        _ = try await GitCLI.run(["worktree", "lock", task.worktreePath], in: repoURL)
-
-        let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: "Fix the login bug")
-
-        #expect(renamed.name == "Fix the login bug")
-        #expect(renamed.awaitingAutoRename == false)
-
-        // The branch rename succeeded on disk, so the persisted record must name
-        // the branch that actually exists — not the old, now-nonexistent one.
-        #expect(renamed.branchName == "task/fix-the-login-bug")
-        let oldBranchExists = try await GitCLI.branchExists(task.branchName, at: repoURL)
-        #expect(oldBranchExists == false)
-
-        // The worktree move failed, so the worktree is still at its original path.
+        // The worktree directory must never move — doing so out from under a
+        // live pi process breaks its tools and its session transcript lookup.
         #expect(renamed.worktreePath == task.worktreePath)
+        #expect(FileManager.default.fileExists(atPath: renamed.worktreePath))
+
         let currentBranch = await GitCLI.currentBranch(at: URL(fileURLWithPath: renamed.worktreePath))
         #expect(currentBranch == "task/fix-the-login-bug")
+
+        let oldBranchExists = try await GitCLI.branchExists(task.branchName, at: repoURL)
+        #expect(oldBranchExists == false)
     }
 
     @Test("a task without its own worktree renames its name only")
@@ -272,7 +225,7 @@ struct TaskAutoRenameServiceApplyRenameTests {
         #expect(FileManager.default.fileExists(atPath: task.worktreePath))
     }
 
-    @Test("dedupes against an already-taken directory/branch name by suffixing")
+    @Test("dedupes against an already-taken branch name by suffixing")
     func dedupesAgainstAnAlreadyTakenName() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
@@ -280,7 +233,7 @@ struct TaskAutoRenameServiceApplyRenameTests {
         let repoURL = try await TestRepo.makeRepo(in: root)
         let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
 
-        // An unrelated existing task already occupies the slug the rename would target.
+        // An unrelated existing task already occupies the branch the rename would target.
         _ = try await TaskWorktreeService.createWorktree(for: project, taskName: "Fix the bug", baseRef: "main")
 
         let setupResult = try await TaskWorktreeService.createWorktree(
@@ -303,8 +256,8 @@ struct TaskAutoRenameServiceApplyRenameTests {
         let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: "Fix the bug")
 
         #expect(renamed.branchName == "task/fix-the-bug-2")
-        #expect(renamed.worktreePath == "\(repoURL.path)-worktrees/fix-the-bug-2")
-        #expect(FileManager.default.fileExists(atPath: renamed.worktreePath))
+        // The worktree directory never moves, dedupe or not.
+        #expect(renamed.worktreePath == task.worktreePath)
     }
 }
 
@@ -353,6 +306,32 @@ struct ProjectsStoreAutoRenameTests {
         #expect(refetchedNamed?.name == "Explicit name")
     }
 
+    @Test("a blank-name task gets a stable new-task-<hex> worktree directory, not one derived from the placeholder title")
+    func blankNameTaskGetsNeutralWorktreeSlug() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let database = try AppDatabase.openInMemory()
+        let project = Project(path: repoURL.path, displayName: "repo", baseRef: "main")
+        let insertedProject = try await database.dbQueue.write { db -> Project in
+            var project = project
+            try project.insert(db)
+            return project
+        }
+
+        let store = await ProjectsStore(database: database)
+        let task = try await store.createTask(project: insertedProject, name: "")
+
+        let expectedPrefix = "\(repoURL.path)-worktrees/new-task-"
+        #expect(task.worktreePath.hasPrefix(expectedPrefix))
+        let slug = String(task.worktreePath.dropFirst(expectedPrefix.count))
+        #expect(slug.count == 4)
+        #expect(slug.allSatisfy { $0.isHexDigit })
+        #expect(task.branchName == "task/new-task-\(slug)")
+        #expect(FileManager.default.fileExists(atPath: task.worktreePath))
+    }
+
     @Test("applyAutoRename with a degenerate prompt clears the flag and leaves the placeholder name")
     func degeneratePromptLeavesPlaceholderName() async throws {
         let root = try TestRepo.makeTempDirectory()
@@ -380,10 +359,10 @@ struct ProjectsStoreAutoRenameTests {
     }
 }
 
-@Suite("Auto-rename doesn't disturb pi session resume")
+@Suite("Resuming a task whose worktree was already moved by an older build")
 struct AutoRenameSessionResumeTests {
-    @Test("resuming after a rename repairs the transcript's header cwd so pi doesn't refuse to resume it")
-    func resumeStillTargetsSameTranscriptAfterRename() async throws {
+    @Test("resuming a task whose worktree was moved by a pre-fix auto-rename still repairs the transcript's header cwd")
+    func resumeStillTargetsSameTranscriptAfterLegacyMove() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
 
@@ -432,19 +411,26 @@ struct AutoRenameSessionResumeTests {
             pathBinaryFinder: { nil }
         )
 
-        let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: "Fix the login bug")
-        #expect(renamed.worktreePath != task.worktreePath)
+        // Simulate a task whose worktree was already relocated by an older
+        // build's auto-rename, before it stopped moving worktree
+        // directories — `TaskAutoRenameService.applyRename` no longer does
+        // this itself, but tasks already moved by a prior version still need
+        // to resume correctly.
+        let movedWorktreePath = "\(repoURL.path)-worktrees/fix-the-login-bug"
+        try await GitCLI.moveWorktree(
+            from: URL(fileURLWithPath: task.worktreePath),
+            to: URL(fileURLWithPath: movedWorktreePath),
+            in: repoURL
+        )
 
-        // The repair happens at resume time, not during the rename itself —
-        // `applyRename` above must not have touched the transcript at all.
         #expect(try Data(contentsOf: originalTranscriptURL) == "\(header)\n\(bodyLine)\n".data(using: .utf8))
 
         let repairedPath = PiSessionService.repairTranscriptForResume(
             transcriptPath: conversation.transcriptPath,
-            currentWorkingDirectory: renamed.worktreePath,
+            currentWorkingDirectory: movedWorktreePath,
             locations: locations
         )
-        let resolvedNewWorktreePath = URL(fileURLWithPath: renamed.worktreePath).resolvingSymlinksInPath().path
+        let resolvedNewWorktreePath = URL(fileURLWithPath: movedWorktreePath).resolvingSymlinksInPath().path
 
         let repairedPathValue = try #require(repairedPath)
         let repairedContents = try String(contentsOf: URL(fileURLWithPath: repairedPathValue), encoding: .utf8)
@@ -462,7 +448,7 @@ struct AutoRenameSessionResumeTests {
             locations: locations,
             sessionID: conversation.sessionId,
             transcriptPath: repairedPathValue,
-            taskName: renamed.name
+            taskName: task.name
         )
         #expect(afterRenameCommand.contains("--session '\(repairedPathValue)'"))
     }

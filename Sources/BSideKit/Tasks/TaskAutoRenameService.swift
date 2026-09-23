@@ -3,8 +3,12 @@ import OSLog
 
 /// Automatic task renaming from a task's first pi prompt: a task created
 /// with a blank name (`TaskRecord.awaitingAutoRename`) is renamed once its
-/// user types their first prompt into its agent terminal, and its worktree
-/// directory and app-created branch are renamed to match.
+/// user types their first prompt into its agent terminal, and its
+/// app-created branch is renamed to match. The worktree directory itself is
+/// never moved — moving it out from under a live pi process breaks pi's
+/// tools (stale cwd) and its session transcript lookup, so the directory
+/// stays put for the lifetime of the task, the same way Claude Desktop and
+/// Codex keep a stable worktree path and only rename title and branch.
 ///
 /// The transcript parsing and title derivation below are pure and call no
 /// model; only `applyRename` touches git or the filesystem.
@@ -109,19 +113,15 @@ public enum TaskAutoRenameService {
     // MARK: - Applying the rename
 
     /// Renames `task` to `newName`, and \u2014 when it has its own worktree on a
-    /// branch the app created \u2014 renames that branch and moves the worktree
-    /// directory to match, deduping against any existing branch/directory the
-    /// same way `TaskWorktreeService.createWorktree` does. Always clears
+    /// branch the app created \u2014 renames that branch to match, deduping
+    /// against any existing branch the same way
+    /// `TaskWorktreeService.createWorktree` does. The worktree directory
+    /// itself (`task.worktreePath`) is never touched. Always clears
     /// `awaitingAutoRename` on the returned record, so a caller persisting it
     /// never re-fires this for the same task.
     ///
-    /// Runs in place (task name only, no git/filesystem calls) when the task
-    /// has no worktree of its own or its branch predates the app. The branch
-    /// rename and worktree move are applied \u2014 and persisted to the returned
-    /// record \u2014 independently: a git failure is logged, and if it happens
-    /// after the branch rename already succeeded, the returned record's
-    /// `branchName` still reflects that so it never names a branch that no
-    /// longer exists on disk.
+    /// Runs in place (task name only, no git calls) when the task has no
+    /// worktree of its own or its branch predates the app.
     public static func applyRename(task: TaskRecord, project: Project, newName: String) async -> TaskRecord {
         var updated = task
         updated.name = newName
@@ -135,13 +135,11 @@ public enum TaskAutoRenameService {
         let newSlug = await uniqueSlug(
             baseSlug: baseSlug,
             projectPath: project.path,
-            currentWorktreePath: task.worktreePath,
             currentBranchName: task.branchName
         )
         let newBranchName = "task/\(newSlug)"
-        let newWorktreePath = TaskWorktreeService.worktreePath(forProjectAt: project.path, slug: newSlug)
 
-        guard newBranchName != task.branchName || newWorktreePath != task.worktreePath else {
+        guard newBranchName != task.branchName else {
             return updated
         }
 
@@ -149,51 +147,33 @@ public enum TaskAutoRenameService {
 
         do {
             try await GitCLI.renameBranch(task.branchName, to: newBranchName, at: projectURL)
-            // Persisted immediately: the branch has already been renamed on
-            // disk, so the record must say so even if the worktree move below fails.
             updated.branchName = newBranchName
         } catch {
             logger.error(
                 "Auto-rename branch rename failed for task \(task.id ?? -1, privacy: .public): \(error, privacy: .public)"
-            )
-            return updated
-        }
-
-        do {
-            try await GitCLI.moveWorktree(
-                from: URL(fileURLWithPath: task.worktreePath),
-                to: URL(fileURLWithPath: newWorktreePath),
-                in: projectURL
-            )
-            updated.worktreePath = newWorktreePath
-        } catch {
-            logger.error(
-                "Auto-rename worktree move failed for task \(task.id ?? -1, privacy: .public): \(error, privacy: .public)"
             )
         }
 
         return updated
     }
 
-    /// A slug derived from `baseSlug` whose worktree directory and branch
-    /// name are both free, suffixing with `-2`, `-3`, \u2026 like
-    /// `TaskWorktreeService.uniqueSlug` \u2014 except a candidate that matches the
-    /// task's own current path/branch doesn't count as taken, since that's
-    /// exactly what's being renamed away from.
+    /// A slug derived from `baseSlug` whose `task/`-prefixed branch name is
+    /// free, suffixing with `-2`, `-3`, \u2026 like `TaskWorktreeService.uniqueSlug`
+    /// \u2014 except a candidate that matches the task's own current branch
+    /// doesn't count as taken, since that's exactly what's being renamed
+    /// away from. Directory existence no longer factors in, since renaming
+    /// never moves the worktree directory.
     private static func uniqueSlug(
         baseSlug: String,
         projectPath: String,
-        currentWorktreePath: String,
         currentBranchName: String
     ) async -> String {
         let projectURL = URL(fileURLWithPath: projectPath)
         var candidate = baseSlug
         var suffix = 2
         for _ in 0..<TaskWorktreeService.maxUniqueSlugAttempts {
-            let candidatePath = TaskWorktreeService.worktreePath(forProjectAt: projectPath, slug: candidate)
             let candidateBranch = "task/\(candidate)"
 
-            let pathTaken = candidatePath != currentWorktreePath && FileManager.default.fileExists(atPath: candidatePath)
             let branchTaken: Bool
             if candidateBranch == currentBranchName {
                 branchTaken = false
@@ -201,7 +181,7 @@ public enum TaskAutoRenameService {
                 branchTaken = (try? await GitCLI.branchExists(candidateBranch, at: projectURL)) ?? false
             }
 
-            if !pathTaken && !branchTaken { return candidate }
+            if !branchTaken { return candidate }
             candidate = "\(baseSlug)-\(suffix)"
             suffix += 1
         }
