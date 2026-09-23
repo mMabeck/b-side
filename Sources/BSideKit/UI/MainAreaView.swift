@@ -131,33 +131,29 @@ struct MainAreaView: View {
         guard let conversation = await conversationGate.ensureConversation(for: task, store: store) else { return }
 
         let locations = PiSessionService.Locations.standard()
-        let (workingDirectory, usedProjectFallback) = MainAreaView.resolvedDirectoryDetail(forTask: task, project: project)
+        let workingDirectory = MainAreaView.resolvedDirectory(forTask: task, project: project)
 
         // A prior auto-rename may have moved this task's worktree since the
-        // transcript was written, leaving its header `cwd` stale — repair it
-        // (or fall back to a fresh session) before handing `pi` a command
-        // that's guaranteed to exit 1. See `repairTranscriptForResume`'s doc
-        // comment for why this happens here and not at rename time. Skipped
-        // entirely when `workingDirectory` is itself the project-path
-        // fallback (the task's own worktree is missing): repairing against
-        // that directory would rewrite a perfectly healthy transcript onto a
-        // false premise rather than reflect a genuinely broken one.
-        var transcriptPathForLaunch: String? = conversation.transcriptPath.isEmpty ? nil : conversation.transcriptPath
-        if !conversation.transcriptPath.isEmpty, !usedProjectFallback {
-            transcriptPathForLaunch = await Self.repairTranscriptOffMain(
-                transcriptPath: conversation.transcriptPath,
-                currentWorkingDirectory: workingDirectory.path,
-                locations: locations
-            )
-            if let repairedPath = transcriptPathForLaunch, repairedPath != conversation.transcriptPath {
-                try? await store.recordTranscriptPath(repairedPath, for: conversation)
-            }
+        // transcript was written, leaving its header `cwd` stale, and/or the
+        // bounded poll in `resolveTranscriptPath` below may never have caught
+        // up with a transcript pi already wrote — `resolveTranscriptForResume`
+        // handles both by scanning for the transcript by session id and
+        // repairing its stored cwd before handing `pi` a command that's
+        // otherwise guaranteed to exit 1. See its doc comment for why
+        // `--session-id` is not a safe fallback here.
+        let resolved = await Self.resolveTranscriptForResumeOffMain(
+            conversation: conversation,
+            currentWorkingDirectory: workingDirectory.path,
+            locations: locations
+        )
+        if let pathToPersist = resolved.transcriptPathToPersist {
+            try? await store.recordTranscriptPath(pathToPersist, for: conversation)
         }
 
         let command = PiSessionService.launchCommand(
             locations: locations,
             sessionID: conversation.sessionId,
-            transcriptPath: transcriptPathForLaunch,
+            transcriptPath: resolved.transcriptPathForLaunch,
             taskName: task.name
         )
         guard hostsByTaskID[id] == nil else { return }
@@ -208,30 +204,38 @@ struct MainAreaView: View {
         }.value
     }
 
-    /// Runs `PiSessionService.repairTranscriptForResume` off the main actor
-    /// for the same reason: it reads and rewrites the whole transcript file,
-    /// which real transcripts can grow to tens of megabytes.
-    private static func repairTranscriptOffMain(
-        transcriptPath: String,
+    /// Runs `PiSessionService.resolveTranscriptForResume` off the main actor
+    /// for the same reason: it can scan the whole sessions tree and reads
+    /// and rewrites the whole transcript file, which real transcripts can
+    /// grow to tens of megabytes.
+    private static func resolveTranscriptForResumeOffMain(
+        conversation: Conversation,
         currentWorkingDirectory: String,
         locations: PiSessionService.Locations
-    ) async -> String? {
+    ) async -> PiSessionService.ResolvedTranscript {
         await Task.detached(priority: .utility) {
-            PiSessionService.repairTranscriptForResume(
-                transcriptPath: transcriptPath,
+            PiSessionService.resolveTranscriptForResume(
+                conversation: conversation,
                 currentWorkingDirectory: currentWorkingDirectory,
                 locations: locations
             )
         }.value
     }
 
-    /// Reads `url` as UTF-8 text off the main actor, for the same reason as
-    /// `locateTranscriptOffMain` above — used by `watchForAutoRename` to read
-    /// a transcript that can already be tens of megabytes by its first poll.
-    private static func readTranscriptTextOffMain(url: URL) async -> String? {
+    /// Reads `url` off the main actor and extracts the task's first user
+    /// prompt, for the same reason as `locateTranscriptOffMain` above —
+    /// used by `watchForAutoRename`, which polls every 750ms for up to 30
+    /// minutes, against a transcript that can already be tens of megabytes
+    /// by its first poll. Splitting into lines and parsing happen inside the
+    /// detached work too, not just the read, so none of that repeated cost
+    /// lands on the main actor either.
+    private static func firstUserPromptTextOffMain(url: URL) async -> String? {
         await Task.detached(priority: .utility) {
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return String(data: data, encoding: .utf8)
+            guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            return TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines)
         }.value
     }
 
@@ -261,13 +265,10 @@ struct MainAreaView: View {
             guard let task = store.task(withId: taskId), task.awaitingAutoRename else { return }
 
             if let url = await Self.locateTranscriptOffMain(sessionID: conversation.sessionId, locations: locations),
-                let text = await Self.readTranscriptTextOffMain(url: url)
+                let prompt = await Self.firstUserPromptTextOffMain(url: url)
             {
-                let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-                if let prompt = TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) {
-                    await store.applyAutoRename(task: task, project: project, prompt: prompt)
-                    return
-                }
+                await store.applyAutoRename(task: task, project: project, prompt: prompt)
+                return
             }
 
             try? await Task.sleep(nanoseconds: 750_000_000)
@@ -354,23 +355,12 @@ struct MainAreaView: View {
     /// task terminal should never fail to open just because its worktree
     /// disappeared.
     static func resolvedDirectory(forTask task: TaskRecord, project: Project) -> URL {
-        resolvedDirectoryDetail(forTask: task, project: project).directory
-    }
-
-    /// Same resolution as `resolvedDirectory(forTask:project:)`, plus
-    /// whether it actually used the project-path fallback — callers that
-    /// treat a stale worktree cwd as a signal of a genuinely broken
-    /// transcript (`ensureHost`'s repair step) need to tell "this task's
-    /// worktree is fine but differs" apart from "this task's worktree is
-    /// simply missing", since the fallback directory is never the resumed
-    /// session's real working directory.
-    static func resolvedDirectoryDetail(forTask task: TaskRecord, project: Project) -> (directory: URL, usedProjectFallback: Bool) {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: task.worktreePath, isDirectory: &isDirectory)
         if exists && isDirectory.boolValue {
-            return (URL(fileURLWithPath: task.worktreePath), false)
+            return URL(fileURLWithPath: task.worktreePath)
         }
-        return (URL(fileURLWithPath: project.path), true)
+        return URL(fileURLWithPath: project.path)
     }
 
     /// The directory the terminal drawer's own scratch shell should start

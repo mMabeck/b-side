@@ -199,10 +199,14 @@ public enum PiSessionService {
     ///
     /// Compares paths with symlinks resolved, since macOS reports `/tmp/x`
     /// as `/private/tmp/x` and pi stores the resolved form. A no-op (returns
-    /// `transcriptPath` unchanged) when the header already matches.
-    /// Otherwise rewrites only the header line's `cwd` field — every other
-    /// field and every other line is preserved byte-for-byte — and moves the
-    /// file into the sessions subdirectory for the new cwd (see
+    /// `transcriptPath` unchanged) both when the header already matches, and
+    /// when the header's stored `cwd` is different but still exists on disk
+    /// — that's a genuinely different, still-valid directory (not the
+    /// worktree-got-moved case this exists for), and rewriting a healthy
+    /// transcript on that basis would wrongly relocate it. Otherwise rewrites
+    /// only the header line's `cwd` field — every other field and every
+    /// other line is preserved byte-for-byte — and moves the file into the
+    /// sessions subdirectory for the new cwd (see
     /// `sessionsSubdirectoryName(forCWD:)`).
     ///
     /// Returns `nil` when `transcriptPath` doesn't exist, can't be read, or
@@ -275,6 +279,79 @@ public enum PiSessionService {
         }
 
         return destinationURL.path
+    }
+
+    // MARK: - Resume-time transcript resolution
+
+    /// What `ensureHost` should launch with, and what (if anything) it
+    /// should persist back onto the `Conversation` afterwards.
+    public struct ResolvedTranscript: Equatable, Sendable {
+        /// The path to hand `launchCommand` as `transcriptPath`. `nil` means
+        /// launch with `--session-id` instead — either this is the
+        /// conversation's first launch, or no transcript for its session id
+        /// exists anywhere under `locations.sessionsRoot`.
+        public let transcriptPathForLaunch: String?
+        /// The path to persist onto the `Conversation` via
+        /// `ProjectsStore.recordTranscriptPath`, when it differs from what's
+        /// already stored (freshly located, or relocated by a repair). `nil`
+        /// when nothing changed.
+        public let transcriptPathToPersist: String?
+    }
+
+    /// Resolves which transcript (if any) to resume `conversation` from,
+    /// repairing a stale stored `cwd` along the way.
+    ///
+    /// Looks the transcript up by session id via `locateTranscript` —
+    /// scanning the whole sessions tree — whenever `conversation`'s own
+    /// `transcriptPath` is still empty, rather than depending on it having
+    /// already been captured by `resolveTranscriptPath`'s bounded polling
+    /// loop. That loop is best-effort and gives up after ~10 seconds; a
+    /// reopened task can easily outlive it, and a stale `transcriptPath`
+    /// must never be the reason resume falls back to `--session-id`.
+    ///
+    /// Once a candidate transcript is found, `repairTranscriptForResume`
+    /// decides whether its stored `cwd` needs rewriting to
+    /// `currentWorkingDirectory` (or is fine as-is) — this function only
+    /// decides *whether there is a transcript to hand it at all*.
+    ///
+    /// Falls back to `transcriptPathForLaunch: nil` (i.e. `--session-id`)
+    /// only when no transcript for this session id exists anywhere, or the
+    /// one found is unreadable/malformed. This is deliberately the last
+    /// resort, not a safe default: `pi --session-id <id>` run from a
+    /// directory other than the one the session was created in does not
+    /// find that session by id — lookup is scoped to the working directory
+    /// — it prints "Warning: No project session found with id '<id>';
+    /// creating a new session with that id" and silently starts a brand-new
+    /// *empty* session, exit 0, quietly discarding the entire prior
+    /// conversation. Do not "simplify" this back to always using
+    /// `--session-id`: it looks safe (no crash, no error) precisely because
+    /// it fails silently.
+    public static func resolveTranscriptForResume(
+        conversation: Conversation,
+        currentWorkingDirectory: String,
+        locations: Locations
+    ) -> ResolvedTranscript {
+        let candidatePath: String?
+        if !conversation.transcriptPath.isEmpty {
+            candidatePath = conversation.transcriptPath
+        } else {
+            candidatePath = locateTranscript(sessionID: conversation.sessionId, locations: locations)?.path
+        }
+
+        guard let candidatePath else {
+            return ResolvedTranscript(transcriptPathForLaunch: nil, transcriptPathToPersist: nil)
+        }
+
+        guard let repairedPath = repairTranscriptForResume(
+            transcriptPath: candidatePath,
+            currentWorkingDirectory: currentWorkingDirectory,
+            locations: locations
+        ) else {
+            return ResolvedTranscript(transcriptPathForLaunch: nil, transcriptPathToPersist: nil)
+        }
+
+        let pathToPersist = repairedPath != conversation.transcriptPath ? repairedPath : nil
+        return ResolvedTranscript(transcriptPathForLaunch: repairedPath, transcriptPathToPersist: pathToPersist)
     }
 
     /// Pi's sessions-subdirectory naming rule for a working directory,
