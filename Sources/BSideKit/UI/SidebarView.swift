@@ -282,7 +282,8 @@ struct SidebarView: View {
             merged: syncStatus?.merged ?? false,
             isBlocked: summary.isBlocked,
             isVanished: isVanished,
-            activeChildCount: summary.activeCount
+            activeChildCount: summary.activeCount,
+            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false
         )
         let isMerged = syncStatus?.merged ?? false
         // The "merged" pill below already covers the merged case; the

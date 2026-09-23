@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import GhosttyTerminal
 import GhosttyTheme
@@ -44,7 +45,9 @@ import SwiftUI
 /// | Title change | `TerminalViewState.title` (published) | read, currently unused (no window/tab title binding yet) |
 /// | Surface close | `TerminalViewState.onClose` | logged; removing the surface from the UI is the caller's job, out of scope this stage |
 /// | Clipboard read/write confirmation (OSC 52, `clipboard-write = ask`) | `TerminalViewState.onClipboardConfirmationRequest` | left `nil`: Ghostty's documented default applies — a program's read/write is denied silently, a user-initiated paste is allowed |
-/// | Open URL, bell, desktop notification, mouse shape, scrollbar, focus, resize, grid resize, pwd, hover link, progress report, text selection request | *(no delegate adopted)* | Ghostty's own default behaviour for each; none is claimed as app-handled |
+/// | Bell (OSC 9 falls back to this when a program doesn't emit OSC 777) | `TerminalViewState.bellCount`/`lastBellAt` (published) | republished as `TerminalSurfaceHost.bellCount`; `TerminalAlertBridge` forwards it to `ProjectsStore.handleTerminalBell`, which plays a sound, posts a native notification, and marks the sidebar row needing attention |
+/// | Desktop notification (OSC 777) | `TerminalViewState.lastDesktopNotificationTitle`/`Body`/`At` (published) | republished as `TerminalSurfaceHost.lastDesktopNotification*`; `TerminalAlertBridge` forwards it to `ProjectsStore.handleTerminalDesktopNotification`, classified via `TaskAlertClassifier` into a question or finished alert |
+/// | Open URL, mouse shape, scrollbar, focus, resize, grid resize, pwd, hover link, progress report, text selection request | *(no delegate adopted)* | Ghostty's own default behaviour for each; none is claimed as app-handled |
 public enum GhosttyBridge {
     static let logger = Logger(subsystem: "ai.syv.bside", category: "terminal-theme")
 
@@ -334,6 +337,17 @@ public final class TerminalSurfaceHost: ObservableObject {
 
     let state: TerminalViewState
 
+    /// Republished from `TerminalViewState.bellCount`/`lastDesktopNotification*`
+    /// so a caller (`TerminalAlertBridge`) can observe them without itself
+    /// importing `GhosttyTerminal` — this file remains the only one that
+    /// does, per the doc comment above.
+    @Published public private(set) var bellCount: Int = 0
+    @Published public private(set) var lastDesktopNotificationTitle: String?
+    @Published public private(set) var lastDesktopNotificationBody: String?
+    @Published public private(set) var lastDesktopNotificationAt: Date?
+
+    private var cancellables: Set<AnyCancellable> = []
+
     /// - Parameters:
     ///   - workingDirectory: Where the shell starts. Callers pass the
     ///     selected project's path, falling back to the user's home
@@ -363,6 +377,26 @@ public final class TerminalSurfaceHost: ObservableObject {
         if let issue = state.controller.lastConfigurationIssue {
             Self.logger.error("ghostty config issue: \(issue, privacy: .public)")
         }
+
+        state.$bellCount
+            .dropFirst()
+            .sink { [weak self] count in self?.bellCount = count }
+            .store(in: &cancellables)
+
+        // `.at` publishes last, after `title`/`body` have already been
+        // assigned (see `TerminalViewState+Delegate.swift`), so reading
+        // `state`'s own properties here — not the publisher's payload — is
+        // always the fully-updated triple, not a stale title paired with a
+        // fresh timestamp.
+        state.$lastDesktopNotificationAt
+            .compactMap { $0 }
+            .sink { [weak self] at in
+                guard let self else { return }
+                lastDesktopNotificationTitle = state.lastDesktopNotificationTitle
+                lastDesktopNotificationBody = state.lastDesktopNotificationBody
+                lastDesktopNotificationAt = at
+            }
+            .store(in: &cancellables)
     }
 
     /// Whether this surface should keep rendering. Per native-rewrite.md §6,
@@ -421,5 +455,38 @@ public struct TerminalHostView: View {
         } else {
             TerminalSurfaceView(context: host.state)
         }
+    }
+}
+
+/// Invisible per-task bridge from `TerminalSurfaceHost`'s republished bell/
+/// desktop-notification signals to `ProjectsStore.handleTerminalBell`/
+/// `handleTerminalDesktopNotification`. Mounted alongside `TerminalHostView`
+/// in `MainAreaView.body` for every cached host — live or hidden — so a
+/// question raised in a background task still triggers its sound,
+/// notification, and sidebar attention dot.
+public struct TerminalAlertBridge: View {
+    @ObservedObject var host: TerminalSurfaceHost
+    var store: ProjectsStore
+    var taskID: Int64
+
+    public init(host: TerminalSurfaceHost, store: ProjectsStore, taskID: Int64) {
+        self.host = host
+        self.store = store
+        self.taskID = taskID
+    }
+
+    public var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: host.bellCount) { _, _ in
+                store.handleTerminalBell(taskID: taskID)
+            }
+            .onChange(of: host.lastDesktopNotificationAt) { _, _ in
+                store.handleTerminalDesktopNotification(
+                    taskID: taskID,
+                    title: host.lastDesktopNotificationTitle ?? "",
+                    body: host.lastDesktopNotificationBody ?? ""
+                )
+            }
     }
 }

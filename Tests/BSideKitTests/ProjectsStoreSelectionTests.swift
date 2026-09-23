@@ -251,4 +251,34 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedProjectID == nil)
         #expect(store.selectedTaskID == nil)
     }
+
+    @Test("A terminal question alert marks its task needing attention until it's next selected")
+    func terminalQuestionMarksNeedsAttentionUntilSelected() async throws {
+        let (store, projectA, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+
+        store.handleTerminalDesktopNotification(taskID: id, title: "Pi has a question", body: "Ready?")
+        #expect(store.taskIDsNeedingAttention.contains(id))
+
+        store.selectTask(taskA, project: projectA)
+        #expect(!store.taskIDsNeedingAttention.contains(id))
+    }
+
+    @Test("A terminal bell always marks its task needing attention")
+    func terminalBellMarksNeedsAttention() async throws {
+        let (store, _, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+
+        store.handleTerminalBell(taskID: id)
+        #expect(store.taskIDsNeedingAttention.contains(id))
+    }
+
+    @Test("A plain finished notification does not mark needs-attention")
+    func terminalFinishedNotificationDoesNotMarkNeedsAttention() async throws {
+        let (store, _, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+
+        store.handleTerminalDesktopNotification(taskID: id, title: "Pi finished", body: "Ready for your next prompt.")
+        #expect(!store.taskIDsNeedingAttention.contains(id))
+    }
 }

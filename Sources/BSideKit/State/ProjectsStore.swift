@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import GRDB
 import OSLog
@@ -37,6 +38,15 @@ public final class ProjectsStore {
     public private(set) var tasksByProject: [Int64: [TaskRecord]] = [:]
     public private(set) var syncStatusByTask: [Int64: TaskWorktreeService.BranchSyncStatus] = [:]
     public private(set) var vanishedWorktreeTaskIds: Set<Int64> = []
+
+    /// Task ids whose sidebar row should read as "needs attention" because a
+    /// terminal alert classified as a question arrived for them — cleared
+    /// the next time that task is selected. See `handleTerminalAlert`.
+    public private(set) var taskIDsNeedingAttention: Set<Int64> = []
+
+    /// Last time a terminal alert was accepted (post-debounce) for a task,
+    /// keyed by task id — feeds `TaskAlertDebouncer.isDebounced`.
+    private var lastTerminalAlertAt: [Int64: Date] = [:]
 
     /// The project whose dashboard or task list the sidebar and main area
     /// reflect. In-memory only; not persisted. `nil` until the user picks a
@@ -139,6 +149,51 @@ public final class ProjectsStore {
     public func selectTask(_ task: TaskRecord, project: Project) {
         selectedProjectID = project.id
         selectedTaskID = task.id
+        if let id = task.id {
+            taskIDsNeedingAttention.remove(id)
+        }
+    }
+
+    // MARK: - Terminal alerts
+
+    /// A terminal's OSC 777/OSC 9 desktop notification, classified and
+    /// routed: plays the configured sound, marks the task's sidebar row
+    /// needing attention for a question, and posts a native notification
+    /// unless B-Side is frontmost and already showing this task.
+    public func handleTerminalDesktopNotification(taskID: Int64, title: String, body: String) {
+        handleTerminalAlert(
+            taskID: taskID,
+            kind: TaskAlertClassifier.classify(title: title, body: body),
+            title: title,
+            body: body
+        )
+    }
+
+    /// A terminal bell — always classified as a question, per the same
+    /// reasoning Pi's own notify extension uses `SOUND_QUESTION` for a bell:
+    /// a bare bell with no OSC 777 text is a program (Claude Code, a shell
+    /// prompt) asking for attention with nothing more specific to say.
+    public func handleTerminalBell(taskID: Int64) {
+        handleTerminalAlert(taskID: taskID, kind: .question, title: "Bell", body: "")
+    }
+
+    private func handleTerminalAlert(taskID: Int64, kind: TaskAlertKind, title: String, body: String) {
+        let now = Date()
+        if TaskAlertDebouncer.isDebounced(previous: lastTerminalAlertAt[taskID], now: now) { return }
+        lastTerminalAlertAt[taskID] = now
+
+        TaskAlertSoundPlayer.play(kind: kind)
+
+        if kind == .question {
+            taskIDsNeedingAttention.insert(taskID)
+        }
+
+        guard UserDefaults.standard.object(forKey: TaskAlertSettingsKeys.enabled) as? Bool ?? true else { return }
+        let isFrontmostAndSelected = NSApp?.isActive == true && selectedTaskID == taskID
+        guard !isFrontmostAndSelected else { return }
+
+        let taskName = taskAndProject(forID: taskID)?.task.name ?? "Task"
+        TaskAlertNotificationCenter.shared.notify(taskID: taskID, taskName: taskName, title: title, body: body)
     }
 
     /// Reconciles selection against a fresh `projects`/`tasksByProject`
@@ -249,6 +304,12 @@ public final class ProjectsStore {
 
         Task { [weak self] in
             await self?.startSubagentServer()
+        }
+
+        TaskAlertNotificationCenter.shared.activateIfSupported()
+        TaskAlertNotificationCenter.shared.onSelectTask = { [weak self] taskID in
+            guard let self, let pair = self.taskAndProject(forID: taskID) else { return }
+            self.selectTask(pair.task, project: pair.project)
         }
     }
 

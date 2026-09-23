@@ -14,9 +14,21 @@ public enum TaskStatus: Hashable, Sendable {
     ///
     /// `merged` takes priority: a task whose branch is already merged is
     /// "finished" regardless of whatever else is going on in its worktree.
-    public static func derive(merged: Bool, isBlocked: Bool, isVanished: Bool, activeChildCount: Int) -> TaskStatus {
+    ///
+    /// `needsAttention` defaults to `false` for callers with no opinion
+    /// (existing tests, `ProjectsStore.taskIDsNeedingAttention` not wired in
+    /// yet) — it folds a task's terminal having raised a question alert
+    /// (see `ProjectsStore.handleTerminalAlert`) into the same tier as
+    /// `isBlocked`/`isVanished`.
+    public static func derive(
+        merged: Bool,
+        isBlocked: Bool,
+        isVanished: Bool,
+        activeChildCount: Int,
+        needsAttention: Bool = false
+    ) -> TaskStatus {
         if merged { return .finished }
-        if isBlocked || isVanished { return .needsAttention }
+        if isBlocked || isVanished || needsAttention { return .needsAttention }
         if activeChildCount > 0 { return .running }
         return .idle
     }

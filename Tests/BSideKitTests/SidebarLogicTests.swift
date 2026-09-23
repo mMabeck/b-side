@@ -65,6 +65,12 @@ struct SidebarLogicTests {
         #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0) == .idle)
     }
 
+    @Test("A pending terminal question marks a task needing attention even with no other signal")
+    func needsAttentionFromTerminalQuestion() {
+        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true) == .needsAttention)
+        #expect(TaskStatus.derive(merged: true, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true) == .finished)
+    }
+
     // MARK: - Branch-sync summary formatting
 
     @Test("Branch sync summary formatting")

@@ -44,6 +44,7 @@ struct MainAreaView: View {
                     TerminalHostView(host: host, focusedTaskID: $focusedTaskID, taskID: taskID)
                         .opacity(isVisible ? 1 : 0)
                         .allowsHitTesting(isVisible)
+                    TerminalAlertBridge(host: host, store: store, taskID: taskID)
                 }
             }
 
