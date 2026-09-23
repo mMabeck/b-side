@@ -189,13 +189,10 @@ public enum PiSessionService {
     ///
     /// `pi` refuses to resume a transcript whose header `cwd` no longer
     /// matches where it's about to run (it prints "Stored session working
-    /// directory does not exist" and exits 1) — which happens whenever
-    /// `TaskAutoRenameService.applyRename` has moved the task's worktree
-    /// since the transcript was created. This is deliberately called only at
-    /// resume time, never during the rename itself: the rename runs moments
-    /// after the user's first prompt, while `pi` is still the live writer of
-    /// that file, so rewriting it then would race with pi's own appends. By
-    /// resume time no process owns the file.
+    /// directory does not exist" and exits 1). `TaskAutoRenameService.applyRename`
+    /// no longer moves a task's worktree, so this now only fires for tasks
+    /// renamed before that changed and whose worktree was moved back then.
+    /// Kept so resuming those older tasks still works.
     ///
     /// Compares paths with symlinks resolved, since macOS reports `/tmp/x`
     /// as `/private/tmp/x` and pi stores the resolved form. A no-op (returns

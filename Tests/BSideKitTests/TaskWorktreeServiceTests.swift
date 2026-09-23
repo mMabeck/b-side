@@ -75,6 +75,26 @@ struct TaskWorktreeServiceTests {
         #expect(FileManager.default.fileExists(atPath: second.worktreePath))
     }
 
+    @Test("baseSlugOverride names the worktree/branch instead of the task name")
+    func baseSlugOverrideNamesWorktreeAndBranch() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "New Task",
+            baseRef: "main",
+            baseSlugOverride: "new-task-abcd"
+        )
+
+        #expect(result.worktreePath == "\(repoURL.path)-worktrees/new-task-abcd")
+        #expect(result.branchName == "task/new-task-abcd")
+        #expect(FileManager.default.fileExists(atPath: result.worktreePath))
+    }
+
     @Test("createWorktree copies loose ignored files like .env but not ignored directories")
     func copiesIgnoredFilesUsingTheLooseRule() async throws {
         let root = try TestRepo.makeTempDirectory()
