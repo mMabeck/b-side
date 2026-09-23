@@ -20,6 +20,17 @@ struct MainAreaView: View {
 
     @State private var hostsByTaskID: [Int64: TerminalSurfaceHost] = [:]
 
+    /// Serializes `ensureHost` per task id so concurrent calls (e.g. a rapid
+    /// A -> B -> A selection change re-triggering `.task(id:)`) can't both
+    /// see "no host yet" and each start their own conversation — see
+    /// `ConversationLaunchGate`.
+    @State private var conversationGate = ConversationLaunchGate()
+
+    /// Retains each task's auto-rename poll loop so it can actually be
+    /// cancelled once its task's host is purged — an unstructured `Task`
+    /// nothing holds a reference to can never be cancelled, only abandoned.
+    @State private var autoRenameWatchers: [Int64: Task<Void, Never>] = [:]
+
     /// Which cached host, if any, should hold keyboard focus — driven
     /// explicitly by `syncFocus()` rather than left to click-to-focus, since
     /// every cached host stays mounted underneath the visible one and AppKit
@@ -108,30 +119,32 @@ struct MainAreaView: View {
     /// under a fresh pi session id, then spawns `pi` with
     /// `PiSessionService.launchCommand` so reopening the task or restarting
     /// the app resumes the same pi session instead of a fresh one.
+    ///
+    /// Guarded twice against a concurrent call for the same task id (e.g. a
+    /// rapid A -> B -> A selection change): `conversationGate` claims the id
+    /// up front so only one call ever resolves a conversation for it, and
+    /// `hostsByTaskID` is re-checked immediately before assignment as a
+    /// second line of defense, since nothing else may race to create a host.
     @MainActor
     private func ensureHost(for task: TaskRecord, project: Project) async {
         guard let id = task.id, hostsByTaskID[id] == nil else { return }
-
-        let conversation: Conversation
-        if let existing = await store.activeConversation(forTaskId: id) {
-            conversation = existing
-        } else {
-            let sessionID = PiSessionService.newSessionID()
-            conversation = (try? await store.startConversation(for: task, sessionID: sessionID))
-                ?? Conversation(taskId: id, sessionId: sessionID, transcriptPath: "")
-        }
+        guard let conversation = await conversationGate.ensureConversation(for: task, store: store) else { return }
 
         let locations = PiSessionService.Locations.standard()
-        let workingDirectory = MainAreaView.resolvedDirectory(forTask: task, project: project)
+        let (workingDirectory, usedProjectFallback) = MainAreaView.resolvedDirectoryDetail(forTask: task, project: project)
 
         // A prior auto-rename may have moved this task's worktree since the
         // transcript was written, leaving its header `cwd` stale — repair it
         // (or fall back to a fresh session) before handing `pi` a command
         // that's guaranteed to exit 1. See `repairTranscriptForResume`'s doc
-        // comment for why this happens here and not at rename time.
-        var transcriptPathForLaunch: String?
-        if !conversation.transcriptPath.isEmpty {
-            transcriptPathForLaunch = PiSessionService.repairTranscriptForResume(
+        // comment for why this happens here and not at rename time. Skipped
+        // entirely when `workingDirectory` is itself the project-path
+        // fallback (the task's own worktree is missing): repairing against
+        // that directory would rewrite a perfectly healthy transcript onto a
+        // false premise rather than reflect a genuinely broken one.
+        var transcriptPathForLaunch: String? = conversation.transcriptPath.isEmpty ? nil : conversation.transcriptPath
+        if !conversation.transcriptPath.isEmpty, !usedProjectFallback {
+            transcriptPathForLaunch = await Self.repairTranscriptOffMain(
                 transcriptPath: conversation.transcriptPath,
                 currentWorkingDirectory: workingDirectory.path,
                 locations: locations
@@ -147,6 +160,7 @@ struct MainAreaView: View {
             transcriptPath: transcriptPathForLaunch,
             taskName: task.name
         )
+        guard hostsByTaskID[id] == nil else { return }
         hostsByTaskID[id] = TerminalSurfaceHost(
             workingDirectory: workingDirectory,
             command: command
@@ -156,7 +170,7 @@ struct MainAreaView: View {
             Task { await Self.resolveTranscriptPath(for: conversation, locations: locations, store: store) }
         }
         if task.awaitingAutoRename {
-            Task {
+            autoRenameWatchers[id] = Task {
                 await Self.watchForAutoRename(taskId: id, project: project, conversation: conversation, locations: locations, store: store)
             }
         }
@@ -172,12 +186,53 @@ struct MainAreaView: View {
         store: ProjectsStore
     ) async {
         for _ in 0..<40 {
-            if let url = PiSessionService.locateTranscript(sessionID: conversation.sessionId, locations: locations) {
+            if let url = await Self.locateTranscriptOffMain(sessionID: conversation.sessionId, locations: locations) {
                 try? await store.recordTranscriptPath(url.path, for: conversation)
                 return
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
+    }
+
+    /// Runs `PiSessionService.locateTranscript` off the main actor: it
+    /// enumerates the whole sessions tree and reads from every `.jsonl`
+    /// file, which on a real, ~230 MB sessions directory is long enough to
+    /// stall task switching if run directly on the main actor — and this is
+    /// called on every poll tick from two different loops above.
+    private static func locateTranscriptOffMain(
+        sessionID: String,
+        locations: PiSessionService.Locations
+    ) async -> URL? {
+        await Task.detached(priority: .utility) {
+            PiSessionService.locateTranscript(sessionID: sessionID, locations: locations)
+        }.value
+    }
+
+    /// Runs `PiSessionService.repairTranscriptForResume` off the main actor
+    /// for the same reason: it reads and rewrites the whole transcript file,
+    /// which real transcripts can grow to tens of megabytes.
+    private static func repairTranscriptOffMain(
+        transcriptPath: String,
+        currentWorkingDirectory: String,
+        locations: PiSessionService.Locations
+    ) async -> String? {
+        await Task.detached(priority: .utility) {
+            PiSessionService.repairTranscriptForResume(
+                transcriptPath: transcriptPath,
+                currentWorkingDirectory: currentWorkingDirectory,
+                locations: locations
+            )
+        }.value
+    }
+
+    /// Reads `url` as UTF-8 text off the main actor, for the same reason as
+    /// `locateTranscriptOffMain` above — used by `watchForAutoRename` to read
+    /// a transcript that can already be tens of megabytes by its first poll.
+    private static func readTranscriptTextOffMain(url: URL) async -> String? {
+        await Task.detached(priority: .utility) {
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }.value
     }
 
     /// Watches `conversation`'s transcript for the task's first user prompt
@@ -187,6 +242,12 @@ struct MainAreaView: View {
     /// as the rename resolves — successfully or not — since
     /// `ProjectsStore.applyAutoRename` always clears that flag, which this
     /// loop rechecks against the freshest known task state on every poll.
+    ///
+    /// Also stops once `autoRenameDeadline` passes, so a task the user never
+    /// prompts doesn't poll the sessions tree forever — `ensureHost` retains
+    /// this in `autoRenameWatchers` and `purgeHosts` cancels it directly the
+    /// moment the task itself goes away, but a task can also just sit idle
+    /// indefinitely with its host still live.
     @MainActor
     private static func watchForAutoRename(
         taskId: Int64,
@@ -195,12 +256,12 @@ struct MainAreaView: View {
         locations: PiSessionService.Locations,
         store: ProjectsStore
     ) async {
-        while !Task.isCancelled {
+        let deadline = Date().addingTimeInterval(autoRenameWatchDuration)
+        while !Task.isCancelled, Date() < deadline {
             guard let task = store.task(withId: taskId), task.awaitingAutoRename else { return }
 
-            if let url = PiSessionService.locateTranscript(sessionID: conversation.sessionId, locations: locations),
-                let data = try? Data(contentsOf: url),
-                let text = String(data: data, encoding: .utf8)
+            if let url = await Self.locateTranscriptOffMain(sessionID: conversation.sessionId, locations: locations),
+                let text = await Self.readTranscriptTextOffMain(url: url)
             {
                 let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
                 if let prompt = TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) {
@@ -212,6 +273,12 @@ struct MainAreaView: View {
             try? await Task.sleep(nanoseconds: 750_000_000)
         }
     }
+
+    /// How long `watchForAutoRename` keeps polling for a task's first
+    /// prompt before giving up. Generous enough for a task the user is
+    /// still composing a prompt for, but finite so an unprompted, forgotten
+    /// task doesn't poll forever.
+    private static let autoRenameWatchDuration: TimeInterval = 30 * 60
 
     /// Marks the active task's host visible and every other cached host not
     /// visible, so hidden surfaces stop drawing frames nobody sees (per
@@ -258,7 +325,9 @@ struct MainAreaView: View {
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
         for id in MainAreaView.idsToPurge(cachedIDs: Set(hostsByTaskID.keys), liveTaskIDs: liveTaskIDs) {
             hostsByTaskID.removeValue(forKey: id)
+            autoRenameWatchers.removeValue(forKey: id)?.cancel()
         }
+        conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)
     }
 
     /// Pure so it's directly testable: cached host ids no longer present
@@ -285,12 +354,23 @@ struct MainAreaView: View {
     /// task terminal should never fail to open just because its worktree
     /// disappeared.
     static func resolvedDirectory(forTask task: TaskRecord, project: Project) -> URL {
+        resolvedDirectoryDetail(forTask: task, project: project).directory
+    }
+
+    /// Same resolution as `resolvedDirectory(forTask:project:)`, plus
+    /// whether it actually used the project-path fallback — callers that
+    /// treat a stale worktree cwd as a signal of a genuinely broken
+    /// transcript (`ensureHost`'s repair step) need to tell "this task's
+    /// worktree is fine but differs" apart from "this task's worktree is
+    /// simply missing", since the fallback directory is never the resumed
+    /// session's real working directory.
+    static func resolvedDirectoryDetail(forTask task: TaskRecord, project: Project) -> (directory: URL, usedProjectFallback: Bool) {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: task.worktreePath, isDirectory: &isDirectory)
         if exists && isDirectory.boolValue {
-            return URL(fileURLWithPath: task.worktreePath)
+            return (URL(fileURLWithPath: task.worktreePath), false)
         }
-        return URL(fileURLWithPath: project.path)
+        return (URL(fileURLWithPath: project.path), true)
     }
 
     /// The directory the terminal drawer's own scratch shell should start
@@ -307,5 +387,70 @@ struct MainAreaView: View {
         case .none:
             return FileManager.default.homeDirectoryForCurrentUser
         }
+    }
+}
+
+/// Ensures at most one caller ever resolves (looks up or starts) a
+/// `Conversation` for a given task id at a time, and that a task id already
+/// resolved can't be resolved again.
+///
+/// `ensureHost` awaits several times — the active-conversation lookup, the
+/// possible insert — before it has a host in `hostsByTaskID` to check
+/// against. Without this, a rapid task-switch-and-back (A -> B -> A) that
+/// re-triggers `.task(id:)` twice for A while the first call is still
+/// in flight would let both calls see "no conversation yet", both insert a
+/// row under a different pi session id, and whichever `TerminalSurfaceHost`
+/// loses the assignment race leak its pty and `pi` process. `claim` makes
+/// the second call bail out immediately instead.
+///
+/// A separate type (rather than inline `@State` on `MainAreaView`) so the
+/// dedup behavior is testable against the real `ProjectsStore` reuse path,
+/// without needing a `TerminalSurfaceHost` (which requires a live AppKit/
+/// libghostty surface) to exercise it.
+@MainActor
+final class ConversationLaunchGate {
+    private var claimedTaskIDs: Set<Int64> = []
+
+    init() {}
+
+    /// Resolves `task`'s conversation — reusing its active one or starting a
+    /// fresh one — unless another call has already claimed this task id
+    /// (in flight, or already resolved to a host). Returns `nil` when the
+    /// claim fails, which the caller must treat as "do nothing further for
+    /// this task right now", not as an error.
+    func ensureConversation(for task: TaskRecord, store: ProjectsStore) async -> Conversation? {
+        guard let id = task.id, claim(id) else { return nil }
+        var resolved = false
+        defer { if !resolved { abandon(id) } }
+
+        let conversation: Conversation
+        if let existing = await store.activeConversation(forTaskId: id) {
+            conversation = existing
+        } else {
+            let sessionID = PiSessionService.newSessionID()
+            conversation = (try? await store.startConversation(for: task, sessionID: sessionID))
+                ?? Conversation(taskId: id, sessionId: sessionID, transcriptPath: "")
+        }
+
+        resolved = true
+        return conversation
+    }
+
+    /// Releases task ids no longer live (deleted or archived out of
+    /// `tasksByProject`), mirroring `MainAreaView.purgeHosts` — the same
+    /// task id reappearing later (e.g. unarchived) must be able to start a
+    /// fresh conversation lookup rather than staying claimed forever.
+    func release(exceptLiveTaskIDs liveTaskIDs: Set<Int64>) {
+        claimedTaskIDs.formIntersection(liveTaskIDs)
+    }
+
+    private func claim(_ id: Int64) -> Bool {
+        guard !claimedTaskIDs.contains(id) else { return false }
+        claimedTaskIDs.insert(id)
+        return true
+    }
+
+    private func abandon(_ id: Int64) {
+        claimedTaskIDs.remove(id)
     }
 }
