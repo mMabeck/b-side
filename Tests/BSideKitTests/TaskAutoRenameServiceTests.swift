@@ -161,6 +161,54 @@ struct TaskAutoRenameServiceApplyRenameTests {
         #expect(oldBranchExists == false)
     }
 
+    @Test("a worktree move failure after a successful branch rename still persists the new branch name")
+    func persistsBranchRenameWhenWorktreeMoveFails() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let setupResult = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "New Task",
+            baseRef: "main"
+        )
+
+        let task = TaskRecord(
+            id: 1,
+            projectId: 1,
+            name: "New Task",
+            branchName: setupResult.branchName,
+            branchCreatedByApp: setupResult.branchCreatedByApp,
+            worktreePath: setupResult.worktreePath,
+            harness: "claude",
+            permissionLevel: "default",
+            awaitingAutoRename: true
+        )
+
+        // `git worktree move` refuses to move a locked worktree, so locking it
+        // makes the move fail while the branch rename (a separate, already-
+        // applied git step) still succeeds.
+        _ = try await GitCLI.run(["worktree", "lock", task.worktreePath], in: repoURL)
+
+        let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: "Fix the login bug")
+
+        #expect(renamed.name == "Fix the login bug")
+        #expect(renamed.awaitingAutoRename == false)
+
+        // The branch rename succeeded on disk, so the persisted record must name
+        // the branch that actually exists — not the old, now-nonexistent one.
+        #expect(renamed.branchName == "task/fix-the-login-bug")
+        let oldBranchExists = try await GitCLI.branchExists(task.branchName, at: repoURL)
+        #expect(oldBranchExists == false)
+
+        // The worktree move failed, so the worktree is still at its original path.
+        #expect(renamed.worktreePath == task.worktreePath)
+        let currentBranch = await GitCLI.currentBranch(at: URL(fileURLWithPath: renamed.worktreePath))
+        #expect(currentBranch == "task/fix-the-login-bug")
+    }
+
     @Test("a task without its own worktree renames its name only")
     func renamesNameOnlyWhenRunningInPlace() async throws {
         let root = try TestRepo.makeTempDirectory()

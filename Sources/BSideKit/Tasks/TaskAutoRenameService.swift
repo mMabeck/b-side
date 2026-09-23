@@ -116,9 +116,12 @@ public enum TaskAutoRenameService {
     /// never re-fires this for the same task.
     ///
     /// Runs in place (task name only, no git/filesystem calls) when the task
-    /// has no worktree of its own or its branch predates the app. Any git
-    /// failure is logged and leaves the task's existing branch/worktree
-    /// untouched \u2014 the display-name rename still applies.
+    /// has no worktree of its own or its branch predates the app. The branch
+    /// rename and worktree move are applied \u2014 and persisted to the returned
+    /// record \u2014 independently: a git failure is logged, and if it happens
+    /// after the branch rename already succeeded, the returned record's
+    /// `branchName` still reflects that so it never names a branch that no
+    /// longer exists on disk.
     public static func applyRename(task: TaskRecord, project: Project, newName: String) async -> TaskRecord {
         var updated = task
         updated.name = newName
@@ -143,18 +146,29 @@ public enum TaskAutoRenameService {
         }
 
         let projectURL = URL(fileURLWithPath: project.path)
+
         do {
             try await GitCLI.renameBranch(task.branchName, to: newBranchName, at: projectURL)
+            // Persisted immediately: the branch has already been renamed on
+            // disk, so the record must say so even if the worktree move below fails.
+            updated.branchName = newBranchName
+        } catch {
+            logger.error(
+                "Auto-rename branch rename failed for task \(task.id ?? -1, privacy: .public): \(error, privacy: .public)"
+            )
+            return updated
+        }
+
+        do {
             try await GitCLI.moveWorktree(
                 from: URL(fileURLWithPath: task.worktreePath),
                 to: URL(fileURLWithPath: newWorktreePath),
                 in: projectURL
             )
-            updated.branchName = newBranchName
             updated.worktreePath = newWorktreePath
         } catch {
             logger.error(
-                "Auto-rename git rename failed for task \(task.id ?? -1, privacy: .public): \(error, privacy: .public)"
+                "Auto-rename worktree move failed for task \(task.id ?? -1, privacy: .public): \(error, privacy: .public)"
             )
         }
 
@@ -175,7 +189,7 @@ public enum TaskAutoRenameService {
         let projectURL = URL(fileURLWithPath: projectPath)
         var candidate = baseSlug
         var suffix = 2
-        while true {
+        for _ in 0..<TaskWorktreeService.maxUniqueSlugAttempts {
             let candidatePath = TaskWorktreeService.worktreePath(forProjectAt: projectPath, slug: candidate)
             let candidateBranch = "task/\(candidate)"
 
@@ -191,5 +205,6 @@ public enum TaskAutoRenameService {
             candidate = "\(baseSlug)-\(suffix)"
             suffix += 1
         }
+        return candidate
     }
 }

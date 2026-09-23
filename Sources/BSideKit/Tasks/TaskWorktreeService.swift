@@ -102,14 +102,24 @@ public enum TaskWorktreeService {
         return siblingRoot.appendingPathComponent(slug).path
     }
 
-    /// A variant of `baseSlug` whose worktree directory doesn't already exist,
-    /// suffixing with `-2`, `-3`, … so repeated task names — notably the
-    /// blank-name placeholder "New Task" — get distinct worktrees instead of
-    /// colliding with an existing task's directory.
-    static func uniqueSlug(forProjectAt projectPath: String, baseSlug: String) -> String {
+    /// Upper bound on the `-2`, `-3`, … suffixes `uniqueSlug` tries before giving
+    /// up and returning its last candidate, so a pathological filesystem/branch
+    /// state can't spin the dedupe loop forever.
+    static let maxUniqueSlugAttempts = 1000
+
+    /// A variant of `baseSlug` whose worktree directory and `task/`-prefixed
+    /// branch name are both free, suffixing with `-2`, `-3`, … so repeated task
+    /// names — notably the blank-name placeholder "New Task" — get distinct
+    /// worktrees instead of colliding with an existing task's directory or a
+    /// branch left behind by a partially failed rename.
+    static func uniqueSlug(forProjectAt projectPath: String, baseSlug: String) async -> String {
+        let projectURL = URL(fileURLWithPath: projectPath)
         var candidate = baseSlug
         var suffix = 2
-        while FileManager.default.fileExists(atPath: worktreePath(forProjectAt: projectPath, slug: candidate)) {
+        for _ in 0..<maxUniqueSlugAttempts {
+            let pathTaken = FileManager.default.fileExists(atPath: worktreePath(forProjectAt: projectPath, slug: candidate))
+            let branchTaken = (try? await GitCLI.branchExists("task/\(candidate)", at: projectURL)) ?? false
+            if !pathTaken && !branchTaken { return candidate }
             candidate = "\(baseSlug)-\(suffix)"
             suffix += 1
         }
@@ -147,7 +157,7 @@ public enum TaskWorktreeService {
         }
 
         let baseSlug = slug(forTaskName: taskName)
-        let taskSlug = uniqueSlug(forProjectAt: project.path, baseSlug: baseSlug)
+        let taskSlug = await uniqueSlug(forProjectAt: project.path, baseSlug: baseSlug)
         let worktreePathString = worktreePath(forProjectAt: project.path, slug: taskSlug)
         let worktreeURL = URL(fileURLWithPath: worktreePathString)
 
