@@ -93,6 +93,33 @@ enum ThemeCatalogSource {
         BSideBundledThemes.all + GhosttyThemeCatalog.allThemes
     }
 
+    /// Whether a theme reads as dark, by the same background-luminance test
+    /// ``BSidePalette/themed(from:)`` uses for the app's appearance.
+    static func isDark(_ definition: GhosttyThemeDefinition) -> Bool {
+        RGBColor(hex: definition.background).relativeLuminance < 0.5
+    }
+
+    /// One titled group of the theme list.
+    struct Group: Identifiable {
+        let title: String
+        let themes: [GhosttyThemeDefinition]
+        var id: String { title }
+    }
+
+    /// The theme list's sections: popular dark, popular light, then the
+    /// rest of each. Computed once — classifying ~490 themes is not free and
+    /// the catalog never changes at runtime.
+    static let groups: [Group] = {
+        let featured = featuredThemes()
+        let other = otherThemes()
+        return [
+            Group(title: "Dark", themes: featured.filter(isDark)),
+            Group(title: "Light", themes: featured.filter { !isDark($0) }),
+            Group(title: "More Dark", themes: other.filter(isDark)),
+            Group(title: "More Light", themes: other.filter { !isDark($0) }),
+        ]
+    }()
+
     static func theme(named name: String) -> GhosttyThemeDefinition? {
         BSideBundledThemes.all.first { $0.name == name } ?? GhosttyThemeCatalog.theme(named: name)
     }

@@ -1,3 +1,4 @@
+import GhosttyTheme
 import SwiftUI
 
 /// Standard macOS `Settings` scene content: General, Agent, Git, Terminal, Notifications.
@@ -87,87 +88,80 @@ private struct AppearanceSettingsTab: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ThemeList(selection: listSelection)
-                .frame(width: 220)
-            Divider()
-            Form {
-                Section {
-                    Picker("Theme Source", selection: $modeRaw) {
-                        ForEach(ThemeOverrideMode.allCases, id: \.rawValue) { mode in
-                            Text(mode.label).tag(mode.rawValue)
-                        }
-                    }
-                    .onChange(of: modeRaw) { _, _ in GhosttyThemeController.reapply() }
-
-                    switch mode {
-                    case .useConfig:
-                        LabeledContent("Resolved Theme") {
-                            Text(theme.definition?.name ?? "none (system colours)")
-                                .foregroundStyle(theme.palette.textSecondary)
-                        }
-                    case .single:
-                        LabeledContent("Theme", value: singleThemeName.isEmpty ? "—" : singleThemeName)
-                    case .matchSystem:
-                        Picker("List Edits", selection: $editingDark) {
-                            Text("Light").tag(false)
-                            Text("Dark").tag(true)
-                        }
-                        .pickerStyle(.segmented)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 16) {
+                Picker("Theme Source", selection: $modeRaw) {
+                    ForEach(ThemeOverrideMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.label).tag(mode.rawValue)
                     }
                 }
+                .fixedSize()
+                .onChange(of: modeRaw) { _, _ in GhosttyThemeController.reapply() }
 
-                Section("Preview") {
+                if mode == .matchSystem {
+                    Picker("Editing", selection: $editingDark) {
+                        Text("Light").tag(false)
+                        Text("Dark").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+                Spacer()
+            }
+
+            HStack(alignment: .top, spacing: 16) {
+                ThemeList(
+                    selection: listSelection,
+                    darkOnly: mode == .matchSystem ? editingDark : nil
+                )
+                // Rebuilt per slot so its scroll position jumps to that
+                // slot's selection instead of staying where the other left off.
+                .id(mode == .matchSystem ? "slot-\(editingDark)" : "all")
+                .frame(width: 220)
+
+                VStack(alignment: .leading, spacing: 8) {
                     previewContent
+                    Text(caption)
+                        .font(.callout)
+                        .foregroundStyle(theme.palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
         }
+        .padding(20)
+        .frame(width: 720, height: 420, alignment: .topLeading)
         .background(theme.palette.windowBackground)
-        .frame(width: 720, height: 460)
+    }
+
+    /// The theme the preview shows: whichever one the list is editing.
+    private var previewedDefinition: GhosttyThemeDefinition? {
+        switch mode {
+        case .useConfig: theme.definition
+        case .single: ThemeCatalogSource.theme(named: singleThemeName)
+        case .matchSystem: ThemeCatalogSource.theme(named: editingDark ? darkThemeName : lightThemeName)
+        }
     }
 
     @ViewBuilder
     private var previewContent: some View {
-        switch mode {
-        case .useConfig:
-            if let definition = theme.definition {
-                ThemePreviewView(definition: definition)
-            } else {
-                Text("No theme resolved from the Ghostty config — using system colours.")
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
-        case .single:
-            if let definition = ThemeCatalogSource.theme(named: singleThemeName) {
-                ThemePreviewView(definition: definition)
-            } else {
-                Text("Pick a theme from the list to preview it.")
-                    .font(.caption)
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
-        case .matchSystem:
-            HStack(alignment: .top, spacing: 12) {
-                previewColumn(title: "Light", themeName: lightThemeName)
-                previewColumn(title: "Dark", themeName: darkThemeName)
-            }
+        if let definition = previewedDefinition {
+            ThemePreviewView(definition: definition, scale: 1.2)
+        } else {
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(theme.palette.separator, style: StrokeStyle(lineWidth: 1, dash: [4]))
+                .frame(width: ThemePreviewView.baseSize.width * 1.2, height: ThemePreviewView.baseSize.height * 1.2)
+                .overlay(Text("Pick a theme to preview it.").foregroundStyle(theme.palette.textSecondary))
         }
     }
 
-    @ViewBuilder
-    private func previewColumn(title: String, themeName: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(theme.palette.textSecondary)
-            if let definition = ThemeCatalogSource.theme(named: themeName) {
-                ThemePreviewView(definition: definition, scale: 0.52)
-            } else {
-                Text("Pick a theme from the list to preview it.")
-                    .font(.caption2)
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
+    private var caption: String {
+        switch mode {
+        case .useConfig:
+            "Following ~/.config/ghostty/config (\(theme.definition?.name ?? "no theme — system colours")). Pick a theme to override it."
+        case .single:
+            "Use ↑ and ↓ to try themes. Changes apply immediately, including open terminals."
+        case .matchSystem:
+            "Switches between the light and dark theme with the macOS appearance."
         }
     }
 }
