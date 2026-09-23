@@ -54,8 +54,14 @@ struct SidebarView: View {
                         )
                         Section(isExpanded: isExpandedBinding) {
                             if tasks.isEmpty {
+                                // Aligned with where task titles start, so the
+                                // placeholder reads as the project's (empty) child.
                                 Text("No tasks")
+                                    .font(.system(size: 13))
                                     .foregroundStyle(theme.palette.textSecondary)
+                                    .padding(.leading, Self.taskLeadingIndent + TaskRowLayout.statusDotColumnWidth + 6)
+                                    .padding(.vertical, 6)
+                                    .listRowInsets(Self.rowInsets)
                                     .listRowBackground(theme.palette.surfaceBackground)
                             } else {
                                 ForEach(tasks) { task in
@@ -224,9 +230,9 @@ struct SidebarView: View {
             store.pendingTaskCreationProject = project
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(theme.palette.textDisabled)
-                .frame(width: 16, height: 16)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+                .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -244,6 +250,9 @@ struct SidebarView: View {
     /// Tight `List` row insets so the selection fill spans nearly the full
     /// sidebar width instead of sitting inside `.sidebar`'s default margins.
     private static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
+
+    /// How far the selection fill extends past each side of its row.
+    private static let selectionBleed: CGFloat = 14
 
     /// The leading inset a task row sits at, aligned with where the project
     /// title's text begins (`projectRow`'s own horizontal padding) so the
@@ -392,8 +401,12 @@ struct SidebarView: View {
     /// often saturated `selectionBackground`, so selected rows keep their
     /// normal text colours.
     private func selectionFill(isSelected: Bool, in palette: BSidePalette) -> some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(isSelected ? palette.textPrimary.opacity(0.22) : Color.clear)
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(isSelected ? palette.textPrimary.opacity(0.32) : Color.clear)
+            // `.sidebar` keeps its own ~20pt horizontal margins even with
+            // tight `listRowInsets`; bleeding the fill past the row lets it
+            // span nearly the whole sidebar width.
+            .padding(.horizontal, -Self.selectionBleed)
     }
 
     /// The persistent "Add Project" row pinned below the list — not a `List`
