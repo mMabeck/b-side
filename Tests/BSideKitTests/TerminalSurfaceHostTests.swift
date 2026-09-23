@@ -68,13 +68,9 @@ struct TerminalSurfaceHostTests {
     }
 
     /// Regression test for `MainAreaView.syncFocus()`: mounts two hosts the
-    /// way it does (both in the tree, one shared `@FocusState`, the same
-    /// `.terminalFocused(_:equals:)` bridge), then moves focus the
-    /// deterministic way — `TerminalViewState.requestFocus()` on the newly
-    /// visible host — and checks first responder actually lands there.
-    /// `@FocusState` itself isn't exercised as the acquisition path here:
-    /// per `requestFocus()`'s own doc comment, that bridge is best-effort,
-    /// which is exactly why `syncFocus()` no longer relies on it alone.
+    /// way it does, then checks that focus survives a re-render of the
+    /// focused host and moves (or is dropped) exactly as `focus()`/
+    /// `resignFocus()` direct.
     @Test func requestFocusMovesFirstResponderDeterministically() async throws {
         let dirA = FileManager.default.temporaryDirectory
             .appendingPathComponent("terminal-host-focus-test-a-\(UUID().uuidString)")
@@ -95,42 +91,48 @@ struct TerminalSurfaceHostTests {
         window.setIsVisible(true)
         try await Task.sleep(for: .seconds(2))
 
-        // Establish hostA as focused the same deterministic way `syncFocus()`
-        // does on first mount: FocusState alone (see `onAppear` in
-        // `TwoHostFocusHarness`) does not reliably land first responder with
-        // two hosts competing for one `@FocusState` — that gap is exactly
-        // the defect `requestFocus()` closes.
-        hostA.state.requestFocus()
+        // Establish hostA as focused the same deterministic way
+        // `syncFocus()` does on first mount.
+        hostA.focus()
         try await Task.sleep(for: .milliseconds(500))
         #expect(window.firstResponder === hostA.state.attachedPlatformView)
 
-        // Switch to hostB the way `syncFocus()` does: FocusState plus the
-        // deterministic `requestFocus()` call, not FocusState alone.
-        hostB.state.requestFocus()
+        // A re-render of the focused host (a title change, a bell, ...) must
+        // not take focus away: the old `@FocusState` bridge resigned first
+        // responder on every `updateNSView` once SwiftUI reset the state.
+        hostA.objectWillChange.send()
+        hostB.objectWillChange.send()
         try await Task.sleep(for: .milliseconds(500))
+        #expect(window.firstResponder === hostA.state.attachedPlatformView)
 
+        // Switch to hostB the way `syncFocus()` does.
+        hostB.focus()
+        hostA.resignFocus()
+        try await Task.sleep(for: .milliseconds(500))
         #expect(window.firstResponder === hostB.state.attachedPlatformView)
+
+        // With no task visible, resigning leaves no terminal focused.
+        hostB.resignFocus()
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(!hostA.hasKeyboardFocus && !hostB.hasKeyboardFocus)
 
         window.orderOut(nil)
     }
 }
 
-/// Mounts two hosts the way `MainAreaView` does: both in the tree, one
-/// shared `@FocusState`, `.terminalFocused(_:equals:)` bound per host, only
-/// one visible/hit-testable at a time.
+/// Mounts two hosts the way `MainAreaView` does: both in the tree, only one
+/// visible/hit-testable at a time.
 private struct TwoHostFocusHarness: View {
     var hostA: TerminalSurfaceHost
     var hostB: TerminalSurfaceHost
-    @FocusState private var focusedID: Int64?
 
     var body: some View {
         ZStack {
-            TerminalHostView(host: hostA, focusedTaskID: $focusedID, taskID: 0)
-            TerminalHostView(host: hostB, focusedTaskID: $focusedID, taskID: 1)
+            TerminalHostView(host: hostA)
+            TerminalHostView(host: hostB)
                 .opacity(0)
                 .allowsHitTesting(false)
         }
-        .onAppear { focusedID = 0 }
     }
 }
 

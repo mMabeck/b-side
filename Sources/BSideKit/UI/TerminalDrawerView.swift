@@ -54,8 +54,17 @@ struct TerminalDrawerView: View {
             newHost.isVisible = !isCollapsed
             host = newHost
         }
+        // Opening the drawer is a request to type in it; collapsing it must
+        // hand focus back to the task terminal, or the now-hidden shell
+        // would keep swallowing keystrokes.
         .onChange(of: isCollapsed) { _, collapsed in
             host?.isVisible = !collapsed
+            if collapsed {
+                host?.resignFocus()
+                store.requestTerminalFocus()
+            } else {
+                host?.focus()
+            }
         }
     }
 }

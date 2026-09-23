@@ -210,6 +210,13 @@ public final class ProjectsStore {
         focusRequestToken += 1
     }
 
+    /// Asks the main area to hand keyboard focus back to the selected task's
+    /// terminal without changing the selection — e.g. once the bottom drawer
+    /// collapses and its (now hidden) shell must stop receiving keystrokes.
+    public func requestTerminalFocus() {
+        focusRequestToken += 1
+    }
+
     /// Selects `task` and, since a task's terminal is meaningless without
     /// knowing which project owns it, its project too — the two selections
     /// are set together so they can never disagree.
