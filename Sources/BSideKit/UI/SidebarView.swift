@@ -19,7 +19,6 @@ import SwiftUI
 struct SidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
-    @State private var gitInfo = SidebarGitInfoCache()
     @AppStorage("sidebarCollapsedProjectIDs") private var collapseState = SidebarCollapseState()
 
     @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
@@ -34,10 +33,11 @@ struct SidebarView: View {
                         Section {
                             ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
+                                    .listRowInsets(Self.rowInsets)
                             }
                         } header: {
                             Text("Active")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(.uppercase)
                         }
@@ -60,10 +60,12 @@ struct SidebarView: View {
                             } else {
                                 ForEach(tasks) { task in
                                     taskRow(task, project: project)
+                                        .listRowInsets(Self.rowInsets)
                                 }
                             }
                         } header: {
                             projectRow(project, taskCount: tasks.count)
+                                .listRowInsets(Self.rowInsets)
                         }
                     }
                 }
@@ -143,17 +145,17 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 8) {
                 Text(hint ?? "")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(secondary)
                     .frame(width: 22, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.name)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(primary)
                         .lineLimit(1)
-                    Text(project.displayName)
-                        .font(.system(size: 10))
+                    Text(Self.folderName(of: project))
+                        .font(.system(size: 11))
                         .foregroundStyle(secondary)
                         .lineLimit(1)
                 }
@@ -169,12 +171,10 @@ struct SidebarView: View {
         .listRowBackground(Color.clear)
     }
 
-    /// A project row: name, branch (with a `*` if dirty), and path in
-    /// progressively dimmer text, styled after cmux's project list (e.g.
-    /// `dotfiles` / `main*` / `~/Claude/dotfiles`). Selection reads as a
-    /// filled themed row using the palette's selection colours.
+    /// A project row: just the project's folder name, bold, with the
+    /// add-task button and task count trailing. Branch and path live on the
+    /// project dashboard instead, keeping the sidebar scannable.
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
-        let info = gitInfo.info(forProject: project.id)
         let isSelected = store.selectedProjectID == project.id && store.selectedTaskID == nil
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
@@ -183,16 +183,11 @@ struct SidebarView: View {
             store.selectProject(project)
         } label: {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(project.displayName)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(primary)
-                    Text(projectSecondaryLine(branch: info?.branch, isDirty: info?.isDirty ?? false, path: project.path))
-                        .font(.system(size: 11))
-                        .foregroundStyle(secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                Text(Self.folderName(of: project))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Spacer()
                 addTaskButton(for: project)
                 Text("\(taskCount)")
@@ -200,7 +195,7 @@ struct SidebarView: View {
                     .foregroundStyle(secondary)
             }
             .padding(.vertical, 8)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 8)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
         }
@@ -215,7 +210,6 @@ struct SidebarView: View {
                 Task { try? await store.removeProject(project) }
             }
         }
-        .task(id: project.id) { gitInfo.refresh(project) }
     }
 
     /// A quiet, low-contrast "+" beside each project header for starting a
@@ -239,13 +233,17 @@ struct SidebarView: View {
         .help("New Task in \(project.displayName)")
     }
 
-    /// One terse secondary line combining branch and path (`main* — ~/Claude/dotfiles`)
-    /// instead of the two lines a task-peer row would need, keeping the project
-    /// header compact relative to the tasks nested under it.
-    private func projectSecondaryLine(branch: String?, isDirty: Bool, path: String) -> String {
-        guard let branch else { return path }
-        return "\(branch)\(isDirty ? "*" : "") — \(path)"
+    /// The last path component of the project's directory (`dotfiles` for
+    /// `~/Claude/dotfiles`) — what the sidebar shows instead of the stored
+    /// display name, falling back to it only if the path has no usable name.
+    static func folderName(of project: Project) -> String {
+        let name = URL(fileURLWithPath: project.path).lastPathComponent
+        return name.isEmpty || name == "/" ? project.displayName : name
     }
+
+    /// Tight `List` row insets so the selection fill spans nearly the full
+    /// sidebar width instead of sitting inside `.sidebar`'s default margins.
+    private static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
 
     /// The leading inset a task row sits at, aligned with where the project
     /// title's text begins (`projectRow`'s own horizontal padding) so the
@@ -297,7 +295,7 @@ struct SidebarView: View {
                     .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .center)
 
                 Text(task.name)
-                    .font(.system(size: 12, weight: .regular))
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(primary)
 
                 if isVanished {
@@ -395,7 +393,7 @@ struct SidebarView: View {
     /// normal text colours.
     private func selectionFill(isSelected: Bool, in palette: BSidePalette) -> some View {
         RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(isSelected ? palette.textPrimary.opacity(0.12) : Color.clear)
+            .fill(isSelected ? palette.textPrimary.opacity(0.22) : Color.clear)
     }
 
     /// The persistent "Add Project" row pinned below the list — not a `List`
