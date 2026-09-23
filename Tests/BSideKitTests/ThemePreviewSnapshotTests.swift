@@ -48,24 +48,25 @@ struct ThemePreviewSnapshotTests {
         #expect(closeColor(sidebarSample, expectedSurface, tolerance: 0.1))
     }
 
+    /// Draws the hosting view into a bitmap directly, as
+    /// `SubagentCardSnapshotTests` does, not via `CGWindowListCreateImage`:
+    /// the preview is plain SwiftUI with no window vibrancy to wait on, and a
+    /// WindowServer capture intermittently never succeeds within any short
+    /// deadline while other snapshot suites run in parallel.
     private func capture(_ window: NSWindow) async throws -> NSBitmapImageRep {
-        // `Task.sleep`, not `Thread.sleep`: blocking the main thread here
-        // would stall the run loop AppKit needs to finish registering the
-        // window with WindowServer, so `CGWindowListCreateImage` would keep
-        // failing for the whole deadline instead of eventually succeeding
-        // (see `AuxiliaryWindowThemeSnapshotTests.captureUntilSettled` for
-        // the same reasoning).
-        let deadline = Date().addingTimeInterval(3)
-        var lastError: Error?
-        repeat {
-            let windowID = CGWindowID(window.windowNumber)
-            if let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) {
-                return NSBitmapImageRep(cgImage: cgImage)
-            }
-            lastError = CaptureError.failed
-            try await Task.sleep(for: .milliseconds(100))
-        } while Date() < deadline
-        throw lastError ?? CaptureError.failed
+        try await Task.sleep(for: .milliseconds(300))
+        guard let hostingView = window.contentView else { throw CaptureError.failed }
+        hostingView.layoutSubtreeIfNeeded()
+        guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds),
+              let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap)
+        else { throw CaptureError.failed }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        hostingView.displayIgnoringOpacity(hostingView.bounds, in: graphicsContext)
+        NSGraphicsContext.restoreGraphicsState()
+        try? bitmap.representation(using: .png, properties: [:])?
+            .write(to: URL(fileURLWithPath: "/tmp/bside-theme-preview.png"))
+        return bitmap
     }
 
     private enum CaptureError: Error { case failed }
