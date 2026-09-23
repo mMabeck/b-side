@@ -50,6 +50,20 @@ struct MainAreaView: View {
     /// selection changes. See `syncFocus()` for what goes wrong without this.
     @FocusState private var focusedTaskID: Int64?
 
+    /// Which child pane, if any, reads as focused within each task's split
+    /// — purely a presentation flag for `SubagentPaneView`'s accent border;
+    /// actual keyboard focus is real AppKit first-responder state, moved by
+    /// `SubagentPaneView` itself on click. Keyed by task so hidden tasks'
+    /// panes don't lose their own focused-pane highlight while not visible.
+    @State private var focusedChildIDByTask: [Int64: String] = [:]
+
+    private func focusedChildIDBinding(for taskID: Int64) -> Binding<String?> {
+        Binding(
+            get: { focusedChildIDByTask[taskID] },
+            set: { focusedChildIDByTask[taskID] = $0 }
+        )
+    }
+
     private var liveTaskIDs: Set<Int64> {
         Set(store.tasksByProject.values.flatMap { $0.compactMap(\.id) })
     }
@@ -64,9 +78,15 @@ struct MainAreaView: View {
             ForEach(hostsByTaskID.keys.sorted(), id: \.self) { taskID in
                 if let host = hostsByTaskID[taskID] {
                     let isVisible = taskID == MainAreaView.visibleTaskID(for: store.mainSelection)
-                    TerminalHostView(host: host, focusedTaskID: $focusedTaskID, taskID: taskID)
-                        .opacity(isVisible ? 1 : 0)
-                        .allowsHitTesting(isVisible)
+                    TaskTerminalAreaView(
+                        store: store,
+                        host: host,
+                        taskID: taskID,
+                        focusedTaskID: $focusedTaskID,
+                        focusedChildID: focusedChildIDBinding(for: taskID)
+                    )
+                    .opacity(isVisible ? 1 : 0)
+                    .allowsHitTesting(isVisible)
                     TerminalAlertBridge(host: host, store: store, taskID: taskID)
                 }
             }
@@ -91,6 +111,9 @@ struct MainAreaView: View {
         }
         .onChange(of: liveTaskIDs) { _, ids in
             purgeHosts(keeping: ids)
+        }
+        .onChange(of: store.subagentPanes.version) { _, _ in
+            syncVisibility()
         }
         .onChange(of: store.closedTerminalTaskID) { _, closedID in
             guard let closedID else { return }
@@ -322,6 +345,11 @@ struct MainAreaView: View {
         for (id, host) in hostsByTaskID {
             host.isVisible = (id == visibleID)
         }
+        for (id, panes) in store.subagentPanes.panesByTask {
+            for pane in panes {
+                pane.host.isVisible = (id == visibleID)
+            }
+        }
     }
 
     /// Explicitly moves keyboard focus to the active task's host (or off of
@@ -368,6 +396,8 @@ struct MainAreaView: View {
         autoRenameWatchers.removeValue(forKey: taskID)?.cancel()
         store.pruneOpenTerminals(removing: [taskID])
         conversationGate.releaseClaim(for: taskID)
+        store.subagentPanes.closeAll(taskId: taskID)
+        focusedChildIDByTask.removeValue(forKey: taskID)
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
@@ -375,6 +405,8 @@ struct MainAreaView: View {
         for id in purged {
             hostsByTaskID.removeValue(forKey: id)
             autoRenameWatchers.removeValue(forKey: id)?.cancel()
+            store.subagentPanes.closeAll(taskId: id)
+            focusedChildIDByTask.removeValue(forKey: id)
         }
         store.pruneOpenTerminals(removing: purged)
         conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)
