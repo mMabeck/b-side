@@ -69,7 +69,10 @@ public enum GhosttyBridge {
 
     /// One `theme = ...` directive as written in a Ghostty config file:
     /// either a single fixed name, or the light/dark adaptive form
-    /// `theme = light:<name>,dark:<name>`.
+    /// `theme = light:<name>,dark:<name>`. B-Side never derives appearance
+    /// from the macOS system setting, so the adaptive form is still parsed
+    /// (a user's own config may use it) but always resolves to `dark` — see
+    /// ``resolveThemeDefinition(_:)``.
     enum ThemeDirective: Equatable {
         case fixed(String)
         case adaptive(light: String, dark: String)
@@ -145,18 +148,21 @@ public enum GhosttyBridge {
     /// appearance. Never throws: an unresolvable name is logged via `OSLog`
     /// and `nil` is returned so the caller falls back to the package's
     /// default theme while keeping the rest of the user's config intact.
-    static func resolveThemeDefinition(
-        _ directive: ThemeDirective?,
-        preferDark: Bool
-    ) -> GhosttyThemeDefinition? {
+    ///
+    /// An adaptive `light:X,dark:Y` directive always resolves to `dark`:
+    /// B-Side never derives its appearance from the macOS system setting,
+    /// so there is no light/dark choice to make here — the light name is
+    /// still parsed (a user's own config may use the adaptive form) but
+    /// never selected.
+    static func resolveThemeDefinition(_ directive: ThemeDirective?) -> GhosttyThemeDefinition? {
         guard let directive else { return nil }
 
         let name: String
         switch directive {
         case let .fixed(value):
             name = value
-        case let .adaptive(light, dark):
-            name = preferDark ? dark : light
+        case let .adaptive(_, dark):
+            name = dark
         }
 
         guard let definition = ThemeCatalogSource.theme(named: name) else {
@@ -164,23 +170,6 @@ public enum GhosttyBridge {
             return nil
         }
         return definition
-    }
-
-    /// Whether the current system appearance is dark, used to resolve the
-    /// `light:/dark:` adaptive theme form.
-    ///
-    /// Reads `AppleInterfaceStyle` straight from `defaults` rather than
-    /// `NSApp.effectiveAppearance`: ``GhosttyThemeController/reapply()``
-    /// pins `NSApplication.shared.appearance` to the resolved palette once
-    /// any theme is active (see below), and once that pin exists,
-    /// `effectiveAppearance` stops tracking the system and just echoes the
-    /// app's own pin back — a case of reading back what this app itself
-    /// wrote. `AppleInterfaceStyle` is written by the system, not this app,
-    /// so it stays truthful regardless of any pin. `defaults` defaults to
-    /// the live store so ordinary callers need not know this exists, while
-    /// tests can inject an isolated one to avoid touching global state.
-    static func systemPrefersDarkAppearance(defaults: UserDefaults = .standard) -> Bool {
-        defaults.string(forKey: "AppleInterfaceStyle") == "Dark"
     }
 
     /// The user's config, fully resolved: a `ConfigSource` libghostty can
@@ -282,14 +271,13 @@ public enum GhosttyBridge {
     ///   while tests can pass an explicit value to keep resolution pure.
     @MainActor
     static func resolveUserConfig(
-        preferDark: Bool = systemPrefersDarkAppearance(),
         override: ThemeDirective? = ThemeOverride.currentDirective()
     ) -> ResolvedUserConfig {
         guard let path = userConfigFilePath else {
             // Still generated rather than `.none`: even with no user config
             // at all, the app's own key equivalents must be released from
             // Ghostty's defaults.
-            let definition = resolveThemeDefinition(override, preferDark: preferDark)
+            let definition = resolveThemeDefinition(override)
             return ResolvedUserConfig(
                 configSource: .generated(appOwnedKeybinds),
                 theme: definition?.toTerminalTheme() ?? .default,
@@ -306,7 +294,7 @@ public enum GhosttyBridge {
             // otherwise silently falls back to the default theme with no
             // way for the user to tell why.
             logger.error("ghostty config: failed to read \(path, privacy: .public): \(error, privacy: .public)")
-            let definition = resolveThemeDefinition(override, preferDark: preferDark)
+            let definition = resolveThemeDefinition(override)
             return ResolvedUserConfig(
                 configSource: .generated(appOwnedKeybinds),
                 theme: definition?.toTerminalTheme() ?? .default,
@@ -322,7 +310,7 @@ public enum GhosttyBridge {
         // Passes through as generated text rather than `.file(path)` even
         // when there's no theme directive to resolve, since the unbinds
         // have to be appended to it either way.
-        let definition = resolveThemeDefinition(directive, preferDark: preferDark)
+        let definition = resolveThemeDefinition(directive)
         let theme = definition?.toTerminalTheme() ?? .default
         return ResolvedUserConfig(
             configSource: .generated(sanitized + appOwnedKeybinds),
@@ -584,43 +572,11 @@ final class TerminalSurfaceHostRegistry {
 /// ``TerminalSurfaceHostRegistry``.
 @MainActor
 public enum GhosttyThemeController {
-    private static var systemAppearanceObserver: NSObjectProtocol?
-
     static func reapply() {
         let resolved = GhosttyBridge.resolveUserConfig()
         GhosttyResolvedTheme.shared.update(resolved.themeDefinition)
         NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
         TerminalSurfaceHostRegistry.shared.applyThemeToAllHosts(resolved.theme)
-    }
-
-    /// Observes the system's light/dark preference and calls ``reapply()``
-    /// whenever it flips, so Match System (``ThemeOverrideMode/matchSystem``)
-    /// and a config file's own adaptive `theme = light:X,dark:Y` directive
-    /// both keep tracking the system live instead of only at launch or the
-    /// next unrelated `reapply()`. `reapply()` re-resolves from scratch and
-    /// is a no-op when nothing changed, so firing it for every system
-    /// appearance change — regardless of which mode is active — is cheap
-    /// enough not to bother filtering.
-    ///
-    /// `NSApp.effectiveAppearance`/its KVO cannot detect this change: once
-    /// `reapply()` has pinned `NSApplication.shared.appearance` (above),
-    /// `effectiveAppearance` echoes that pin back instead of tracking the
-    /// system — see ``GhosttyBridge/systemPrefersDarkAppearance(defaults:)``
-    /// for the same trap on the read side. `AppleInterfaceThemeChangedNotification`
-    /// is the system's own distributed notification for this preference and
-    /// is unaffected by anything this app pins.
-    ///
-    /// Call once, from app startup (``BSideApp/init()``); a second call is a
-    /// harmless no-op rather than a second observer.
-    public static func installSystemAppearanceObserver() {
-        guard systemAppearanceObserver == nil else { return }
-        systemAppearanceObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
-            object: nil,
-            queue: .main
-        ) { _ in
-            MainActor.assumeIsolated { reapply() }
-        }
     }
 }
 

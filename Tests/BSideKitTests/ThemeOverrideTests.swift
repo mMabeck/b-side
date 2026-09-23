@@ -1,4 +1,3 @@
-import AppKit
 import GhosttyTheme
 import Foundation
 import Testing
@@ -13,9 +12,7 @@ struct ThemeOverrideTests {
     func useConfigYieldsNoDirective() {
         let directive = ThemeOverride.directive(
             mode: .useConfig,
-            singleThemeName: "Ayu Mirage",
-            lightThemeName: "Ayu Light",
-            darkThemeName: "Ayu Mirage"
+            singleThemeName: "Ayu Mirage"
         )
         #expect(directive == nil)
     }
@@ -24,9 +21,7 @@ struct ThemeOverrideTests {
     func singleModeYieldsFixedDirective() {
         let directive = ThemeOverride.directive(
             mode: .single,
-            singleThemeName: "Ayu Mirage",
-            lightThemeName: "",
-            darkThemeName: ""
+            singleThemeName: "Ayu Mirage"
         )
         #expect(directive == .fixed("Ayu Mirage"))
     }
@@ -35,28 +30,9 @@ struct ThemeOverrideTests {
     func singleModeWithEmptyNameYieldsNoDirective() {
         let directive = ThemeOverride.directive(
             mode: .single,
-            singleThemeName: "",
-            lightThemeName: "",
-            darkThemeName: ""
+            singleThemeName: ""
         )
         #expect(directive == nil)
-    }
-
-    @Test("matchSystem with both names yields an adaptive directive")
-    func matchSystemYieldsAdaptiveDirective() {
-        let directive = ThemeOverride.directive(
-            mode: .matchSystem,
-            singleThemeName: "",
-            lightThemeName: "Ayu Light",
-            darkThemeName: "Ayu Mirage"
-        )
-        #expect(directive == .adaptive(light: "Ayu Light", dark: "Ayu Mirage"))
-    }
-
-    @Test("matchSystem missing either name yields no directive")
-    func matchSystemMissingNameYieldsNoDirective() {
-        #expect(ThemeOverride.directive(mode: .matchSystem, singleThemeName: "", lightThemeName: "Ayu Light", darkThemeName: "") == nil)
-        #expect(ThemeOverride.directive(mode: .matchSystem, singleThemeName: "", lightThemeName: "", darkThemeName: "Ayu Mirage") == nil)
     }
 
     @Test("currentDirective reads the same UserDefaults keys @AppStorage writes to")
@@ -71,39 +47,36 @@ struct ThemeOverrideTests {
         #expect(ThemeOverride.currentDirective(defaults: defaults) == .fixed("Ayu Mirage"))
     }
 
-    @Test("systemPrefersDarkAppearance reads the system's own AppleInterfaceStyle, not NSApp's pinned appearance")
-    func systemPrefersDarkAppearanceIgnoresPinnedAppearance() throws {
+    @Test("A stored matchSystem mode migrates to Single Theme using the old dark theme name")
+    func legacyMatchSystemMigratesToSingleWithDarkName() {
+        let directive = ThemeOverride.directive(
+            rawMode: "matchSystem",
+            singleThemeName: "",
+            legacyDarkThemeName: "Ayu Mirage"
+        )
+        #expect(directive == .fixed("Ayu Mirage"))
+    }
+
+    @Test("A stored matchSystem mode with no dark theme name falls back to Use Ghostty Config")
+    func legacyMatchSystemWithNoDarkNameFallsBackToUseConfig() {
+        let directive = ThemeOverride.directive(
+            rawMode: "matchSystem",
+            singleThemeName: "",
+            legacyDarkThemeName: ""
+        )
+        #expect(directive == nil)
+    }
+
+    @Test("currentDirective migrates a prior install's stored matchSystem mode")
+    func currentDirectiveMigratesLegacyMatchSystem() throws {
         let suiteName = "ThemeOverrideTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        // Pin NSApp to light, exactly as `GhosttyThemeController.reapply()`
-        // does for every resolved theme. If this read went through
-        // `NSApp.effectiveAppearance` instead of `defaults`, it would report
-        // light forever regardless of what the system actually switched to.
-        let previousAppearance = NSApplication.shared.appearance
-        NSApplication.shared.appearance = NSAppearance(named: .aqua)
-        defer { NSApplication.shared.appearance = previousAppearance }
+        defaults.set("matchSystem", forKey: AppearanceSettingsKeys.mode)
+        defaults.set("Ayu Mirage", forKey: "settings.appearance.darkThemeName")
 
-        defaults.set("Dark", forKey: "AppleInterfaceStyle")
-        #expect(GhosttyBridge.systemPrefersDarkAppearance(defaults: defaults) == true)
-
-        defaults.removeObject(forKey: "AppleInterfaceStyle")
-        #expect(GhosttyBridge.systemPrefersDarkAppearance(defaults: defaults) == false)
-    }
-
-    @Test("Adaptive resolution flips with preferDark even while NSApp's appearance is pinned to the opposite value")
-    func adaptiveResolutionFlipsWithPreferDarkWhilePinned() {
-        let previousAppearance = NSApplication.shared.appearance
-        NSApplication.shared.appearance = NSAppearance(named: .aqua)
-        defer { NSApplication.shared.appearance = previousAppearance }
-
-        let directive = GhosttyBridge.ThemeDirective.adaptive(light: "Ayu Light", dark: "Ayu Mirage")
-        let lightResolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: false)
-        let darkResolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: true)
-
-        #expect(lightResolved?.name == "Ayu Light")
-        #expect(darkResolved?.name == "Ayu Mirage")
+        #expect(ThemeOverride.currentDirective(defaults: defaults) == .fixed("Ayu Mirage"))
     }
 
     @Test("An override replaces the config file's own theme directive, keeping the rest of the config")
@@ -129,7 +102,7 @@ struct ThemeOverrideTests {
             }
         }
 
-        let resolved = GhosttyBridge.resolveUserConfig(preferDark: true, override: .fixed("Ayu Mirage"))
+        let resolved = GhosttyBridge.resolveUserConfig(override: .fixed("Ayu Mirage"))
         #expect(resolved.themeDefinition?.name == "Ayu Mirage")
         guard case let .generated(generated) = resolved.configSource else {
             Issue.record("expected a generated config source, got \(resolved.configSource)")
@@ -161,7 +134,7 @@ struct ThemeOverrideTests {
             }
         }
 
-        let resolved = GhosttyBridge.resolveUserConfig(preferDark: true, override: nil)
+        let resolved = GhosttyBridge.resolveUserConfig(override: nil)
         #expect(resolved.themeDefinition?.name == "Ayu Light")
     }
 
@@ -184,19 +157,26 @@ struct ThemeOverrideTests {
 
         #expect(GhosttyBridge.userConfigFilePath == nil)
 
-        let resolved = GhosttyBridge.resolveUserConfig(preferDark: true, override: .fixed("Ayu Mirage"))
+        let resolved = GhosttyBridge.resolveUserConfig(override: .fixed("Ayu Mirage"))
         #expect(resolved.themeDefinition?.name == "Ayu Mirage")
+    }
+
+    @Test("An adaptive light:X,dark:Y directive always resolves to the dark theme")
+    func adaptiveDirectiveResolvesToDark() {
+        let directive = GhosttyBridge.ThemeDirective.adaptive(light: "Ayu Light", dark: "Ayu Mirage")
+        let resolved = GhosttyBridge.resolveThemeDefinition(directive)
+        #expect(resolved?.name == "Ayu Mirage")
     }
 
     @Test("An unknown override name falls back to no theme, same as an unknown config directive")
     func unknownOverrideNameFallsBack() {
-        let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("Definitely Not A Real Theme"), preferDark: true)
+        let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("Definitely Not A Real Theme"))
         #expect(resolved == nil)
     }
 
     @Test("Bundled brand themes resolve through the same lookup as the catalog")
     func bundledBrandThemeResolves() {
-        let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("B-Side"), preferDark: true)
+        let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("B-Side"))
         #expect(resolved?.name == "B-Side")
         #expect(resolved?.background == "16141c")
     }
