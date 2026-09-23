@@ -72,6 +72,59 @@ public final class ProjectsStore {
         return tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == selectedTaskID }
     }
 
+    /// Task ids with a live `TerminalSurfaceHost` in `MainAreaView`, ordered
+    /// by when each terminal was first opened — not by project/task list
+    /// order, so "Cmd+1" always means "the task I opened first", not
+    /// whichever task happens to sort first. Owned here rather than as
+    /// private `MainAreaView` state so the sidebar's "Active" section and
+    /// `NavigationShortcuts` can both read it; `MainAreaView` is still the
+    /// only writer, via `noteTerminalOpened(taskID:)`/`pruneOpenTerminals(keeping:)`,
+    /// mirroring its own `hostsByTaskID` one-for-one.
+    public private(set) var openTerminalTaskIDs: [Int64] = []
+
+    /// Records that `taskID` now has a live terminal host, appending it to
+    /// the end of `openTerminalTaskIDs` if it isn't tracked yet. A no-op for
+    /// an id already present, since `MainAreaView.ensureHost` only ever
+    /// creates a host once per task and re-selecting an existing terminal
+    /// must not reorder it.
+    public func noteTerminalOpened(taskID: Int64) {
+        openTerminalTaskIDs = Self.addingOpenTerminal(taskID, to: openTerminalTaskIDs)
+    }
+
+    /// Drops every id in `removed` from `openTerminalTaskIDs`, called from
+    /// `MainAreaView.purgeHosts` with the same ids it evicts from
+    /// `hostsByTaskID` so the two never disagree about which tasks still
+    /// have a live terminal.
+    public func pruneOpenTerminals(removing removed: Set<Int64>) {
+        openTerminalTaskIDs = Self.removingOpenTerminals(removed, from: openTerminalTaskIDs)
+    }
+
+    /// Pure so it's directly testable: appends `id` only if it isn't
+    /// already present, preserving the existing order of everything else.
+    static func addingOpenTerminal(_ id: Int64, to ids: [Int64]) -> [Int64] {
+        ids.contains(id) ? ids : ids + [id]
+    }
+
+    /// Pure so it's directly testable: removes every id in `removed`,
+    /// preserving the relative order of what remains.
+    static func removingOpenTerminals(_ removed: Set<Int64>, from ids: [Int64]) -> [Int64] {
+        ids.filter { !removed.contains($0) }
+    }
+
+    /// Looks up the (task, owning project) pair for an arbitrary task id —
+    /// unlike `selectedTask`, not tied to the current selection. Used by the
+    /// sidebar's "Active" section and `NavigationShortcuts` to resolve an
+    /// `openTerminalTaskIDs` entry into something `selectTask(_:project:)`
+    /// can target.
+    public func taskAndProject(forID id: Int64) -> (task: TaskRecord, project: Project)? {
+        for (projectID, tasks) in tasksByProject {
+            guard let task = tasks.first(where: { $0.id == id }) else { continue }
+            guard let project = projects.first(where: { $0.id == projectID }) else { continue }
+            return (task, project)
+        }
+        return nil
+    }
+
     /// Selects `project` for the sidebar/dashboard and clears any task
     /// selection: a project on its own is never a terminal, so picking one
     /// always evicts whatever task terminal was showing.
