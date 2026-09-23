@@ -276,7 +276,7 @@ struct TaskCreationView: View {
         } label: {
             themedMenuLabel(selectedBranch ?? "Choose…", isPlaceholder: selectedBranch == nil)
         }
-        .menuStyle(.borderlessButton)
+        .themedMenuStyle()
     }
 
     private var baseRefPicker: some View {
@@ -287,7 +287,7 @@ struct TaskCreationView: View {
         } label: {
             themedMenuLabel(baseRef.isEmpty ? "Choose…" : baseRef, isPlaceholder: baseRef.isEmpty)
         }
-        .menuStyle(.borderlessButton)
+        .themedMenuStyle()
     }
 
     private func themedMenuLabel(_ text: String, isPlaceholder: Bool) -> some View {
@@ -302,6 +302,8 @@ struct TaskCreationView: View {
         .font(.system(size: 13))
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(theme.palette.elevatedSurfaceBackground)
@@ -462,5 +464,18 @@ struct TaskCreationView: View {
                 errorMessage = String(describing: error)
             }
         }
+    }
+}
+
+private extension View {
+    /// A `Menu` that renders its label exactly as built: `.borderlessButton`
+    /// on macOS discards the label's own background, padding and frame and
+    /// shows bare text, so the themed field box never appeared.
+    func themedMenuStyle() -> some View {
+        self
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
