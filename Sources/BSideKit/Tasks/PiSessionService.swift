@@ -314,6 +314,15 @@ public enum PiSessionService {
     /// `currentWorkingDirectory` (or is fine as-is) — this function only
     /// decides *whether there is a transcript to hand it at all*.
     ///
+    /// A non-empty stored `transcriptPath` that fails to repair (the file
+    /// was moved or deleted out from under the stored path, e.g. by a repair
+    /// that relocated it but crashed or quit before
+    /// `ProjectsStore.recordTranscriptPath` persisted the new location) is
+    /// not trusted as the final answer either: this falls back to the same
+    /// `locateTranscript` scan used for an empty stored path before giving
+    /// up, since the transcript may well still exist elsewhere under
+    /// `locations.sessionsRoot`.
+    ///
     /// Falls back to `transcriptPathForLaunch: nil` (i.e. `--session-id`)
     /// only when no transcript for this session id exists anywhere, or the
     /// one found is unreadable/malformed. This is deliberately the last
@@ -331,27 +340,29 @@ public enum PiSessionService {
         currentWorkingDirectory: String,
         locations: Locations
     ) -> ResolvedTranscript {
-        let candidatePath: String?
-        if !conversation.transcriptPath.isEmpty {
-            candidatePath = conversation.transcriptPath
-        } else {
-            candidatePath = locateTranscript(sessionID: conversation.sessionId, locations: locations)?.path
+        func repaired(from candidatePath: String) -> ResolvedTranscript? {
+            guard let repairedPath = repairTranscriptForResume(
+                transcriptPath: candidatePath,
+                currentWorkingDirectory: currentWorkingDirectory,
+                locations: locations
+            ) else {
+                return nil
+            }
+            let pathToPersist = repairedPath != conversation.transcriptPath ? repairedPath : nil
+            return ResolvedTranscript(transcriptPathForLaunch: repairedPath, transcriptPathToPersist: pathToPersist)
         }
 
-        guard let candidatePath else {
-            return ResolvedTranscript(transcriptPathForLaunch: nil, transcriptPathToPersist: nil)
+        if !conversation.transcriptPath.isEmpty, let result = repaired(from: conversation.transcriptPath) {
+            return result
         }
 
-        guard let repairedPath = repairTranscriptForResume(
-            transcriptPath: candidatePath,
-            currentWorkingDirectory: currentWorkingDirectory,
-            locations: locations
-        ) else {
-            return ResolvedTranscript(transcriptPathForLaunch: nil, transcriptPathToPersist: nil)
+        if let located = locateTranscript(sessionID: conversation.sessionId, locations: locations)?.path,
+           let result = repaired(from: located)
+        {
+            return result
         }
 
-        let pathToPersist = repairedPath != conversation.transcriptPath ? repairedPath : nil
-        return ResolvedTranscript(transcriptPathForLaunch: repairedPath, transcriptPathToPersist: pathToPersist)
+        return ResolvedTranscript(transcriptPathForLaunch: nil, transcriptPathToPersist: nil)
     }
 
     /// Pi's sessions-subdirectory naming rule for a working directory,

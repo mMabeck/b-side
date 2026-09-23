@@ -418,6 +418,63 @@ struct PiSessionServiceResolveTranscriptForResumeTests {
         #expect(resolved.transcriptPathForLaunch == nil)
         #expect(resolved.transcriptPathToPersist == nil)
     }
+
+    @Test("a stored transcriptPath pointing at a deleted file falls back to scanning, not --session-id")
+    func deletedStoredPathFallsBackToScanning() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let cwd = root.appendingPathComponent("worktree").path
+        try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+
+        let sessionID = PiSessionService.newSessionID()
+        let realTranscriptURL = sessionsRoot.appendingPathComponent("--slug--/20260101_000000_aaa.jsonl")
+        try writeTranscript(id: sessionID, cwd: cwd, at: realTranscriptURL)
+
+        // The stored path is stale: it names a file that no longer exists
+        // (e.g. a repair relocated the transcript but crashed before
+        // persisting the new path), while a transcript for this session id
+        // genuinely exists elsewhere under the sessions root.
+        let staleStoredPath = sessionsRoot.appendingPathComponent("--gone--/20260101_000000_aaa.jsonl").path
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: staleStoredPath)
+
+        let resolved = PiSessionService.resolveTranscriptForResume(
+            conversation: conversation,
+            currentWorkingDirectory: cwd,
+            locations: locations
+        )
+
+        let locatedPath = try #require(PiSessionService.locateTranscript(sessionID: sessionID, locations: locations)?.path)
+        #expect(resolved.transcriptPathForLaunch == locatedPath)
+        #expect(resolved.transcriptPathToPersist == locatedPath)
+    }
+
+    @Test("a stored transcriptPath pointing at a deleted file with nothing found elsewhere falls back to --session-id")
+    func deletedStoredPathWithNothingElseFallsBackToSessionID() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        try FileManager.default.createDirectory(at: sessionsRoot, withIntermediateDirectories: true)
+        let cwd = root.appendingPathComponent("worktree").path
+        try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+
+        let sessionID = PiSessionService.newSessionID()
+        let staleStoredPath = sessionsRoot.appendingPathComponent("--gone--/20260101_000000_aaa.jsonl").path
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: staleStoredPath)
+
+        let resolved = PiSessionService.resolveTranscriptForResume(
+            conversation: conversation,
+            currentWorkingDirectory: cwd,
+            locations: locations
+        )
+
+        #expect(resolved.transcriptPathForLaunch == nil)
+        #expect(resolved.transcriptPathToPersist == nil)
+    }
 }
 
 @Suite("PiSessionService + ProjectsStore conversation binding")
