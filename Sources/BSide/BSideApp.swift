@@ -53,6 +53,7 @@ struct BSideApp: App {
             // window.
             WindowLayoutCommands()
             ProjectCommands(store: store)
+            NavigationCommands(store: store)
         }
 
         Settings {
