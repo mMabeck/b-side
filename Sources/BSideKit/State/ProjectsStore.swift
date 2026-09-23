@@ -109,6 +109,55 @@ public final class ProjectsStore {
         openTerminalTaskIDs = Self.removingOpenTerminals(removed, from: openTerminalTaskIDs)
     }
 
+    /// The task id, if any, whose terminal should become the active
+    /// selection after `taskID`'s terminal closes: the entry that took
+    /// `taskID`'s position in `openTaskIDs` once it's removed (i.e. the
+    /// "next" active task), or the new last entry if `taskID` was the last
+    /// one open. `nil` once no terminals remain open. Pure so it's directly
+    /// testable without a live store.
+    static func nextActiveTaskID(afterClosing taskID: Int64, in openTaskIDs: [Int64]) -> Int64? {
+        guard let index = openTaskIDs.firstIndex(of: taskID) else { return nil }
+        let remaining = removingOpenTerminals([taskID], from: openTaskIDs)
+        guard !remaining.isEmpty else { return nil }
+        return remaining[min(index, remaining.count - 1)]
+    }
+
+    /// Task id whose terminal `MainAreaView` should tear down next — set by
+    /// `closeTerminal(for:project:)`, observed and cleared (via
+    /// `acknowledgeTerminalClosed`) by `MainAreaView` once it has actually
+    /// purged that task's `TerminalSurfaceHost`. A one-shot request rather
+    /// than a queue: only one Cmd+W can happen at a time, and `MainAreaView`
+    /// acts on it before the next one can be issued.
+    public private(set) var closedTerminalTaskID: Int64?
+
+    /// Ends `task`'s terminal: drops it from `openTerminalTaskIDs` (so it
+    /// leaves the sidebar's "Active" section immediately) and requests that
+    /// `MainAreaView` tear down its `TerminalSurfaceHost` via
+    /// `closedTerminalTaskID`. The task itself is untouched — still in the
+    /// sidebar, its worktree and pi session transcript intact for next time
+    /// it's opened. Selects the next sensible target: the task that took
+    /// its place among open terminals, or else `project`'s own dashboard.
+    public func closeTerminal(for task: TaskRecord, project: Project) {
+        guard let id = task.id else { return }
+        let nextID = Self.nextActiveTaskID(afterClosing: id, in: openTerminalTaskIDs)
+        openTerminalTaskIDs = Self.removingOpenTerminals([id], from: openTerminalTaskIDs)
+        closedTerminalTaskID = id
+        if let nextID, let match = taskAndProject(forID: nextID) {
+            selectTask(match.task, project: match.project)
+        } else {
+            selectProject(project)
+        }
+    }
+
+    /// Clears `closedTerminalTaskID` once `MainAreaView` has purged the
+    /// host for `id` — a no-op if a different (or no) close request is
+    /// currently pending, so a stale acknowledgement can't clear a newer
+    /// request.
+    public func acknowledgeTerminalClosed(_ id: Int64) {
+        guard closedTerminalTaskID == id else { return }
+        closedTerminalTaskID = nil
+    }
+
     /// Pure so it's directly testable: appends `id` only if it isn't
     /// already present, preserving the existing order of everything else.
     static func addingOpenTerminal(_ id: Int64, to ids: [Int64]) -> [Int64] {

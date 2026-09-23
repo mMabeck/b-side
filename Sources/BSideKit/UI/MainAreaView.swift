@@ -80,6 +80,11 @@ struct MainAreaView: View {
         .onChange(of: liveTaskIDs) { _, ids in
             purgeHosts(keeping: ids)
         }
+        .onChange(of: store.closedTerminalTaskID) { _, closedID in
+            guard let closedID else { return }
+            closeHost(taskID: closedID)
+            store.acknowledgeTerminalClosed(closedID)
+        }
     }
 
     /// With no projects at all, invites adding one instead of the plain
@@ -325,6 +330,24 @@ struct MainAreaView: View {
         }
     }
 
+    /// Ends one task's terminal without waiting for its task to be deleted
+    /// or archived (`purgeHosts` only evicts those): tears down its
+    /// `TerminalSurfaceHost` — killing the pty/Pi process, but leaving the
+    /// Pi session transcript on disk so reopening the task resumes it —
+    /// cancels its auto-rename watcher, and releases both the open-terminal
+    /// tracking (`ProjectsStore.pruneOpenTerminals`, mirroring `purgeHosts`)
+    /// and its `conversationGate` claim. Releasing the claim specifically
+    /// (rather than `release(exceptLiveTaskIDs:)`, which only drops ids no
+    /// longer live) matters here: the task itself is still live, so without
+    /// this reopening it would find the id still claimed and `ensureHost`
+    /// would silently do nothing.
+    private func closeHost(taskID: Int64) {
+        guard hostsByTaskID.removeValue(forKey: taskID) != nil else { return }
+        autoRenameWatchers.removeValue(forKey: taskID)?.cancel()
+        store.pruneOpenTerminals(removing: [taskID])
+        conversationGate.releaseClaim(for: taskID)
+    }
+
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
         let purged = MainAreaView.idsToPurge(cachedIDs: Set(hostsByTaskID.keys), liveTaskIDs: liveTaskIDs)
         for id in purged {
@@ -457,6 +480,15 @@ final class ConversationLaunchGate {
     }
 
     private func abandon(_ id: Int64) {
+        claimedTaskIDs.remove(id)
+    }
+
+    /// Drops `id`'s claim outright, live or not — used when a task's
+    /// terminal is closed explicitly (`MainAreaView.closeHost`) rather than
+    /// its task going away, so reopening it later can claim and resolve a
+    /// conversation for it again instead of finding it stuck claimed
+    /// forever.
+    func releaseClaim(for id: Int64) {
         claimedTaskIDs.remove(id)
     }
 }

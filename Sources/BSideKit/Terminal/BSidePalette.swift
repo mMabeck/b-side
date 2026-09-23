@@ -13,6 +13,11 @@ import SwiftUI
 /// its own foreground, so they stay correctly related to *this* theme's
 /// contrast rather than assuming any particular background lightness.
 public struct BSidePalette: Equatable, Sendable {
+    /// The hue band (in degrees) `statusSuccess` is pulled into so it reads
+    /// as unambiguously green rather than a theme's own often yellowish-lime
+    /// ANSI green (see `RGBColor.huePulled(intoRange:)`).
+    static let successHueRange: ClosedRange<Double> = 120...135
+
     /// Whether this palette's background reads as dark, per WCAG relative
     /// luminance. Drives ``preferredAppearance``.
     public let isDark: Bool
@@ -109,9 +114,9 @@ public struct BSidePalette: Equatable, Sendable {
             .blended(toward: background, amount: 0.32)
             .ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 3.0)
 
-        func status(base: Int, bright: Int) -> Color {
+        func status(base: Int, bright: Int) -> RGBColor {
             let hex = (dark ? definition.palette[bright] : nil) ?? definition.palette[base]
-            return (hex.map(RGBColor.init(hex:)) ?? foreground).color
+            return hex.map(RGBColor.init(hex:)) ?? foreground
         }
 
         return BSidePalette(
@@ -127,10 +132,16 @@ public struct BSidePalette: Equatable, Sendable {
             selectionBackground: selectionBg.color,
             selectionForeground: selectionFg.color,
             accent: accentColor.color,
-            statusRunning: status(base: 4, bright: 12),
-            statusNeedsAttention: status(base: 3, bright: 11),
-            statusError: status(base: 1, bright: 9),
-            statusSuccess: status(base: 2, bright: 10)
+            statusRunning: status(base: 4, bright: 12).color,
+            statusNeedsAttention: status(base: 3, bright: 11).color,
+            statusError: status(base: 1, bright: 9).color,
+            // The theme's own ANSI green is often a yellowish lime (Ayu
+            // Mirage's bright green, d5ff80, reads closer to lime than
+            // green — hue ~80°), too far from "green" to read as a success
+            // colour at a glance. Nudged into a true-green hue band while
+            // keeping its own saturation/lightness, so it still varies by
+            // theme instead of becoming one hardcoded green.
+            statusSuccess: status(base: 2, bright: 10).huePulled(intoRange: BSidePalette.successHueRange).color
         )
     }
 }
@@ -178,6 +189,65 @@ struct RGBColor: Equatable {
             g: g + (other.g - g) * amount,
             b: b + (other.b - b) * amount
         )
+    }
+
+    /// HSL hue (0..<360), saturation, and lightness (both 0...1). Achromatic
+    /// colours (r == g == b) have an undefined hue, reported as 0.
+    var hsl: (hue: Double, saturation: Double, lightness: Double) {
+        let maxComponent = max(r, g, b)
+        let minComponent = min(r, g, b)
+        let lightness = (maxComponent + minComponent) / 2
+        guard maxComponent != minComponent else { return (0, 0, lightness) }
+
+        let delta = maxComponent - minComponent
+        let saturation = lightness > 0.5 ? delta / (2 - maxComponent - minComponent) : delta / (maxComponent + minComponent)
+
+        var hue: Double
+        switch maxComponent {
+        case r: hue = (g - b) / delta + (g < b ? 6 : 0)
+        case g: hue = (b - r) / delta + 2
+        default: hue = (r - g) / delta + 4
+        }
+        hue *= 60
+        return (hue, saturation, lightness)
+    }
+
+    /// Builds a colour from HSL components (`hue` in degrees, `saturation`/
+    /// `lightness` 0...1).
+    init(hue: Double, saturation: Double, lightness: Double) {
+        guard saturation > 0 else {
+            self.init(r: lightness, g: lightness, b: lightness)
+            return
+        }
+        let c = (1 - abs(2 * lightness - 1)) * saturation
+        let hPrime = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360) / 60
+        let x = c * (1 - abs(hPrime.truncatingRemainder(dividingBy: 2) - 1))
+        let m = lightness - c / 2
+        let (r0, g0, b0): (Double, Double, Double)
+        switch hPrime {
+        case 0..<1: (r0, g0, b0) = (c, x, 0)
+        case 1..<2: (r0, g0, b0) = (x, c, 0)
+        case 2..<3: (r0, g0, b0) = (0, c, x)
+        case 3..<4: (r0, g0, b0) = (0, x, c)
+        case 4..<5: (r0, g0, b0) = (x, 0, c)
+        default: (r0, g0, b0) = (c, 0, x)
+        }
+        self.init(r: r0 + m, g: g0 + m, b: b0 + m)
+    }
+
+    /// Rotates this colour's hue into `range` (degrees) if it currently sits
+    /// outside it, nudging to whichever edge is nearer while leaving
+    /// saturation and lightness untouched — the colour stays visibly "this
+    /// theme's own tone", just no longer off in an adjacent hue family.
+    /// Colours with negligible saturation (greys) are left alone: hue is
+    /// meaningless on them, and rotating it would do nothing perceptible.
+    func huePulled(intoRange range: ClosedRange<Double>, minimumSaturation: Double = 0.15) -> RGBColor {
+        let (hue, saturation, lightness) = hsl
+        guard saturation >= minimumSaturation, !range.contains(hue) else { return self }
+        let distanceToLower = abs(hue - range.lowerBound)
+        let distanceToUpper = abs(hue - range.upperBound)
+        let target = distanceToLower <= distanceToUpper ? range.lowerBound : range.upperBound
+        return RGBColor(hue: target, saturation: saturation, lightness: lightness)
     }
 
     /// WCAG contrast ratio between two colours: `(lighter + 0.05) / (darker + 0.05)`,
