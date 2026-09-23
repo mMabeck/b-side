@@ -16,11 +16,13 @@ enum TaskCreationValidation {
     /// a chosen branch (existing branch).
     static func canCreate(
         name: String,
+        useWorktree: Bool,
         mode: TaskCreationMode,
         baseRef: String,
         selectedBranch: String?
     ) -> Bool {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard useWorktree else { return true }
         switch mode {
         case .newBranch:
             return !baseRef.trimmingCharacters(in: .whitespaces).isEmpty
@@ -56,8 +58,10 @@ struct TaskCreationView: View {
     @State private var baseRef: String
     @State private var mode: Mode = .newBranch
     @State private var branches: [TaskWorktreeService.BranchOption] = []
+    @State private var baseRefOptions: [String] = []
     @State private var selectedBranch: String?
     @State private var branchesLoaded = false
+    @State private var useWorktree: Bool
 
     @State private var isCreating = false
     @State private var isFinished = false
@@ -71,6 +75,9 @@ struct TaskCreationView: View {
         self.store = store
         self.onFinished = onFinished
         _baseRef = State(initialValue: project.baseRef)
+        _useWorktree = State(
+            initialValue: ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path)).taskDefaults.useWorktree
+        )
     }
 
     var body: some View {
@@ -100,10 +107,15 @@ struct TaskCreationView: View {
         // system-drawn text inside it renders in light `aqua` over this dark
         // background.
         .themedWindow(theme.palette)
-        .task(id: mode) {
-            guard mode == .existingBranch, !branchesLoaded else { return }
+        .task {
+            guard !branchesLoaded else { return }
             branchesLoaded = true
             branches = (try? await TaskWorktreeService.availableBranches(for: project)) ?? []
+            var baseRefs = (try? await TaskWorktreeService.availableBaseRefs(for: project)) ?? []
+            if !baseRefs.isEmpty, !baseRefs.contains(project.baseRef) {
+                baseRefs.insert(project.baseRef, at: 0)
+            }
+            baseRefOptions = baseRefs
         }
     }
 
@@ -131,23 +143,33 @@ struct TaskCreationView: View {
                 themedTextField("e.g. Fix login bug", text: $name)
             }
 
-            formRow("Start from") {
-                modeToggle
+            formRow("Use worktree") {
+                worktreeToggleRow
             }
 
-            switch mode {
-            case .newBranch:
-                formRow("Base ref") {
-                    themedTextField("main", text: $baseRef)
+            if useWorktree {
+                formRow("Start from") {
+                    modeToggle
                 }
-            case .existingBranch:
-                formRow("Branch") {
-                    if branches.isEmpty {
-                        Text("No local branches found.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(theme.palette.textDisabled)
-                    } else {
-                        branchPicker
+
+                switch mode {
+                case .newBranch:
+                    formRow("Base ref") {
+                        if baseRefOptions.isEmpty {
+                            themedTextField("main", text: $baseRef)
+                        } else {
+                            baseRefPicker
+                        }
+                    }
+                case .existingBranch:
+                    formRow("Branch") {
+                        if branches.isEmpty {
+                            Text("No local branches found.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(theme.palette.textDisabled)
+                        } else {
+                            branchPicker
+                        }
                     }
                 }
             }
@@ -188,6 +210,39 @@ struct TaskCreationView: View {
         }
     }
 
+    private var worktreeToggleRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            themedToggle(isOn: $useWorktree)
+            if !useWorktree {
+                Text("Runs in the project folder on its current branch.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
+    }
+
+    private func themedToggle(isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isOn.wrappedValue ? theme.palette.accent : theme.palette.elevatedSurfaceBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(theme.palette.separator, lineWidth: isOn.wrappedValue ? 0 : 1)
+                )
+                .frame(width: 34, height: 20)
+                .overlay(
+                    Circle()
+                        .fill(theme.palette.selectionForeground)
+                        .frame(width: 16, height: 16)
+                        .padding(2)
+                        .frame(maxWidth: .infinity, alignment: isOn.wrappedValue ? .trailing : .leading)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func modeToggleButton(_ candidate: Mode) -> some View {
         let isSelected = mode == candidate
         return Button {
@@ -219,31 +274,52 @@ struct TaskCreationView: View {
                 .disabled(branch.isCheckedOut)
             }
         } label: {
-            HStack {
-                Text(selectedBranch ?? "Choose…")
-                    .foregroundStyle(selectedBranch == nil ? theme.palette.textDisabled : theme.palette.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10))
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
-            .font(.system(size: 13))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(theme.palette.elevatedSurfaceBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(theme.palette.separator, lineWidth: 1)
-            )
+            themedMenuLabel(selectedBranch ?? "Choose…", isPlaceholder: selectedBranch == nil)
         }
         .menuStyle(.borderlessButton)
     }
 
+    private var baseRefPicker: some View {
+        Menu {
+            ForEach(baseRefOptions, id: \.self) { ref in
+                Button(ref) { baseRef = ref }
+            }
+        } label: {
+            themedMenuLabel(baseRef.isEmpty ? "Choose…" : baseRef, isPlaceholder: baseRef.isEmpty)
+        }
+        .menuStyle(.borderlessButton)
+    }
+
+    private func themedMenuLabel(_ text: String, isPlaceholder: Bool) -> some View {
+        HStack {
+            Text(text)
+                .foregroundStyle(isPlaceholder ? theme.palette.textDisabled : theme.palette.textPrimary)
+            Spacer()
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.palette.textSecondary)
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(theme.palette.elevatedSurfaceBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(theme.palette.separator, lineWidth: 1)
+        )
+    }
+
     private var canCreate: Bool {
-        TaskCreationValidation.canCreate(name: name, mode: mode, baseRef: baseRef, selectedBranch: selectedBranch)
+        TaskCreationValidation.canCreate(
+            name: name,
+            useWorktree: useWorktree,
+            mode: mode,
+            baseRef: baseRef,
+            selectedBranch: selectedBranch
+        )
     }
 
     // MARK: - Creation progress
@@ -364,15 +440,20 @@ struct TaskCreationView: View {
         isCreating = true
         Task {
             do {
+                let newBaseRef = useWorktree && mode == .newBranch ? baseRef : nil
                 _ = try await store.createTask(
                     project: project,
                     name: name,
-                    baseRef: mode == .newBranch ? baseRef : nil,
-                    existingBranch: mode == .existingBranch ? selectedBranch : nil,
+                    baseRef: newBaseRef,
+                    existingBranch: useWorktree && mode == .existingBranch ? selectedBranch : nil,
+                    useWorktree: useWorktree,
                     onOutput: { line in
                         Task { @MainActor in logLines.append(line) }
                     }
                 )
+                if let newBaseRef, !newBaseRef.trimmingCharacters(in: .whitespaces).isEmpty, newBaseRef != project.baseRef {
+                    try? await store.updateProjectBaseRef(project, baseRef: newBaseRef)
+                }
                 isCreating = false
                 isFinished = true
                 onFinished()

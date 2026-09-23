@@ -84,6 +84,30 @@ struct TaskWorktreeServiceTests {
         #expect(shared?.checkedOutAt?.hasSuffix("/first-wt") == true)
     }
 
+    @Test("availableBaseRefs lists local branches then remote-tracking branches")
+    func availableBaseRefsListsLocalThenRemote() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let remoteURL = root.appendingPathComponent("remote.git")
+        _ = try await GitCLI.run(["init", "--bare", remoteURL.path], in: root)
+        _ = try await GitCLI.run(["remote", "add", "origin", remoteURL.path], in: repoURL)
+        _ = try await GitCLI.run(["push", "origin", "main"], in: repoURL)
+        try await GitCLI.createBranch("staging", from: "main", at: repoURL)
+        _ = try await GitCLI.run(["push", "origin", "main:release"], in: repoURL)
+        _ = try await GitCLI.run(["fetch", "origin"], in: repoURL)
+
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+        let baseRefs = try await TaskWorktreeService.availableBaseRefs(for: project)
+
+        #expect(baseRefs.contains("main"))
+        #expect(baseRefs.contains("staging"))
+        #expect(baseRefs.contains("origin/main"))
+        #expect(baseRefs.contains("origin/release"))
+        #expect(try #require(baseRefs.firstIndex(of: "main")) < (baseRefs.firstIndex(of: "origin/main") ?? Int.max))
+    }
+
     @Test("deleteTask runs teardown before removing the worktree directory")
     func teardownRunsBeforeRemoval() async throws {
         let root = try TestRepo.makeTempDirectory()

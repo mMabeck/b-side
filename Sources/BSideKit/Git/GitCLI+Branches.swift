@@ -16,6 +16,19 @@ extension GitCLI {
             .filter { !$0.isEmpty }
     }
 
+    /// Remote-tracking branch names (e.g. `origin/main`), most-recently-committed
+    /// first. Skips `<remote>/HEAD` symrefs, since those aren't real branches.
+    public static func remoteTrackingBranches(at path: URL) async throws -> [String] {
+        let output = try await runText(
+            ["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "refs/remotes"],
+            in: path
+        )
+        return output
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { !$0.isEmpty && !$0.hasSuffix("/HEAD") }
+    }
+
     /// Whether `branch` exists locally.
     public static func branchExists(_ branch: String, at path: URL) async throws -> Bool {
         do {
