@@ -113,6 +113,36 @@ struct TerminalSurfaceHostTests {
 
         window.orderOut(nil)
     }
+
+    /// Exercises what `SubagentPaneStore.spawn` relies on: a `command`
+    /// script actually starts running in the given `workingDirectory`, the
+    /// way the app opens a child subagent's pane.
+    @Test func commandStartsInGivenWorkingDirectory() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("terminal-host-cwd-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let marker = dir.appendingPathComponent("cwd-marker")
+
+        let script = dir.appendingPathComponent("launch.sh")
+        try "#!/bin/sh\npwd > \(marker.path)\nsleep 30\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+        let host = TerminalSurfaceHost(workingDirectory: dir, command: script.path)
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 800, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: TerminalHostView(host: host))
+        window.setIsVisible(true)
+        try await Task.sleep(for: .seconds(2))
+
+        let contents = try? String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(contents == dir.resolvingSymlinksInPath().path)
+
+        window.orderOut(nil)
+    }
 }
 
 /// Mounts two hosts the way `MainAreaView` does: both in the tree, one

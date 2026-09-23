@@ -318,6 +318,11 @@ public final class ProjectsStore {
     /// same data.
     public let subagentFeed = SubagentFeedStore()
 
+    /// Native split-pane state for subagent children, keyed by task — the
+    /// live-surface counterpart to `subagentFeed`'s presentation-free event
+    /// feed. `MainAreaView` reads this to lay out each task's terminal area.
+    public let subagentPanes = SubagentPaneStore()
+
     /// The local HTTP endpoint agent processes report status and subagent
     /// events to (native-rewrite.md §5, §6). `nil` until `start()` has bound it.
     public private(set) var subagentServer: SubagentEventServer?
@@ -384,7 +389,11 @@ public final class ProjectsStore {
     private func startSubagentServer() async {
         guard subagentServer == nil else { return }
         do {
-            let server = try SubagentEventServer(store: subagentFeed)
+            let server = try SubagentEventServer(
+                store: subagentFeed,
+                paneStore: subagentPanes,
+                taskExists: { [weak self] taskId in self?.task(withId: taskId) != nil }
+            )
             try await server.start()
             subagentServer = server
             Self.logger.info("Subagent event server listening on \(server.address ?? "?", privacy: .public)")

@@ -12,6 +12,21 @@ import OSLog
 /// - `POST /subagents/{taskId}/{childId}/begin` — body `{"agent","taskLabel","openingLine"?}`
 /// - `POST /subagents/{taskId}/{childId}/events` — body one or more `\n`-terminated JSON event lines
 /// - `POST /subagents/{taskId}/{childId}/done` — body the `done.json` payload
+/// - `POST /subagents/{taskId}/{childId}/spawn` — body `{"label","cwd","command"}`;
+///   opens a native split pane running `command` (an absolute path to an
+///   executable launch script, run directly — not wrapped in a login
+///   shell) in `cwd`. `204` once the surface is created; `404` if `taskId`
+///   is unknown; `429` if the task is already at `SubagentPaneStore
+///   .maxPanesPerTask` (the caller should fall back to headless); `400` for
+///   a malformed body.
+/// - `POST /subagents/{taskId}/{childId}/close` — empty body; tears down
+///   that child's pane. Always `204`, idempotent.
+///
+/// `spawn`/`close` hop to the main actor to touch `SubagentPaneStore` (and,
+/// for `spawn`, to create a `TerminalSurfaceHost`) before responding, unlike
+/// `begin`/`events`/`done`, which respond immediately and mutate `store`
+/// asynchronously — the caller needs to know a `spawn` actually produced a
+/// surface (or why not) before it decides whether to fall back to headless.
 /// Guards a resume-once flag shared between the listener's state-update
 /// closure and the enclosing continuation, since NWListener may deliver
 /// state updates from an arbitrary queue.
@@ -47,8 +62,17 @@ public final class SubagentEventServer: @unchecked Sendable {
         port.map { "127.0.0.1:\($0)" }
     }
 
-    public init(store: SubagentFeedStore) throws {
+    private let paneStore: SubagentPaneStore
+    private let taskExists: @MainActor (Int64) -> Bool
+
+    public init(
+        store: SubagentFeedStore,
+        paneStore: SubagentPaneStore,
+        taskExists: @escaping @MainActor (Int64) -> Bool
+    ) throws {
         self.store = store
+        self.paneStore = paneStore
+        self.taskExists = taskExists
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -113,12 +137,12 @@ public final class SubagentEventServer: @unchecked Sendable {
 
     private func handle(_ request: ParsedHTTPRequest, on connection: NWConnection) {
         let components = request.path.split(separator: "/").map(String.init)
-        defer { respondEmpty(on: connection) }
 
         guard components.count == 4, components[0] == "subagents",
               let taskId = Int64(components[1])
         else {
             Self.logger.notice("Ignoring request to unrecognised path \(request.path, privacy: .public)")
+            respond(status: 204, on: connection)
             return
         }
         let childId = components[2]
@@ -128,37 +152,105 @@ public final class SubagentEventServer: @unchecked Sendable {
         case "begin":
             guard let value = try? JSONDecoder().decode(JSONValue.self, from: request.body),
                   let object = value.objectValue
-            else { return }
+            else {
+                respond(status: 204, on: connection)
+                return
+            }
             let agent = object["agent"]?.stringValue ?? "agent"
             let taskLabel = object["taskLabel"]?.stringValue ?? ""
             let openingLine = object["openingLine"]?.stringValue
             Task { @MainActor [store] in
                 store.beginRun(taskId: taskId, childId: childId, agent: agent, taskLabel: taskLabel, openingLine: openingLine)
             }
+            respond(status: 204, on: connection)
         case "events":
             let key = "\(taskId):\(childId)"
             var parser = lineParsers[key] ?? SubagentEventLineParser()
             let events = parser.consume(request.body)
             lineParsers[key] = parser
-            guard !events.isEmpty else { return }
-            Task { @MainActor [store] in
-                for event in events {
-                    store.ingest(taskId: taskId, childId: childId, event: event)
+            if !events.isEmpty {
+                Task { @MainActor [store] in
+                    for event in events {
+                        store.ingest(taskId: taskId, childId: childId, event: event)
+                    }
                 }
             }
+            respond(status: 204, on: connection)
         case "done":
-            guard let payload = SubagentDonePayload.decode(from: request.body) else { return }
-            lineParsers.removeValue(forKey: "\(taskId):\(childId)")
-            Task { @MainActor [store] in
-                store.markDone(taskId: taskId, childId: childId, payload: payload)
+            if let payload = SubagentDonePayload.decode(from: request.body) {
+                lineParsers.removeValue(forKey: "\(taskId):\(childId)")
+                Task { @MainActor [store] in
+                    store.markDone(taskId: taskId, childId: childId, payload: payload)
+                }
             }
+            respond(status: 204, on: connection)
+        case "spawn":
+            handleSpawn(taskId: taskId, childId: childId, body: request.body, on: connection)
+        case "close":
+            handleClose(taskId: taskId, childId: childId, on: connection)
         default:
             Self.logger.notice("Ignoring unrecognised action \(action, privacy: .public)")
+            respond(status: 204, on: connection)
         }
     }
 
-    private func respondEmpty(on connection: NWConnection) {
-        let response = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    /// Decodes `{"label","cwd","command"}`, then hops to the main actor to
+    /// check the task exists and ask `SubagentPaneStore` to create the
+    /// surface, responding only once that's resolved — the caller needs the
+    /// real outcome (in particular `429`, cap reached) before deciding
+    /// whether to fall back to headless.
+    private func handleSpawn(taskId: Int64, childId: String, body: Data, on connection: NWConnection) {
+        guard let value = try? JSONDecoder().decode(JSONValue.self, from: body),
+              let object = value.objectValue,
+              let label = object["label"]?.stringValue,
+              let cwd = object["cwd"]?.stringValue,
+              let command = object["command"]?.stringValue,
+              !label.isEmpty, !cwd.isEmpty, !command.isEmpty
+        else {
+            respond(status: 400, on: connection)
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard self.taskExists(taskId) else {
+                self.respond(status: 404, on: connection)
+                return
+            }
+            let created = self.paneStore.spawn(
+                taskId: taskId,
+                childId: childId,
+                label: label,
+                cwd: URL(fileURLWithPath: cwd),
+                command: command
+            )
+            self.respond(status: created ? 204 : 429, on: connection)
+        }
+    }
+
+    /// Tears down `childId`'s pane, if any. Always `204` — a close for an
+    /// already-gone (or never-spawned) pane is not an error.
+    private func handleClose(taskId: Int64, childId: String, on connection: NWConnection) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.paneStore.close(taskId: taskId, childId: childId)
+            self.respond(status: 204, on: connection)
+        }
+    }
+
+    private static let statusText: [Int: String] = [
+        204: "No Content",
+        400: "Bad Request",
+        404: "Not Found",
+        429: "Too Many Requests",
+    ]
+
+    /// Every response keeps an empty body — anything returned is liable to
+    /// be injected into the agent's context (see the file doc comment) — so
+    /// only the status line varies.
+    private func respond(status: Int, on connection: NWConnection) {
+        let reason = Self.statusText[status] ?? "Unknown"
+        let response = "HTTP/1.1 \(status) \(reason)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in
             connection.cancel()
         })

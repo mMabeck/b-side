@@ -394,7 +394,18 @@ public final class TerminalSurfaceHost: ObservableObject {
     ///     `PiSessionService.launchEnvironment(...)` here so its `pi`
     ///     process can find `SubagentEventServer`; the scratch terminal
     ///     leaves this empty.
-    public init(workingDirectory: URL, shell: String? = nil, command: String? = nil, envVars: [String: String] = [:]) {
+    ///   - onExit: Called when the surface's own process exits on its own
+    ///     (not via an explicit teardown the caller already knows about),
+    ///     with whether the process was still alive at close. `SubagentPaneStore`
+    ///     passes this to remove a child pane when its command exits instead
+    ///     of waiting for an explicit `/close` call.
+    public init(
+        workingDirectory: URL,
+        shell: String? = nil,
+        command: String? = nil,
+        envVars: [String: String] = [:],
+        onExit: ((Bool) -> Void)? = nil
+    ) {
         let resolvedConfig = GhosttyBridge.resolveUserConfig()
         state = TerminalViewState(
             configSource: resolvedConfig.configSource,
@@ -412,6 +423,7 @@ public final class TerminalSurfaceHost: ObservableObject {
 
         state.onClose = { processAlive in
             Self.logger.info("surface closed, processAlive=\(processAlive, privacy: .public)")
+            onExit?(processAlive)
         }
 
         if let issue = state.controller.lastConfigurationIssue {
