@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 
 @testable import BSideKit
@@ -294,7 +295,7 @@ struct PiSessionServiceTests {
 
 @Suite("PiSessionService + ProjectsStore conversation binding")
 struct PiSessionServiceConversationBindingTests {
-    private func makeStore() async throws -> (store: ProjectsStore, task: TaskRecord) {
+    private func makeStore() async throws -> (store: ProjectsStore, task: TaskRecord, database: AppDatabase) {
         let database = try AppDatabase.openInMemory()
         let project = Project(path: "/tmp/repo", displayName: "repo", baseRef: "main")
         let insertedProject = try await database.dbQueue.write { db -> Project in
@@ -318,12 +319,12 @@ struct PiSessionServiceConversationBindingTests {
         }
 
         let store = await ProjectsStore(database: database)
-        return (store, insertedTask)
+        return (store, insertedTask, database)
     }
 
     @Test("first launch for a task with no conversation persists a new active conversation")
     func firstLaunchPersistsConversation() async throws {
-        let (store, task) = try await makeStore()
+        let (store, task, _) = try await makeStore()
 
         let existing = await store.activeConversation(forTaskId: task.id!)
         #expect(existing == nil)
@@ -342,7 +343,7 @@ struct PiSessionServiceConversationBindingTests {
 
     @Test("a second launch for the same task reuses the existing conversation instead of creating another")
     func secondLaunchReusesConversation() async throws {
-        let (store, task) = try await makeStore()
+        let (store, task, _) = try await makeStore()
 
         let sessionID = PiSessionService.newSessionID()
         let first = try await store.startConversation(for: task, sessionID: sessionID)
@@ -368,5 +369,31 @@ struct PiSessionServiceConversationBindingTests {
         )
         #expect(command.contains("--session '/tmp/sessions/proj/session.jsonl'"))
         #expect(command.contains(sessionID) == false)
+    }
+
+    @Test("concurrent ensureConversation calls for one task yield exactly one conversation row and one resolved host")
+    @MainActor
+    func concurrentEnsureConversationYieldsOneConversation() async throws {
+        let (store, task, database) = try await makeStore()
+        let gate = ConversationLaunchGate()
+
+        // Both calls start from the same "no conversation yet" state and
+        // race through the real reuse path (`ConversationLaunchGate` wraps
+        // `ProjectsStore.activeConversation`/`startConversation` exactly as
+        // `MainAreaView.ensureHost` does); only the gate's claim should let
+        // one of them actually resolve a conversation, mirroring how only
+        // one of two racing `ensureHost` calls should ever assign a host.
+        async let first = gate.ensureConversation(for: task, store: store)
+        async let second = gate.ensureConversation(for: task, store: store)
+        let results = await [first, second]
+
+        let resolved = results.compactMap { $0 }
+        #expect(resolved.count == 1)
+
+        let conversations = try await database.dbQueue.read { db in
+            try Conversation.filter(Conversation.Columns.taskId == task.id!).fetchAll(db)
+        }
+        #expect(conversations.count == 1)
+        #expect(conversations.first?.sessionId == resolved.first?.sessionId)
     }
 }

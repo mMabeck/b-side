@@ -244,6 +244,12 @@ public enum PiSessionService {
         let resolvedExisting = URL(fileURLWithPath: existingCWD).resolvingSymlinksInPath().path
         let resolvedCurrent = URL(fileURLWithPath: currentWorkingDirectory).resolvingSymlinksInPath().path
         guard resolvedExisting != resolvedCurrent else { return transcriptPath }
+        // Only repair when the stored directory has genuinely vanished (the
+        // actual auto-rename-moved-the-worktree case this exists for). A
+        // merely-different-but-still-real directory means the caller isn't
+        // resuming from a broken cwd, and rewriting a healthy transcript on
+        // that basis would wrongly relocate it.
+        guard !fileManager.fileExists(atPath: resolvedExisting) else { return transcriptPath }
 
         header["cwd"] = resolvedCurrent
         guard let newHeaderData = try? JSONSerialization.data(withJSONObject: header) else { return nil }
