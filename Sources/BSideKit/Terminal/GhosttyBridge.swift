@@ -168,9 +168,19 @@ public enum GhosttyBridge {
 
     /// Whether the current system appearance is dark, used to resolve the
     /// `light:/dark:` adaptive theme form.
-    @MainActor
-    static var systemPrefersDarkAppearance: Bool {
-        NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    ///
+    /// Reads `AppleInterfaceStyle` straight from `defaults` rather than
+    /// `NSApp.effectiveAppearance`: ``GhosttyThemeController/reapply()``
+    /// pins `NSApplication.shared.appearance` to the resolved palette once
+    /// any theme is active (see below), and once that pin exists,
+    /// `effectiveAppearance` stops tracking the system and just echoes the
+    /// app's own pin back — a case of reading back what this app itself
+    /// wrote. `AppleInterfaceStyle` is written by the system, not this app,
+    /// so it stays truthful regardless of any pin. `defaults` defaults to
+    /// the live store so ordinary callers need not know this exists, while
+    /// tests can inject an isolated one to avoid touching global state.
+    static func systemPrefersDarkAppearance(defaults: UserDefaults = .standard) -> Bool {
+        defaults.string(forKey: "AppleInterfaceStyle") == "Dark"
     }
 
     /// The user's config, fully resolved: a `ConfigSource` libghostty can
@@ -272,7 +282,7 @@ public enum GhosttyBridge {
     ///   while tests can pass an explicit value to keep resolution pure.
     @MainActor
     static func resolveUserConfig(
-        preferDark: Bool = systemPrefersDarkAppearance,
+        preferDark: Bool = systemPrefersDarkAppearance(),
         override: ThemeDirective? = ThemeOverride.currentDirective()
     ) -> ResolvedUserConfig {
         guard let path = userConfigFilePath else {
@@ -573,12 +583,44 @@ final class TerminalSurfaceHostRegistry {
 /// window to redraw, and re-themes every live terminal through
 /// ``TerminalSurfaceHostRegistry``.
 @MainActor
-enum GhosttyThemeController {
+public enum GhosttyThemeController {
+    private static var systemAppearanceObserver: NSObjectProtocol?
+
     static func reapply() {
         let resolved = GhosttyBridge.resolveUserConfig()
         GhosttyResolvedTheme.shared.update(resolved.themeDefinition)
         NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
         TerminalSurfaceHostRegistry.shared.applyThemeToAllHosts(resolved.theme)
+    }
+
+    /// Observes the system's light/dark preference and calls ``reapply()``
+    /// whenever it flips, so Match System (``ThemeOverrideMode/matchSystem``)
+    /// and a config file's own adaptive `theme = light:X,dark:Y` directive
+    /// both keep tracking the system live instead of only at launch or the
+    /// next unrelated `reapply()`. `reapply()` re-resolves from scratch and
+    /// is a no-op when nothing changed, so firing it for every system
+    /// appearance change — regardless of which mode is active — is cheap
+    /// enough not to bother filtering.
+    ///
+    /// `NSApp.effectiveAppearance`/its KVO cannot detect this change: once
+    /// `reapply()` has pinned `NSApplication.shared.appearance` (above),
+    /// `effectiveAppearance` echoes that pin back instead of tracking the
+    /// system — see ``GhosttyBridge/systemPrefersDarkAppearance(defaults:)``
+    /// for the same trap on the read side. `AppleInterfaceThemeChangedNotification`
+    /// is the system's own distributed notification for this preference and
+    /// is unaffected by anything this app pins.
+    ///
+    /// Call once, from app startup (``BSideApp/init()``); a second call is a
+    /// harmless no-op rather than a second observer.
+    public static func installSystemAppearanceObserver() {
+        guard systemAppearanceObserver == nil else { return }
+        systemAppearanceObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { reapply() }
+        }
     }
 }
 

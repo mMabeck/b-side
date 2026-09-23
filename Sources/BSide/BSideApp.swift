@@ -25,6 +25,10 @@ struct BSideApp: App {
         // either way): deferring risks a light-appearance flash on the
         // first frame.
         NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
+        // Keeps Match System (and a config file's own adaptive `theme =
+        // light:X,dark:Y`) tracking the system live rather than only at
+        // launch — see `GhosttyThemeController.installSystemAppearanceObserver()`.
+        GhosttyThemeController.installSystemAppearanceObserver()
 
         // Cmd+1…9/Ctrl+1…9/Cmd+B/etc. must fire even while a Ghostty terminal
         // running Pi is first responder — see `MainMenuKeyRouter`'s doc comment
