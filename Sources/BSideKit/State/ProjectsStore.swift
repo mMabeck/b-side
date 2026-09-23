@@ -379,7 +379,8 @@ public final class ProjectsStore {
     /// Creates a task: resolves the base ref, creates (or attaches to) a branch
     /// and worktree, copies ignored files, runs setup, then persists the task.
     /// `onOutput` streams setup command output for display while creation is
-    /// still in progress.
+    /// still in progress. A blank `name` falls back to the placeholder "New Task".
+    /// `useWorktree` defaults to the project's `ProjectConfig` setting when omitted.
     @discardableResult
     public func createTask(
         project: Project,
@@ -390,10 +391,12 @@ public final class ProjectsStore {
         onOutput: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> TaskRecord {
         let config = ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path))
+        let nameWasBlank = name.trimmingCharacters(in: .whitespaces).isEmpty
+        let resolvedName = nameWasBlank ? "New Task" : name
 
         let setupResult = try await TaskWorktreeService.createWorktree(
             for: project,
-            taskName: name,
+            taskName: resolvedName,
             baseRef: baseRef,
             existingBranch: existingBranch,
             useWorktree: useWorktree ?? config.taskDefaults.useWorktree,
@@ -403,12 +406,13 @@ public final class ProjectsStore {
 
         let task = TaskRecord(
             projectId: project.id ?? 0,
-            name: name,
+            name: resolvedName,
             branchName: setupResult.branchName,
             branchCreatedByApp: setupResult.branchCreatedByApp,
             worktreePath: setupResult.worktreePath,
             harness: "claude",
-            permissionLevel: config.taskDefaults.permissionMode
+            permissionLevel: config.taskDefaults.permissionMode,
+            awaitingAutoRename: nameWasBlank
         )
         return try await database.dbQueue.write { db in
             var task = task
@@ -456,6 +460,88 @@ public final class ProjectsStore {
         guard let id = task.id else { return }
         try await database.dbQueue.write { db in
             _ = try TaskRecord.deleteOne(db, key: id)
+        }
+    }
+
+    // MARK: - Pi conversations
+
+    /// The task's current active conversation — the most recently started
+    /// one still marked active — or `nil` if its agent terminal has never
+    /// been launched. `MainAreaView` reuses this instead of starting a new
+    /// conversation so reopening a task resumes the same pi session.
+    public func activeConversation(forTaskId taskId: Int64) async -> Conversation? {
+        try? await database.dbQueue.read { db in
+            try Conversation
+                .filter(Conversation.Columns.taskId == taskId)
+                .filter(Conversation.Columns.isActive == true)
+                .order(Conversation.Columns.startedAt.desc)
+                .fetchOne(db)
+        }
+    }
+
+    /// Starts and persists a new conversation for `task` under `sessionID`,
+    /// with no transcript path yet — pi creates the transcript file itself
+    /// shortly after launch; `recordTranscriptPath` fills it in once
+    /// `PiSessionService.locateTranscript` resolves it on disk.
+    @discardableResult
+    public func startConversation(for task: TaskRecord, sessionID: String) async throws -> Conversation {
+        let conversation = Conversation(taskId: task.id ?? 0, sessionId: sessionID, transcriptPath: "")
+        return try await database.dbQueue.write { db in
+            var conversation = conversation
+            try conversation.insert(db)
+            return conversation
+        }
+    }
+
+    /// Records the transcript path resolved for `conversation` once pi has
+    /// created the file on disk. A no-op if the conversation has since been
+    /// deleted (e.g. its task was deleted while resolution was in flight).
+    public func recordTranscriptPath(_ path: String, for conversation: Conversation) async throws {
+        guard let id = conversation.id else { return }
+        try await database.dbQueue.write { db in
+            guard var updated = try Conversation.fetchOne(db, key: id) else { return }
+            updated.transcriptPath = path
+            try updated.update(db)
+        }
+    }
+
+    /// The task with `id` from the current in-memory snapshot, not the
+    /// database — for callers (the auto-rename watcher in `MainAreaView`)
+    /// that need the freshest known state without a round trip.
+    public func task(withId id: Int64) -> TaskRecord? {
+        tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == id }
+    }
+
+    /// Applies the once-only automatic rename derived from a task's first pi
+    /// prompt (see `TaskAutoRenameService`): renames the task, and its
+    /// worktree/branch when it owns ones the app created. Always clears
+    /// `awaitingAutoRename`, even when `prompt` doesn't yield a usable title,
+    /// so this never re-fires for the same task.
+    public func applyAutoRename(task: TaskRecord, project: Project, prompt: String) async {
+        guard task.awaitingAutoRename else { return }
+        guard let title = TaskAutoRenameService.deriveTitle(fromPrompt: prompt) else {
+            await clearAwaitingAutoRename(task)
+            return
+        }
+
+        let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: title)
+        guard let id = task.id else { return }
+        try? await database.dbQueue.write { db in
+            guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
+            updated.name = renamed.name
+            updated.branchName = renamed.branchName
+            updated.worktreePath = renamed.worktreePath
+            updated.awaitingAutoRename = false
+            try updated.update(db)
+        }
+    }
+
+    private func clearAwaitingAutoRename(_ task: TaskRecord) async {
+        guard let id = task.id else { return }
+        try? await database.dbQueue.write { db in
+            guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
+            updated.awaitingAutoRename = false
+            try updated.update(db)
         }
     }
 

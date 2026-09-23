@@ -29,6 +29,52 @@ struct TaskWorktreeServiceTests {
         #expect(currentBranch == "task/fix-the-thing")
     }
 
+    @Test("createWorktree with useWorktree disabled runs the task in the project's own checkout")
+    func runsInPlaceWhenWorktreeDisabled() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "In place task",
+            baseRef: "main",
+            useWorktree: false
+        )
+
+        #expect(result.worktreePath == project.path)
+        #expect(result.branchCreatedByApp == false)
+        #expect(result.branchName == "main")
+    }
+
+    @Test("repeated blank-name tasks get distinct worktree paths")
+    func distinctSlugsForRepeatedNames() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let first = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "New Task",
+            baseRef: "main"
+        )
+        let second = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "New Task",
+            baseRef: "main"
+        )
+
+        #expect(first.worktreePath == "\(repoURL.path)-worktrees/new-task")
+        #expect(second.worktreePath == "\(repoURL.path)-worktrees/new-task-2")
+        #expect(first.branchName == "task/new-task")
+        #expect(second.branchName == "task/new-task-2")
+        #expect(FileManager.default.fileExists(atPath: second.worktreePath))
+    }
+
     @Test("createWorktree copies loose ignored files like .env but not ignored directories")
     func copiesIgnoredFilesUsingTheLooseRule() async throws {
         let root = try TestRepo.makeTempDirectory()
