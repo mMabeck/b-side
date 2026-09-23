@@ -10,6 +10,8 @@ public struct SettingsView: View {
         TabView {
             GeneralSettingsTab(theme: theme)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AppearanceSettingsTab(theme: theme)
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
             AgentSettingsTab(theme: theme)
                 .tabItem { Label("Agent", systemImage: "cpu") }
             GitSettingsTab(theme: theme)
@@ -19,7 +21,7 @@ public struct SettingsView: View {
             NotificationsSettingsTab(theme: theme)
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 560, height: 560)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
     }
@@ -37,6 +39,107 @@ private struct GeneralSettingsTab: View {
         .scrollContentBackground(.hidden)
         .background(theme.palette.windowBackground)
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct AppearanceSettingsTab: View {
+    var theme: GhosttyResolvedTheme
+    @AppStorage(AppearanceSettingsKeys.mode) private var modeRaw = ThemeOverrideMode.useConfig.rawValue
+    @AppStorage(AppearanceSettingsKeys.singleThemeName) private var singleThemeName = ""
+    @AppStorage(AppearanceSettingsKeys.lightThemeName) private var lightThemeName = ""
+    @AppStorage(AppearanceSettingsKeys.darkThemeName) private var darkThemeName = ""
+
+    private var mode: ThemeOverrideMode {
+        ThemeOverrideMode(rawValue: modeRaw) ?? .useConfig
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Theme Source", selection: $modeRaw) {
+                    ForEach(ThemeOverrideMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.label).tag(mode.rawValue)
+                    }
+                }
+                .onChange(of: modeRaw) { _, _ in GhosttyThemeController.reapply() }
+
+                if mode == .useConfig {
+                    LabeledContent("Resolved Theme") {
+                        Text(theme.definition?.name ?? "none (system colours)")
+                            .foregroundStyle(theme.palette.textSecondary)
+                    }
+                }
+            }
+
+            if mode == .single {
+                Section("Theme") {
+                    ThemePickerField(selection: $singleThemeName)
+                        .onChange(of: singleThemeName) { _, _ in GhosttyThemeController.reapply() }
+                }
+            }
+
+            if mode == .matchSystem {
+                Section("Light Theme") {
+                    ThemePickerField(selection: $lightThemeName)
+                        .onChange(of: lightThemeName) { _, _ in GhosttyThemeController.reapply() }
+                }
+                Section("Dark Theme") {
+                    ThemePickerField(selection: $darkThemeName)
+                        .onChange(of: darkThemeName) { _, _ in GhosttyThemeController.reapply() }
+                }
+            }
+
+            Section("Preview") {
+                previewContent
+            }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
+        switch mode {
+        case .useConfig:
+            if let definition = theme.definition {
+                ThemePreviewView(definition: definition)
+            } else {
+                Text("No theme resolved from the Ghostty config — using system colours.")
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        case .single:
+            if let definition = ThemeCatalogSource.theme(named: singleThemeName) {
+                ThemePreviewView(definition: definition)
+            } else {
+                Text("Pick a theme above to preview it.")
+                    .font(.caption)
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        case .matchSystem:
+            HStack(alignment: .top, spacing: 12) {
+                previewColumn(title: "Light", themeName: lightThemeName)
+                previewColumn(title: "Dark", themeName: darkThemeName)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func previewColumn(title: String, themeName: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+            if let definition = ThemeCatalogSource.theme(named: themeName) {
+                ThemePreviewView(definition: definition, scale: 0.52)
+            } else {
+                Text("Pick a theme above to preview it.")
+                    .font(.caption2)
+                    .foregroundStyle(theme.palette.textSecondary)
+            }
+        }
     }
 }
 
