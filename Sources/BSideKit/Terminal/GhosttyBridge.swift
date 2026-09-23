@@ -205,14 +205,30 @@ public enum GhosttyBridge {
     /// harmless for a key Ghostty never bound, so the app's other window
     /// shortcuts are listed too rather than waiting to be discovered the
     /// same painful way.
+    ///
+    /// Cmd+1…9 and Ctrl+1…9 are released for the same reason: Ghostty binds
+    /// `cmd+1`…`cmd+9` to `goto_tab` by default, which would otherwise
+    /// swallow `NavigationShortcuts`' "switch to active task"/"switch to
+    /// project" digit shortcuts before the app's own menu ever saw them.
+    /// Ctrl+digits are unbound too on the same defensive basis as `cmd+b`
+    /// above, even though Ghostty has no built-in binding for them today.
     static let appOwnedKeybinds = """
 
     # Appended by B-Side: see GhosttyBridge.appOwnedKeybinds.
     keybind = cmd+,=unbind
     keybind = cmd+b=unbind
     keybind = cmd+opt+b=unbind
+    \(digitUnbinds)
 
     """
+
+    /// One `keybind = …=unbind` line per digit 1–9, for both `cmd+` and
+    /// `ctrl+` modifiers — generated rather than spelled out eighteen times
+    /// over, since `NavigationShortcuts` already treats "digits 1–9" as the
+    /// shared range for both shortcut families.
+    private static let digitUnbinds: String = (1...9)
+        .flatMap { digit in ["keybind = cmd+\(digit)=unbind", "keybind = ctrl+\(digit)=unbind"] }
+        .joined(separator: "\n")
 
     @MainActor
     static func resolveUserConfig(preferDark: Bool = systemPrefersDarkAppearance) -> ResolvedUserConfig {
