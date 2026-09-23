@@ -464,11 +464,28 @@ public final class ProjectsStore {
             permissionLevel: config.taskDefaults.permissionMode,
             awaitingAutoRename: nameWasBlank
         )
-        return try await database.dbQueue.write { db in
+        let inserted = try await database.dbQueue.write { db in
             var task = task
             try task.insert(db)
             return task
         }
+        // A newly created task should replace whatever the user was looking
+        // at before, so its terminal comes up and takes focus immediately
+        // instead of leaving the sheet's dismissal reveal the prior
+        // project/task selection underneath. Only reached on success — a
+        // throwing `createWorktree` above leaves selection untouched.
+        //
+        // `mainSelection` resolves `selectedTaskID` against `tasksByProject`,
+        // which only reflects this insert once the `ValueObservation` loop in
+        // `start()` re-fires — asynchronously, after this write already
+        // committed. Folding `inserted` into `tasksByProject` here too, ahead
+        // of that refresh, means `selectTask` below resolves to `.task`
+        // immediately instead of a stale `.project`/`.none` that only
+        // self-corrects once the observation catches up. The later refresh
+        // overwrites this with the same (authoritative) row, so it's harmless.
+        tasksByProject[inserted.projectId, default: []].append(inserted)
+        selectTask(inserted, project: project)
+        return inserted
     }
 
     /// Archives a task: hides it (already excluded from `tasksByProject` once
