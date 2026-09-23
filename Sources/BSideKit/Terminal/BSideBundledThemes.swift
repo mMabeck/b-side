@@ -48,12 +48,49 @@ enum BSideBundledThemes {
 /// Theme lookup across both sources: the brand themes above, and
 /// `GhosttyThemeCatalog`'s own corpus. The brand themes are listed first so
 /// they surface at the top of an unfiltered Appearance-tab picker.
-/// `GhosttyThemeCatalog` exposes no "list everything" API — only
-/// `theme(named:)` and `search(_:)` — but an empty query matches every name
-/// (`String.contains("")` is always true), so `search("")` doubles as that.
+/// Lists the corpus via `GhosttyThemeCatalog.allThemes`, never `search("")`:
+/// Foundation's `contains("")` is false, so an empty search matches nothing.
 enum ThemeCatalogSource {
+    /// Well-known themes pinned above the full alphabetical catalog, which
+    /// otherwise opens on obscure names ("0x96f", "12-bit Rainbow") and
+    /// buries these among ~480 entries. One dark and, where the family has
+    /// one, one light variant each. Every name must exist in the catalog —
+    /// `ThemeOverrideTests` guards against upstream renames.
+    static let featuredNames: [String] = [
+        "Catppuccin Mocha", "Catppuccin Latte",
+        "TokyoNight", "TokyoNight Day",
+        "Dracula",
+        "Nord", "Nord Light",
+        "Gruvbox Dark", "Gruvbox Light",
+        "iTerm2 Solarized Dark", "iTerm2 Solarized Light",
+        "Rose Pine", "Rose Pine Dawn",
+        "Atom One Dark", "Atom One Light",
+        "GitHub Dark Default", "GitHub Light Default",
+        "Monokai Pro", "Monokai Pro Light",
+        "Kanagawa Wave", "Kanagawa Lotus",
+        "Everforest Dark Hard", "Everforest Light Med",
+        "Ayu", "Ayu Light",
+        "Night Owl",
+        "Tomorrow Night", "Tomorrow",
+        "Xcode Dark", "Xcode Light",
+        "Apple System Colors", "Apple System Colors Light",
+        "Zenburn",
+    ]
+
+    /// B-Side's own themes, then ``featuredNames`` in order.
+    static func featuredThemes() -> [GhosttyThemeDefinition] {
+        BSideBundledThemes.all + featuredNames.compactMap(GhosttyThemeCatalog.theme(named:))
+    }
+
+    /// The rest of the catalog, excluding anything already in
+    /// ``featuredThemes()`` so each name appears once in the picker.
+    static func otherThemes() -> [GhosttyThemeDefinition] {
+        let featured = Set(featuredNames)
+        return GhosttyThemeCatalog.allThemes.filter { !featured.contains($0.name) }
+    }
+
     static func allThemes() -> [GhosttyThemeDefinition] {
-        BSideBundledThemes.all + GhosttyThemeCatalog.search("")
+        BSideBundledThemes.all + GhosttyThemeCatalog.allThemes
     }
 
     static func theme(named name: String) -> GhosttyThemeDefinition? {

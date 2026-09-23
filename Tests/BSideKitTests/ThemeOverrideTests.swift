@@ -1,3 +1,4 @@
+import GhosttyTheme
 import Foundation
 import Testing
 @testable import BSideKit
@@ -162,5 +163,15 @@ struct ThemeOverrideTests {
         let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("B-Side"), preferDark: true)
         #expect(resolved?.name == "B-Side")
         #expect(resolved?.background == "16141c")
+    }
+
+    @Test("Every featured theme name exists in the catalog and appears exactly once in the picker")
+    func featuredThemesResolve() {
+        let missing = ThemeCatalogSource.featuredNames.filter { GhosttyThemeCatalog.theme(named: $0) == nil }
+        #expect(missing.isEmpty, "featured names missing from GhosttyThemeCatalog: \(missing)")
+
+        let listed = (ThemeCatalogSource.featuredThemes() + ThemeCatalogSource.otherThemes()).map(\.name)
+        #expect(listed.count == Set(listed).count)
+        #expect(Set(listed) == Set(ThemeCatalogSource.allThemes().map(\.name)))
     }
 }

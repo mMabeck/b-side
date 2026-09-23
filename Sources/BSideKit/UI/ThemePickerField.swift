@@ -9,10 +9,14 @@ struct ThemePickerField: View {
     @Binding var selection: String
     @State private var query = ""
 
-    private var filtered: [GhosttyThemeDefinition] {
-        let all = ThemeCatalogSource.allThemes()
-        guard !query.isEmpty else { return all }
-        return all.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    /// Popular themes first, then the rest; while searching, both sections
+    /// are filtered and an emptied section is hidden.
+    private var sections: [(title: String, themes: [GhosttyThemeDefinition])] {
+        let matches: (GhosttyThemeDefinition) -> Bool = { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+        return [
+            ("Popular", ThemeCatalogSource.featuredThemes().filter(matches)),
+            ("All Themes", ThemeCatalogSource.otherThemes().filter(matches)),
+        ].filter { !$0.themes.isEmpty }
     }
 
     var body: some View {
@@ -20,18 +24,23 @@ struct ThemePickerField: View {
             TextField("Search themes", text: $query)
                 .textFieldStyle(.roundedBorder)
             List(
-                filtered,
                 selection: Binding<String?>(
                     get: { selection.isEmpty ? nil : selection },
                     set: { newValue in if let newValue { selection = newValue } }
                 )
-            ) { definition in
-                ThemeSwatchRow(definition: definition)
-                    .tag(definition.name)
+            ) {
+                ForEach(sections, id: \.title) { section in
+                    Section(section.title) {
+                        ForEach(section.themes, id: \.name) { definition in
+                            ThemeSwatchRow(definition: definition)
+                                .tag(definition.name)
+                        }
+                    }
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .frame(height: 140)
+            .frame(height: 180)
         }
     }
 }
