@@ -29,13 +29,11 @@ struct GhosttyThemeConfigTests {
         #expect(directive == .adaptive(light: "Ayu Light", dark: "Ayu Mirage"))
     }
 
-    @Test("Adaptive form resolves against the given appearance")
+    @Test("Adaptive form always resolves to the dark theme")
     func adaptiveThemeResolution() {
         let directive = GhosttyBridge.ThemeDirective.adaptive(light: "Ayu Light", dark: "Ayu Mirage")
-        let dark = GhosttyBridge.resolveThemeDefinition(directive, preferDark: true)
-        let light = GhosttyBridge.resolveThemeDefinition(directive, preferDark: false)
-        #expect(dark?.name == "Ayu Mirage")
-        #expect(light?.name == "Ayu Light")
+        let resolved = GhosttyBridge.resolveThemeDefinition(directive)
+        #expect(resolved?.name == "Ayu Mirage")
     }
 
     @Test("Comments and stray whitespace around the directive are ignored")
@@ -56,14 +54,14 @@ struct GhosttyThemeConfigTests {
     @Test("A missing or unknown theme name resolves to nil and is logged, not thrown")
     func unknownThemeName() {
         let directive = GhosttyBridge.ThemeDirective.fixed("Definitely Not A Real Theme")
-        let resolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: true)
+        let resolved = GhosttyBridge.resolveThemeDefinition(directive)
         #expect(resolved == nil)
     }
 
     @Test("A known theme name resolves to its full catalog definition")
     func knownThemeName() {
         let directive = GhosttyBridge.ThemeDirective.fixed("Ayu Mirage")
-        let resolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: true)
+        let resolved = GhosttyBridge.resolveThemeDefinition(directive)
         #expect(resolved?.name == "Ayu Mirage")
         #expect(resolved?.background == "1f2430")
     }
@@ -87,7 +85,7 @@ struct GhosttyThemeConfigTests {
 
         #expect(GhosttyBridge.userConfigFilePath == nil)
 
-        let resolved = GhosttyBridge.resolveUserConfig(preferDark: true)
+        let resolved = GhosttyBridge.resolveUserConfig(override: nil)
         #expect(resolved.themeDefinition == nil)
         // Generated, not `.none`: the unbinds below must reach the surface
         // even when the user has no Ghostty config at all.
@@ -127,7 +125,7 @@ struct GhosttyThemeConfigTests {
         // The file exists, so this is a read failure, not an absent config.
         #expect(GhosttyBridge.userConfigFilePath != nil)
 
-        let resolved = GhosttyBridge.resolveUserConfig(preferDark: true)
+        let resolved = GhosttyBridge.resolveUserConfig(override: nil)
         #expect(resolved.themeDefinition == nil)
         #expect(resolved.configSource == .generated(GhosttyBridge.appOwnedKeybinds))
     }
@@ -165,7 +163,7 @@ struct GhosttyThemeConfigTests {
                 encoding: .utf8
             )
 
-            let resolved = GhosttyBridge.resolveUserConfig(preferDark: true)
+            let resolved = GhosttyBridge.resolveUserConfig(override: nil)
             guard case let .generated(generated) = resolved.configSource else {
                 Issue.record("expected a generated config source, got \(resolved.configSource)")
                 return
@@ -225,7 +223,7 @@ struct GhosttyThemeConfigTests {
         background-opacity = 0.98
         """
         let (sanitized, directive) = GhosttyBridge.extractThemeDirective(from: contents)
-        let resolved = GhosttyBridge.resolveThemeDefinition(directive, preferDark: true)
+        let resolved = GhosttyBridge.resolveThemeDefinition(directive)
 
         #expect(resolved == nil)
         #expect(!sanitized.contains("theme"))

@@ -48,15 +48,10 @@ private struct AppearanceSettingsTab: View {
     var theme: GhosttyResolvedTheme
     @AppStorage(AppearanceSettingsKeys.mode) private var modeRaw = ThemeOverrideMode.useConfig.rawValue
     @AppStorage(AppearanceSettingsKeys.singleThemeName) private var singleThemeName = ""
-    @AppStorage(AppearanceSettingsKeys.lightThemeName) private var lightThemeName = ""
-    @AppStorage(AppearanceSettingsKeys.darkThemeName) private var darkThemeName = ""
 
     private var mode: ThemeOverrideMode {
         ThemeOverrideMode(rawValue: modeRaw) ?? .useConfig
     }
-
-    /// Which slot the theme list edits in ``ThemeOverrideMode/matchSystem``.
-    @State private var editingDark = true
 
     /// The theme list's selection, routed to whichever stored name the
     /// current mode uses. Picking a theme while following the Ghostty
@@ -67,7 +62,6 @@ private struct AppearanceSettingsTab: View {
                 let name = switch mode {
                 case .useConfig: theme.definition?.name ?? ""
                 case .single: singleThemeName
-                case .matchSystem: editingDark ? darkThemeName : lightThemeName
                 }
                 return name.isEmpty ? nil : name
             },
@@ -79,8 +73,6 @@ private struct AppearanceSettingsTab: View {
                     modeRaw = ThemeOverrideMode.single.rawValue
                 case .single:
                     singleThemeName = newValue
-                case .matchSystem:
-                    if editingDark { darkThemeName = newValue } else { lightThemeName = newValue }
                 }
                 GhosttyThemeController.reapply()
             }
@@ -97,27 +89,12 @@ private struct AppearanceSettingsTab: View {
                 }
                 .fixedSize()
                 .onChange(of: modeRaw) { _, _ in GhosttyThemeController.reapply() }
-
-                if mode == .matchSystem {
-                    Picker("Editing", selection: $editingDark) {
-                        Text("Light").tag(false)
-                        Text("Dark").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                }
                 Spacer()
             }
 
             HStack(alignment: .top, spacing: 16) {
-                ThemeList(
-                    selection: listSelection,
-                    darkOnly: mode == .matchSystem ? editingDark : nil
-                )
-                // Rebuilt per slot so its scroll position jumps to that
-                // slot's selection instead of staying where the other left off.
-                .id(mode == .matchSystem ? "slot-\(editingDark)" : "all")
-                .frame(width: 220)
+                ThemeList(selection: listSelection)
+                    .frame(width: 220)
 
                 VStack(alignment: .leading, spacing: 8) {
                     previewContent
@@ -138,7 +115,6 @@ private struct AppearanceSettingsTab: View {
         switch mode {
         case .useConfig: theme.definition
         case .single: ThemeCatalogSource.theme(named: singleThemeName)
-        case .matchSystem: ThemeCatalogSource.theme(named: editingDark ? darkThemeName : lightThemeName)
         }
     }
 
@@ -160,8 +136,6 @@ private struct AppearanceSettingsTab: View {
             "Following ~/.config/ghostty/config (\(theme.definition?.name ?? "no theme — system colours")). Pick a theme to override it."
         case .single:
             "Use ↑ and ↓ to try themes. Changes apply immediately, including open terminals."
-        case .matchSystem:
-            "Switches between the light and dark theme with the macOS appearance."
         }
     }
 }
