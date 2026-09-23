@@ -159,7 +159,7 @@ public enum GhosttyBridge {
             name = preferDark ? dark : light
         }
 
-        guard let definition = GhosttyThemeCatalog.theme(named: name) else {
+        guard let definition = ThemeCatalogSource.theme(named: name) else {
             logger.error("ghostty config: unknown theme \"\(name, privacy: .public)\" — falling back to default theme")
             return nil
         }
@@ -263,16 +263,27 @@ public enum GhosttyBridge {
         .flatMap { digit in ["keybind = cmd+\(digit)=unbind", "keybind = ctrl+\(digit)=unbind"] }
         .joined(separator: "\n")
 
+    /// - Parameter override: The Appearance tab's preference, if any — see
+    ///   ``ThemeOverride``. When non-`nil` it takes the place of whatever
+    ///   `theme = ...` directive the config file itself has (or lacks);
+    ///   every other line of the user's config still passes through
+    ///   untouched, exactly as it does with no override at all. Defaults to
+    ///   the live preference so ordinary callers need not know this exists,
+    ///   while tests can pass an explicit value to keep resolution pure.
     @MainActor
-    static func resolveUserConfig(preferDark: Bool = systemPrefersDarkAppearance) -> ResolvedUserConfig {
+    static func resolveUserConfig(
+        preferDark: Bool = systemPrefersDarkAppearance,
+        override: ThemeDirective? = ThemeOverride.currentDirective()
+    ) -> ResolvedUserConfig {
         guard let path = userConfigFilePath else {
             // Still generated rather than `.none`: even with no user config
             // at all, the app's own key equivalents must be released from
             // Ghostty's defaults.
+            let definition = resolveThemeDefinition(override, preferDark: preferDark)
             return ResolvedUserConfig(
                 configSource: .generated(appOwnedKeybinds),
-                theme: .default,
-                themeDefinition: nil
+                theme: definition?.toTerminalTheme() ?? .default,
+                themeDefinition: definition
             )
         }
 
@@ -285,14 +296,19 @@ public enum GhosttyBridge {
             // otherwise silently falls back to the default theme with no
             // way for the user to tell why.
             logger.error("ghostty config: failed to read \(path, privacy: .public): \(error, privacy: .public)")
+            let definition = resolveThemeDefinition(override, preferDark: preferDark)
             return ResolvedUserConfig(
                 configSource: .generated(appOwnedKeybinds),
-                theme: .default,
-                themeDefinition: nil
+                theme: definition?.toTerminalTheme() ?? .default,
+                themeDefinition: definition
             )
         }
 
-        let (sanitized, directive) = extractThemeDirective(from: raw)
+        let (sanitized, configDirective) = extractThemeDirective(from: raw)
+        // The override, when set, replaces the config file's own directive
+        // outright rather than layering on top of it — exactly one theme
+        // directive is ever in effect.
+        let directive = override ?? configDirective
         // Passes through as generated text rather than `.file(path)` even
         // when there's no theme directive to resolve, since the unbinds
         // have to be appended to it either way.
@@ -431,6 +447,22 @@ public final class TerminalSurfaceHost: ObservableObject {
                 lastDesktopNotificationAt = at
             }
             .store(in: &cancellables)
+
+        // Registered so a later Appearance-tab theme change
+        // (``GhosttyThemeController/reapply()``) can re-theme this surface
+        // in place — see ``TerminalSurfaceHostRegistry``.
+        TerminalSurfaceHostRegistry.shared.register(self)
+    }
+
+    deinit {
+        // `deinit` on a `@MainActor` class runs nonisolated (see
+        // `ThemedWindow.swift`'s `VibrancyGuardian` for the same pattern);
+        // the registry's dictionary is only ever touched from the main
+        // actor, so this is safe precisely because nothing else can race a
+        // deallocating object's own teardown.
+        MainActor.assumeIsolated {
+            TerminalSurfaceHostRegistry.shared.unregister(self)
+        }
     }
 
     /// Whether this surface should keep rendering. Per native-rewrite.md §6,
@@ -498,6 +530,58 @@ public struct TerminalHostView: View {
 /// in `MainAreaView.body` for every cached host — live or hidden — so a
 /// question raised in a background task still triggers its sound,
 /// notification, and sidebar attention dot.
+/// Tracks every live ``TerminalSurfaceHost`` so a theme change can reach
+/// them without restarting the app. Entries are weak: a closed host simply
+/// stops receiving updates once ``TerminalSurfaceHost/deinit`` unregisters
+/// it, with nothing else to tear down.
+@MainActor
+final class TerminalSurfaceHostRegistry {
+    static let shared = TerminalSurfaceHostRegistry()
+
+    private var hosts: [ObjectIdentifier: WeakHostBox] = [:]
+
+    private struct WeakHostBox {
+        weak var host: TerminalSurfaceHost?
+    }
+
+    private init() {}
+
+    func register(_ host: TerminalSurfaceHost) {
+        hosts[ObjectIdentifier(host)] = WeakHostBox(host: host)
+    }
+
+    func unregister(_ host: TerminalSurfaceHost) {
+        hosts.removeValue(forKey: ObjectIdentifier(host))
+    }
+
+    /// Re-themes every live surface in place. `TerminalViewState.setTheme(_:)`
+    /// reconfigures the running ghostty surface with new colours without
+    /// touching its pty or session — the terminal never restarts, it just
+    /// redraws in the new theme.
+    func applyThemeToAllHosts(_ theme: TerminalTheme) {
+        for box in hosts.values {
+            box.host?.state.setTheme(theme)
+        }
+    }
+}
+
+/// Coordinates a theme change across the whole running app: re-resolves the
+/// user's config — folding in the Appearance tab's override via
+/// ``ThemeOverride`` — republishes the result to ``GhosttyResolvedTheme/shared``
+/// (which every `themedWindow`-modified window observes and redraws from),
+/// updates `NSApp`'s own appearance immediately rather than waiting for a
+/// window to redraw, and re-themes every live terminal through
+/// ``TerminalSurfaceHostRegistry``.
+@MainActor
+enum GhosttyThemeController {
+    static func reapply() {
+        let resolved = GhosttyBridge.resolveUserConfig()
+        GhosttyResolvedTheme.shared.update(resolved.themeDefinition)
+        NSApplication.shared.appearance = GhosttyResolvedTheme.shared.palette.preferredAppearance
+        TerminalSurfaceHostRegistry.shared.applyThemeToAllHosts(resolved.theme)
+    }
+}
+
 public struct TerminalAlertBridge: View {
     @ObservedObject var host: TerminalSurfaceHost
     var store: ProjectsStore
