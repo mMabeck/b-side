@@ -162,7 +162,7 @@ struct MainAreaView: View {
             command: command
         )
 
-        if conversation.transcriptPath.isEmpty {
+        if resolved.transcriptPathForLaunch == nil {
             Task { await Self.resolveTranscriptPath(for: conversation, locations: locations, store: store) }
         }
         if task.awaitingAutoRename {
@@ -351,16 +351,28 @@ struct MainAreaView: View {
 
     /// The directory a task's terminal should start in: its worktree, or the
     /// project's own path if that worktree is missing or has vanished out
-    /// from under the app (see `ProjectsStore.vanishedWorktreeTaskIds`) — a
-    /// task terminal should never fail to open just because its worktree
-    /// disappeared.
+    /// from under the app (see `ProjectsStore.vanishedWorktreeTaskIds`), or
+    /// home if the project's own path is gone too — a task terminal should
+    /// never fail to open just because its worktree disappeared, and this
+    /// path also ends up written into a repaired transcript's header, where
+    /// a nonexistent directory would make `pi --session <path>` refuse to
+    /// resume it.
     static func resolvedDirectory(forTask task: TaskRecord, project: Project) -> URL {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: task.worktreePath, isDirectory: &isDirectory)
         if exists && isDirectory.boolValue {
             return URL(fileURLWithPath: task.worktreePath)
         }
-        return URL(fileURLWithPath: project.path)
+        var projectIsDirectory: ObjCBool = false
+        let projectExists = FileManager.default.fileExists(atPath: project.path, isDirectory: &projectIsDirectory)
+        if projectExists && projectIsDirectory.boolValue {
+            return URL(fileURLWithPath: project.path)
+        }
+        // Both the worktree and the project directory are gone: fall back to
+        // home rather than writing a nonexistent cwd into a repaired
+        // transcript's header, which would make `pi --session <path>` exit 1
+        // with "Stored session working directory does not exist".
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     /// The directory the terminal drawer's own scratch shell should start
