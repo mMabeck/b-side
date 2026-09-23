@@ -48,6 +48,12 @@ public final class ProjectsStore {
     /// keyed by task id — feeds `TaskAlertDebouncer.isDebounced`.
     private var lastTerminalAlertAt: [Int64: Date] = [:]
 
+    /// Plays the configured sound for an accepted terminal alert. Swappable
+    /// so tests exercising `handleTerminalAlert` don't play real system
+    /// sounds on every `swift test` run.
+    @ObservationIgnored
+    public var playAlertSound: @MainActor (TaskAlertKind) -> Void = { TaskAlertSoundPlayer.play(kind: $0) }
+
     /// The project whose dashboard or task list the sidebar and main area
     /// reflect. In-memory only; not persisted. `nil` until the user picks a
     /// project. Kept in sync with `selectedTaskID` by `selectProject(_:)` /
@@ -231,7 +237,7 @@ public final class ProjectsStore {
         if TaskAlertDebouncer.isDebounced(previous: lastTerminalAlertAt[taskID], now: now) { return }
         lastTerminalAlertAt[taskID] = now
 
-        TaskAlertSoundPlayer.play(kind: kind)
+        playAlertSound(kind)
 
         if kind == .question {
             taskIDsNeedingAttention.insert(taskID)

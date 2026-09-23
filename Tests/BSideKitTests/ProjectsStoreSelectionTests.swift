@@ -31,6 +31,7 @@ struct ProjectsStoreSelectionTests {
     private func makeStore() async throws -> (store: ProjectsStore, projectA: Project, projectB: Project, taskA: TaskRecord) {
         let database = try AppDatabase.openInMemory()
         let store = ProjectsStore(database: database)
+        store.playAlertSound = { _ in }
 
         let (projectA, projectB, taskA): (Project, Project, TaskRecord) = try await database.dbQueue.write { db in
             var projectA = Project(path: "/tmp/project-a", displayName: "A", baseRef: "main")
@@ -216,6 +217,7 @@ struct ProjectsStoreSelectionTests {
 
         let database = try AppDatabase.openInMemory()
         let store = ProjectsStore(database: database)
+        store.playAlertSound = { _ in }
         try await store.addProject(at: repoURL)
         store.start()
         try await waitUntil { !store.projects.isEmpty }
