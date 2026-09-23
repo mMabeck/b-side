@@ -296,6 +296,23 @@ public final class ProjectsStore {
         }
     }
 
+    /// Persists a new default base ref for `project`, e.g. when a task is
+    /// created from a base other than the project's saved default. Updates
+    /// `projects` in place too, so a task-creation sheet opened right after
+    /// preselects the new default without waiting for the next
+    /// `ValueObservation` tick.
+    public func updateProjectBaseRef(_ project: Project, baseRef: String) async throws {
+        guard let id = project.id else { return }
+        try await database.dbQueue.write { db in
+            var updated = project
+            updated.baseRef = baseRef
+            try updated.update(db)
+        }
+        if let index = projects.firstIndex(where: { $0.id == id }) {
+            projects[index].baseRef = baseRef
+        }
+    }
+
     // MARK: - Tasks and worktrees
 
     /// Creates a task: resolves the base ref, creates (or attaches to) a branch
@@ -308,6 +325,7 @@ public final class ProjectsStore {
         name: String,
         baseRef: String? = nil,
         existingBranch: String? = nil,
+        useWorktree: Bool? = nil,
         onOutput: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> TaskRecord {
         let config = ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path))
@@ -317,7 +335,7 @@ public final class ProjectsStore {
             taskName: name,
             baseRef: baseRef,
             existingBranch: existingBranch,
-            useWorktree: config.taskDefaults.useWorktree,
+            useWorktree: useWorktree ?? config.taskDefaults.useWorktree,
             setupCommand: config.setupCommand,
             onOutput: onOutput
         )

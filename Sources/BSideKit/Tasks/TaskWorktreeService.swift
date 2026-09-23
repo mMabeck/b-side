@@ -72,6 +72,16 @@ public enum TaskWorktreeService {
         }
     }
 
+    /// Candidate base refs for cutting a new branch from: local branches first,
+    /// then remote-tracking branches (e.g. `origin/main`), so a base that only
+    /// exists on the remote is still offered.
+    public static func availableBaseRefs(for project: Project) async throws -> [String] {
+        let projectURL = URL(fileURLWithPath: project.path)
+        let local = try await GitCLI.localBranches(at: projectURL)
+        let remote = try await GitCLI.remoteTrackingBranches(at: projectURL)
+        return local + remote
+    }
+
     // MARK: - Creation
 
     /// Slugifies a task name into something safe for branch names and directory
