@@ -19,7 +19,7 @@ public struct SettingsView: View {
             NotificationsSettingsTab(theme: theme)
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
-        .frame(width: 480, height: 300)
+        .frame(width: 480, height: 420)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
     }
@@ -87,11 +87,59 @@ private struct TerminalSettingsTab: View {
 
 private struct NotificationsSettingsTab: View {
     var theme: GhosttyResolvedTheme
-    @AppStorage("settings.notifications.enabled") private var notificationsEnabled = true
+    @AppStorage(TaskAlertSettingsKeys.enabled) private var notificationsEnabled = true
+    @AppStorage(TaskAlertSettingsKeys.soundsEnabled) private var playSounds = true
+    @AppStorage(TaskAlertSettingsKeys.finishedSound) private var finishedSoundName = TaskAlertSound.defaultFinished.rawValue
+    @AppStorage(TaskAlertSettingsKeys.questionSound) private var questionSoundName = TaskAlertSound.defaultQuestion.rawValue
+    @AppStorage(TaskAlertSettingsKeys.volume) private var volume = 70.0
 
     var body: some View {
         Form {
-            Toggle("Enable Notifications", isOn: $notificationsEnabled)
+            Section {
+                Toggle("Enable Notifications", isOn: $notificationsEnabled)
+            }
+
+            Section("Sounds") {
+                Toggle("Play Sounds", isOn: $playSounds)
+
+                Group {
+                    Picker("Finished Sound", selection: $finishedSoundName) {
+                        ForEach(TaskAlertSound.allCases) { sound in
+                            Text(sound.rawValue).tag(sound.rawValue)
+                        }
+                    }
+                    .onChange(of: finishedSoundName) { _, newValue in
+                        TaskAlertSound(rawValue: newValue)?.play(volume: volume)
+                    }
+
+                    Button("Test") {
+                        TaskAlertSound(rawValue: finishedSoundName)?.play(volume: volume)
+                    }
+                    .disabled(finishedSoundName == TaskAlertSound.off.rawValue)
+
+                    Picker("Question Sound", selection: $questionSoundName) {
+                        ForEach(TaskAlertSound.allCases) { sound in
+                            Text(sound.rawValue).tag(sound.rawValue)
+                        }
+                    }
+                    .onChange(of: questionSoundName) { _, newValue in
+                        TaskAlertSound(rawValue: newValue)?.play(volume: volume)
+                    }
+
+                    Button("Test") {
+                        TaskAlertSound(rawValue: questionSoundName)?.play(volume: volume)
+                    }
+                    .disabled(questionSoundName == TaskAlertSound.off.rawValue)
+
+                    VStack(alignment: .leading) {
+                        Text("Volume: \(Int(volume))%")
+                            .font(.caption)
+                            .foregroundStyle(theme.palette.textSecondary)
+                        Slider(value: $volume, in: 0...100, step: 1)
+                    }
+                }
+                .disabled(!playSounds)
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)

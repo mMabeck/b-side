@@ -114,7 +114,8 @@ struct ProjectDashboardView: View {
             merged: syncStatus?.merged ?? false,
             isBlocked: summary.isBlocked,
             isVanished: isVanished,
-            activeChildCount: summary.activeCount
+            activeChildCount: summary.activeCount,
+            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false
         )
         let syncText = syncStatus.flatMap(BranchSyncSummary.text(for:))
 
