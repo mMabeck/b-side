@@ -293,6 +293,133 @@ struct PiSessionServiceTests {
     }
 }
 
+@Suite("PiSessionService.resolveTranscriptForResume")
+struct PiSessionServiceResolveTranscriptForResumeTests {
+    private func writeTranscript(id: String, cwd: String, at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let header = "{\"type\":\"session\",\"id\":\"\(id)\",\"cwd\":\"\(cwd)\"}"
+        let body = "{\"type\":\"message\",\"role\":\"user\",\"content\":\"hi\"}"
+        try "\(header)\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func makeLocations(sessionsRoot: URL) -> PiSessionService.Locations {
+        PiSessionService.Locations(
+            bundledBinaryPath: "/usr/local/bin/pi",
+            sessionsRoot: sessionsRoot,
+            pathBinaryFinder: { nil }
+        )
+    }
+
+    @Test("an empty stored transcriptPath is still resolved by scanning for the session id on disk")
+    func emptyStoredPathIsResolvedByScanning() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let cwd = root.appendingPathComponent("worktree").path
+        try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+
+        let sessionID = PiSessionService.newSessionID()
+        let transcriptURL = sessionsRoot.appendingPathComponent("--slug--/20260101_000000_aaa.jsonl")
+        try writeTranscript(id: sessionID, cwd: cwd, at: transcriptURL)
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: "")
+
+        let resolved = PiSessionService.resolveTranscriptForResume(
+            conversation: conversation,
+            currentWorkingDirectory: cwd,
+            locations: locations
+        )
+
+        let locatedPath = try #require(PiSessionService.locateTranscript(sessionID: sessionID, locations: locations)?.path)
+        #expect(resolved.transcriptPathForLaunch == locatedPath)
+        #expect(resolved.transcriptPathToPersist == locatedPath)
+    }
+
+    @Test("a transcript whose stored cwd no longer exists is repaired and resumed by path")
+    func staleStoredCWDIsRepairedAndResumed() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let oldCWD = root.appendingPathComponent("old-worktree").path
+        let newCWD = root.appendingPathComponent("new-worktree")
+        try FileManager.default.createDirectory(atPath: newCWD.path, withIntermediateDirectories: true)
+
+        let sessionID = PiSessionService.newSessionID()
+        let transcriptURL = sessionsRoot.appendingPathComponent("--old-slug--/20260101_000000_aaa.jsonl")
+        try writeTranscript(id: sessionID, cwd: oldCWD, at: transcriptURL)
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: transcriptURL.path)
+
+        let resolved = PiSessionService.resolveTranscriptForResume(
+            conversation: conversation,
+            currentWorkingDirectory: newCWD.path,
+            locations: locations
+        )
+
+        let resolvedNewCWD = newCWD.resolvingSymlinksInPath().path
+        let expectedSubdirectory = PiSessionService.sessionsSubdirectoryName(forCWD: resolvedNewCWD)
+        let expectedPath = sessionsRoot
+            .appendingPathComponent(expectedSubdirectory)
+            .appendingPathComponent(transcriptURL.lastPathComponent)
+            .path
+
+        #expect(resolved.transcriptPathForLaunch == expectedPath)
+        #expect(resolved.transcriptPathToPersist == expectedPath)
+        #expect(FileManager.default.fileExists(atPath: transcriptURL.path) == false)
+    }
+
+    @Test("a stored cwd that still exists is left untouched and nothing is re-persisted")
+    func stillExistingStoredCWDIsANoOp() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let cwd = root.appendingPathComponent("worktree").path
+        try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+
+        let sessionID = PiSessionService.newSessionID()
+        let transcriptURL = sessionsRoot.appendingPathComponent("--slug--/20260101_000000_aaa.jsonl")
+        try writeTranscript(id: sessionID, cwd: cwd, at: transcriptURL)
+        let originalContents = try Data(contentsOf: transcriptURL)
+
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: transcriptURL.path)
+
+        let resolved = PiSessionService.resolveTranscriptForResume(
+            conversation: conversation,
+            currentWorkingDirectory: cwd,
+            locations: locations
+        )
+
+        #expect(resolved.transcriptPathForLaunch == transcriptURL.path)
+        #expect(resolved.transcriptPathToPersist == nil)
+        #expect(try Data(contentsOf: transcriptURL) == originalContents)
+    }
+
+    @Test("no transcript anywhere for the session id falls back to --session-id via a nil launch path")
+    func noTranscriptFallsBackToSessionID() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+        let conversation = Conversation(taskId: 1, sessionId: PiSessionService.newSessionID(), transcriptPath: "")
+
+        let resolved = PiSessionService.resolveTranscriptForResume(
+            conversation: conversation,
+            currentWorkingDirectory: root.appendingPathComponent("worktree").path,
+            locations: locations
+        )
+
+        #expect(resolved.transcriptPathForLaunch == nil)
+        #expect(resolved.transcriptPathToPersist == nil)
+    }
+}
+
 @Suite("PiSessionService + ProjectsStore conversation binding")
 struct PiSessionServiceConversationBindingTests {
     private func makeStore() async throws -> (store: ProjectsStore, task: TaskRecord, database: AppDatabase) {
