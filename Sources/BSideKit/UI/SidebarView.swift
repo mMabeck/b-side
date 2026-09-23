@@ -252,7 +252,7 @@ struct SidebarView: View {
     private static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
 
     /// How far the selection fill extends past each side of its row.
-    private static let selectionBleed: CGFloat = 14
+    private static let selectionBleed: CGFloat = 17
 
     /// The leading inset a task row sits at, aligned with where the project
     /// title's text begins (`projectRow`'s own horizontal padding) so the
@@ -341,13 +341,13 @@ struct SidebarView: View {
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
             .overlay(alignment: .leading) {
                 // The indent guide: a thin low-opacity line at a fixed x within
-                // the leading inset, independent of whether this particular
-                // row is selected, so the guide reads as one continuous line
-                // rather than flickering per-row with selection state.
+                // the leading inset, hidden on the selected row, where it
+                // would otherwise cut a dark line through the selection fill.
                 Rectangle()
                     .fill(theme.palette.separator.opacity(0.5))
                     .frame(width: 1)
                     .padding(.leading, Self.taskIndentGuideX)
+                    .opacity(isSelected ? 0 : 1)
             }
         }
         .buttonStyle(.plain)

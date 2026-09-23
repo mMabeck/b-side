@@ -103,10 +103,10 @@ public struct BSidePalette: Equatable, Sendable {
         // audit). `ensuringContrast` then guarantees legibility even if this
         // theme's foreground/background pair is itself unusually close.
         let secondaryText = foreground
-            .blended(toward: background, amount: 0.25)
+            .blended(toward: background, amount: 0.15)
             .ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 4.5)
         let disabledText = foreground
-            .blended(toward: background, amount: 0.45)
+            .blended(toward: background, amount: 0.32)
             .ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 3.0)
 
         func status(base: Int, bright: Int) -> Color {
@@ -118,9 +118,9 @@ public struct BSidePalette: Equatable, Sendable {
             isDark: dark,
             forcesAppearance: true,
             windowBackground: background.color,
-            surfaceBackground: background.blended(toward: foreground, amount: 0.06).color,
-            elevatedSurfaceBackground: background.blended(toward: foreground, amount: 0.12).color,
-            separator: background.blended(toward: foreground, amount: 0.18).color,
+            surfaceBackground: background.blended(toward: foreground, amount: 0.09).color,
+            elevatedSurfaceBackground: background.blended(toward: foreground, amount: 0.15).color,
+            separator: background.blended(toward: foreground, amount: 0.24).color,
             textPrimary: foreground.color,
             textSecondary: secondaryText.color,
             textDisabled: disabledText.color,
