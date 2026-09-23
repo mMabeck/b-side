@@ -212,7 +212,10 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
 
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self else {
+                connection.cancel()
+                return
+            }
             guard self.taskExists(taskId) else {
                 self.respond(status: 404, on: connection)
                 return
@@ -232,7 +235,10 @@ public final class SubagentEventServer: @unchecked Sendable {
     /// already-gone (or never-spawned) pane is not an error.
     private func handleClose(taskId: Int64, childId: String, on connection: NWConnection) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self else {
+                connection.cancel()
+                return
+            }
             self.paneStore.close(taskId: taskId, childId: childId)
             self.respond(status: 204, on: connection)
         }

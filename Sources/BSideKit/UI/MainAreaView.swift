@@ -113,7 +113,16 @@ struct MainAreaView: View {
             purgeHosts(keeping: ids)
         }
         .onChange(of: store.subagentPanes.version) { _, _ in
+            let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
+            let lostVisibleFocus = visibleID.map { taskID in
+                focusedChildIDByTask[taskID] != nil
+                    && MainAreaView.prunedFocusedChildIDs(focusedChildIDByTask, panesByTask: store.subagentPanes.panesByTask)[taskID] == nil
+            } ?? false
+            focusedChildIDByTask = MainAreaView.prunedFocusedChildIDs(focusedChildIDByTask, panesByTask: store.subagentPanes.panesByTask)
             syncVisibility()
+            if lostVisibleFocus {
+                syncFocus()
+            }
         }
         .onChange(of: store.closedTerminalTaskID) { _, closedID in
             guard let closedID else { return }
@@ -416,6 +425,22 @@ struct MainAreaView: View {
     /// among live (non-archived, non-deleted) tasks should be evicted.
     static func idsToPurge(cachedIDs: Set<Int64>, liveTaskIDs: Set<Int64>) -> Set<Int64> {
         cachedIDs.subtracting(liveTaskIDs)
+    }
+
+    /// Drops any `focusedChildIDByTask` entry whose child id is no longer
+    /// among its task's live panes — a pane can close without its task's
+    /// terminal closing (`SubagentPaneStore.close`), which would otherwise
+    /// leave a stale id pointing at nothing. Pure so it's directly testable;
+    /// the `version`-change handler in `body` is what decides whether the
+    /// *visible* task lost its focused pane this way and needs `syncFocus()`
+    /// to hand keyboard focus back to the parent terminal.
+    static func prunedFocusedChildIDs(
+        _ focusedChildIDByTask: [Int64: String],
+        panesByTask: [Int64: [SubagentPaneStore.ChildPane]]
+    ) -> [Int64: String] {
+        focusedChildIDByTask.filter { taskID, childID in
+            (panesByTask[taskID] ?? []).contains { $0.id == childID }
+        }
     }
 
     /// The task id that should read as visible/focused for a given

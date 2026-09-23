@@ -1,12 +1,21 @@
 import SwiftUI
 
-/// One task's terminal area: just the parent's `TerminalHostView` while it
-/// has no live subagent panes, or a native horizontal split \u2014 parent on the
-/// left (~60%), children stacked vertically on the right, equal heights \u2014
-/// once `SubagentPaneStore` has any for this task (native-rewrite.md
-/// \u00a7"The chosen design: native splits, plus cards"). Rebalances automatically
-/// as panes open/close since it reads `store.subagentPanes` directly rather
-/// than caching a snapshot.
+/// One task's terminal area: the parent's `TerminalHostView` alone, filling
+/// the space, while it has no live subagent panes; or a native horizontal
+/// split \u2014 parent on the left (~60%), children stacked vertically on the
+/// right, equal heights \u2014 once `SubagentPaneStore` has any for this task
+/// (native-rewrite.md \u00a7"The chosen design: native splits, plus cards").
+/// Pane membership updates automatically as panes open/close since it reads
+/// `store.subagentPanes` directly rather than caching a snapshot.
+///
+/// The parent's `TerminalHostView` sits at one stable position in the view
+/// tree \u2014 the first child of the same `HSplitView` in both the empty and
+/// non-empty cases \u2014 rather than living in two branches of an `if`/`else`.
+/// Only the children column is conditional. SwiftUI would otherwise treat
+/// the parent host as a structurally different view across the two branches
+/// and tear down/rebuild its underlying `NSView` whenever the first pane
+/// opens or the last one closes, which can drop first responder out from
+/// under whatever was focused.
 struct TaskTerminalAreaView: View {
     var store: ProjectsStore
     var host: TerminalSurfaceHost
@@ -16,13 +25,11 @@ struct TaskTerminalAreaView: View {
 
     var body: some View {
         let panes = store.subagentPanes.panes(forTask: taskID)
-        if panes.isEmpty {
-            TerminalHostView(host: host, focusedTaskID: focusedTaskID, taskID: taskID)
-        } else {
-            GeometryReader { proxy in
-                HSplitView {
-                    TerminalHostView(host: host, focusedTaskID: focusedTaskID, taskID: taskID)
-                        .frame(minWidth: 240, idealWidth: proxy.size.width * 0.6)
+        GeometryReader { proxy in
+            HSplitView {
+                TerminalHostView(host: host, focusedTaskID: focusedTaskID, taskID: taskID)
+                    .frame(minWidth: 240, idealWidth: panes.isEmpty ? proxy.size.width : proxy.size.width * 0.6)
+                if !panes.isEmpty {
                     VSplitView {
                         ForEach(panes) { pane in
                             SubagentPaneView(store: store, taskID: taskID, pane: pane, focusedChildID: $focusedChildID)
@@ -42,6 +49,11 @@ struct TaskTerminalAreaView: View {
 /// opening it never steals keyboard focus; a click (anywhere in the pane,
 /// via the header's explicit `requestFocus()` or ordinary AppKit
 /// click-to-focus on the terminal itself) is what focuses it.
+///
+/// Also deliberately has no `TerminalAlertBridge` of its own \u2014 the
+/// Subagents tab's cards, backed by the same `SubagentFeedStore` run this
+/// pane's header glyph reads from, already carry a child's state, so a
+/// second bridge here would be redundant.
 struct SubagentPaneView: View {
     var store: ProjectsStore
     var taskID: Int64
