@@ -18,6 +18,14 @@ public final class SubagentSwapStore {
     /// area keeps showing whatever it already shows.
     public private(set) var highlightedChildIDByTask: [Int64: String] = [:]
 
+    /// Bumped on every change to `shownChildIDByTask` — which surface a
+    /// task's main area shows — so `MainAreaView` can re-derive
+    /// `isVisible`/focus on a swap the same way `SubagentPaneStore.version`
+    /// lets it react to panes appearing or disappearing. Not bumped for
+    /// `highlightedChildIDByTask` alone, since highlighting a headless card
+    /// never changes which surface is shown.
+    public private(set) var version = 0
+
     public init() {}
 
     public func shownChildID(forTask taskId: Int64) -> String? {
@@ -29,13 +37,16 @@ public final class SubagentSwapStore {
     }
 
     public func showMain(forTask taskId: Int64) {
-        shownChildIDByTask.removeValue(forKey: taskId)
         highlightedChildIDByTask.removeValue(forKey: taskId)
+        guard shownChildIDByTask.removeValue(forKey: taskId) != nil else { return }
+        version += 1
     }
 
     public func show(childId: String, forTask taskId: Int64) {
-        shownChildIDByTask[taskId] = childId
         highlightedChildIDByTask.removeValue(forKey: taskId)
+        guard shownChildIDByTask[taskId] != childId else { return }
+        shownChildIDByTask[taskId] = childId
+        version += 1
     }
 
     public func highlight(childId: String, forTask taskId: Int64) {
@@ -56,6 +67,7 @@ public final class SubagentSwapStore {
     public func handleClosed(childId: String, taskId: Int64) {
         if shownChildIDByTask[taskId] == childId {
             shownChildIDByTask.removeValue(forKey: taskId)
+            version += 1
         }
         if highlightedChildIDByTask[taskId] == childId {
             highlightedChildIDByTask.removeValue(forKey: taskId)
@@ -63,8 +75,9 @@ public final class SubagentSwapStore {
     }
 
     public func closeAll(taskId: Int64) {
-        shownChildIDByTask.removeValue(forKey: taskId)
         highlightedChildIDByTask.removeValue(forKey: taskId)
+        guard shownChildIDByTask.removeValue(forKey: taskId) != nil else { return }
+        version += 1
     }
 }
 

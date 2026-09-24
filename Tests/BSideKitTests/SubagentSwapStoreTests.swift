@@ -43,6 +43,27 @@ struct SubagentSwapStoreTests {
         #expect(swap.shownChildID(forTask: 1) == "c2")
     }
 
+    @Test("version bumps when the shown child changes, but not when highlighting alone")
+    func versionBumpsOnlyForShownChildChanges() {
+        let swap = SubagentSwapStore()
+        let versionAfterCreation = swap.version
+
+        swap.highlight(childId: "c1", forTask: 1)
+        #expect(swap.version == versionAfterCreation)
+
+        swap.show(childId: "c1", forTask: 1)
+        #expect(swap.version == versionAfterCreation + 1)
+
+        swap.show(childId: "c1", forTask: 1)
+        #expect(swap.version == versionAfterCreation + 1)
+
+        swap.showMain(forTask: 1)
+        #expect(swap.version == versionAfterCreation + 2)
+
+        swap.showMain(forTask: 1)
+        #expect(swap.version == versionAfterCreation + 2)
+    }
+
     @Test("Swap state for one task never affects another")
     func tasksAreIndependent() {
         let swap = SubagentSwapStore()

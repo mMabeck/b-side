@@ -82,7 +82,8 @@ struct MainAreaView: View {
                         taskID: taskID,
                         focusedTaskID: $focusedTaskID,
                         isExited: exitedTaskIDs.contains(taskID),
-                        onResume: { requestRelaunch(taskID: taskID) }
+                        onResume: { requestRelaunch(taskID: taskID) },
+                        isSelected: isVisible
                     )
                     .opacity(isVisible ? 1 : 0)
                     .allowsHitTesting(isVisible)
@@ -114,6 +115,10 @@ struct MainAreaView: View {
         .onChange(of: store.subagentPanes.version) { _, _ in
             MainAreaView.reconcileSwap(store.subagentSwap, panesByTask: store.subagentPanes.panesByTask)
             syncVisibility()
+        }
+        .onChange(of: store.subagentSwap.version) { _, _ in
+            syncVisibility()
+            syncFocus()
         }
         .onChange(of: store.closedTerminalTaskID) { _, closedID in
             guard let closedID else { return }
@@ -352,21 +357,29 @@ struct MainAreaView: View {
     /// task doesn't poll forever.
     private static let autoRenameWatchDuration: TimeInterval = 30 * 60
 
-    /// Marks the active task's host visible and every other cached host not
-    /// visible, so hidden surfaces stop drawing frames nobody sees (per
-    /// `TerminalSurfaceHost.isVisible`'s own doc comment) without losing
-    /// their grid, scrollback, or running shell. Derived from `mainSelection`,
-    /// not the raw `selectedTaskID`, so this never disagrees with which
-    /// branch of the `switch` above is actually on screen — see
-    /// `visibleTaskID(for:)`.
+    /// Marks the active task's *shown* host visible and every other cached
+    /// host not visible, so hidden surfaces stop drawing frames nobody sees
+    /// (per `TerminalSurfaceHost.isVisible`'s own doc comment) without
+    /// losing their grid, scrollback, or running shell. Derived from
+    /// `mainSelection`, not the raw `selectedTaskID`, so this never
+    /// disagrees with which branch of the `switch` above is actually on
+    /// screen — see `visibleTaskID(for:)`.
+    ///
+    /// "The active task" alone isn't enough for panes: swapping (per
+    /// `ProjectsStore.subagentSwap`) only ever shows *one* surface for a
+    /// task at a time, so a pane that isn't the currently shown child must
+    /// stay not-visible even while its task is the visible one — same for
+    /// the parent host when a child is shown instead.
     private func syncVisibility() {
         let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         for (id, host) in hostsByTaskID {
-            host.isVisible = (id == visibleID)
+            let shownChildID = store.subagentSwap.shownChildID(forTask: id)
+            host.isVisible = (id == visibleID) && shownChildID == nil
         }
         for (id, panes) in store.subagentPanes.panesByTask {
+            let shownChildID = store.subagentSwap.shownChildID(forTask: id)
             for pane in panes {
-                pane.host.isVisible = (id == visibleID)
+                pane.host.isVisible = (id == visibleID) && pane.id == shownChildID
             }
         }
     }
@@ -399,9 +412,35 @@ struct MainAreaView: View {
         // (see its doc comment) via the same `.focused` binding a running
         // task's `TerminalHostView` uses, so setting `focusedTaskID` above
         // is already enough for it.
-        if let visibleID, let host = hostsByTaskID[visibleID], !exitedTaskIDs.contains(visibleID) {
-            host.state.requestFocus()
+        guard let visibleID, !exitedTaskIDs.contains(visibleID) else { return }
+        // A child's surface can be swapped into the main area in place of
+        // the parent (`ProjectsStore.subagentSwap`) — focus must follow
+        // whichever one is actually shown, or the parent keeps first
+        // responder while a child's terminal is what's on screen.
+        let panes = store.subagentPanes.panes(forTask: visibleID)
+        let shownChildID = store.subagentSwap.shownChildID(forTask: visibleID)
+        switch MainAreaView.focusTarget(shownChildID: shownChildID, livePaneIDs: Set(panes.map(\.id))) {
+        case .child(let childID):
+            panes.first(where: { $0.id == childID })?.host.state.requestFocus()
+        case .parent:
+            hostsByTaskID[visibleID]?.state.requestFocus()
         }
+    }
+
+    enum FocusTarget: Equatable {
+        case parent
+        case child(String)
+    }
+
+    /// Which surface `syncFocus()` should hand keyboard focus to: the shown
+    /// child, if `shownChildID` names one that's actually still live, or the
+    /// parent otherwise (no child shown, or a stale id left over from one
+    /// that already closed). Pure so it's directly testable.
+    static func focusTarget(shownChildID: String?, livePaneIDs: Set<String>) -> FocusTarget {
+        if let shownChildID, livePaneIDs.contains(shownChildID) {
+            return .child(shownChildID)
+        }
+        return .parent
     }
 
     /// Ends one task's terminal without waiting for its task to be deleted
