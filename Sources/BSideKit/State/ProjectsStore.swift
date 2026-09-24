@@ -175,6 +175,42 @@ public final class ProjectsStore {
         closedTerminalTaskID = nil
     }
 
+    /// Task id whose terminal `MainAreaView` should tear down and relaunch
+    /// next — set by `requestRestartTerminal(for:)`, observed and cleared
+    /// (via `acknowledgeRestartRequested`) by `MainAreaView` once it has
+    /// actually relaunched that task's `TerminalSurfaceHost`. A one-shot
+    /// request rather than a queue, mirroring `closedTerminalTaskID`.
+    public private(set) var restartRequestedTaskID: Int64?
+
+    /// Requests that `MainAreaView` restart `task`'s agent terminal: tear
+    /// down its current `TerminalSurfaceHost` — killing the pi process if
+    /// it's still alive — and relaunch it along the same
+    /// `PiSessionService.launchCommand` path `ensureHost` normally uses, so
+    /// the relaunch resumes the same pi session/transcript instead of
+    /// starting fresh. Used by both `TerminalCommands`' "Restart Pi
+    /// Session" command (the process may still be running) and the "Pi
+    /// session ended" state's Resume button (the process has already
+    /// exited).
+    public func requestRestartTerminal(for task: TaskRecord) {
+        guard let id = task.id else { return }
+        restartRequestedTaskID = id
+    }
+
+    /// Clears `restartRequestedTaskID` once `MainAreaView` has relaunched
+    /// the host for `id` — scoped the same way `acknowledgeTerminalClosed`
+    /// is, so a stale acknowledgement can't clear a newer request.
+    public func acknowledgeRestartRequested(_ id: Int64) {
+        guard restartRequestedTaskID == id else { return }
+        restartRequestedTaskID = nil
+    }
+
+    /// The project `task` belongs to, resolved the same way `mainSelection`
+    /// resolves its own task/project pair — `nil` only if `task`'s project
+    /// has since been removed out from under it.
+    public func project(forTask task: TaskRecord) -> Project? {
+        projects.first { $0.id == task.projectId }
+    }
+
     /// Pure so it's directly testable: appends `id` only if it isn't
     /// already present, preserving the existing order of everything else.
     static func addingOpenTerminal(_ id: Int64, to ids: [Int64]) -> [Int64] {

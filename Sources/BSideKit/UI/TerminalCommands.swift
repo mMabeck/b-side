@@ -24,7 +24,25 @@ public struct TerminalCommands: Commands {
                 }
             }
             .keyboardShortcut(TerminalCloseShortcut.closeTask)
+
+            // Works whether the task's agent process is still alive (kills
+            // it, then relaunches) or has already exited (the "Pi session
+            // ended" state's Resume button is the other way to trigger the
+            // same request) — both just call `ProjectsStore.requestRestartTerminal`,
+            // which `MainAreaView` is the sole actor on.
+            Button("Restart Pi Session") {
+                if case .task(let task, _) = store.mainSelection {
+                    store.requestRestartTerminal(for: task)
+                }
+            }
+            .keyboardShortcut(TerminalCloseShortcut.restartSession)
+            .disabled(!isTaskSelected)
         }
+    }
+
+    private var isTaskSelected: Bool {
+        if case .task = store.mainSelection { return true }
+        return false
     }
 }
 
@@ -33,4 +51,9 @@ public struct TerminalCommands: Commands {
 /// rationale as `WindowLayoutShortcut`/`NavigationShortcuts`.
 public enum TerminalCloseShortcut {
     public static let closeTask = KeyboardShortcut("w", modifiers: [.command])
+
+    /// Cmd+Shift+R rather than plain Cmd+R, which Ghostty's own defaults
+    /// bind to `reload_config` — see `GhosttyBridge.appOwnedKeybinds`'s
+    /// defensive unbind of it.
+    public static let restartSession = KeyboardShortcut("r", modifiers: [.command, .shift])
 }
