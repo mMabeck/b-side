@@ -23,12 +23,26 @@ struct TaskTerminalAreaView: View {
     var focusedTaskID: FocusState<Int64?>.Binding
     @Binding var focusedChildID: String?
 
+    /// Whether this task's Pi process has exited on its own; when `true`
+    /// (and `onResume` is set), `PiSessionEndedView` replaces the parent's
+    /// `TerminalHostView` in the same split slot — see `MainAreaView`'s
+    /// `exitedTaskIDs`. Defaults preserve every existing caller (including
+    /// `SubagentPaneSnapshotTests`), which never sees an exited task.
+    var isExited: Bool = false
+    var onResume: (() -> Void)? = nil
+
     var body: some View {
         let panes = store.subagentPanes.panes(forTask: taskID)
         GeometryReader { proxy in
             HSplitView {
-                TerminalHostView(host: host, focusedTaskID: focusedTaskID, taskID: taskID)
-                    .frame(minWidth: 240, idealWidth: panes.isEmpty ? proxy.size.width : proxy.size.width * 0.6)
+                Group {
+                    if isExited, let onResume {
+                        PiSessionEndedView(taskID: taskID, focusedTaskID: focusedTaskID, onResume: onResume)
+                    } else {
+                        TerminalHostView(host: host, focusedTaskID: focusedTaskID, taskID: taskID)
+                    }
+                }
+                .frame(minWidth: 240, idealWidth: panes.isEmpty ? proxy.size.width : proxy.size.width * 0.6)
                 if !panes.isEmpty {
                     VSplitView {
                         ForEach(panes) { pane in

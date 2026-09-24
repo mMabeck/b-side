@@ -234,7 +234,11 @@ public enum GhosttyBridge {
     /// with no app menu item of their own here, but are released
     /// defensively for the same reason — both are exactly the shape of
     /// standard AppKit shortcut a terminal emulator's defaults are prone to
-    /// binding out from under an embedding app.
+    /// binding out from under an embedding app. Cmd+Shift+R is unbound on
+    /// the same defensive basis — Ghostty's own default binds plain Cmd+R
+    /// to `reload_config`, and `TerminalCommands`' "Restart Pi Session"
+    /// deliberately uses Cmd+Shift+R instead of Cmd+R to avoid colliding
+    /// with it outright.
     ///
     /// Copy/paste/select-all/find (`cmd+c`/`cmd+v`/`cmd+a`/`cmd+f`) are
     /// deliberately left bound to the terminal: those are exactly the keys a
@@ -251,6 +255,7 @@ public enum GhosttyBridge {
     keybind = cmd+shift+n=unbind
     keybind = cmd+h=unbind
     keybind = cmd+m=unbind
+    keybind = cmd+shift+r=unbind
     \(digitUnbinds)
 
     """
