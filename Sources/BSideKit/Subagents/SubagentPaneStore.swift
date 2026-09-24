@@ -19,7 +19,7 @@ public final class SubagentPaneStore {
     /// cap is about how many child surfaces stay mounted — memory/pty cost,
     /// not screen space — which is why it can sit higher than the old
     /// split-pane limit.
-    public static let maxPanesPerTask = 8
+    public static let maxPanesPerTask = 4
 
     public struct ChildPane: Identifiable, Sendable {
         public let id: String
@@ -36,7 +36,23 @@ public final class SubagentPaneStore {
     /// `ProjectsStore.focusRequestToken`'s role for exactly that reason.
     public private(set) var version = 0
 
-    public init() {}
+    /// Builds the `TerminalSurfaceHost` for a newly spawned child. Real
+    /// callers get the production closure below (a real pty/Ghostty exec
+    /// surface); tests inject `TerminalSurfaceHost.makeInMemoryForTesting()`
+    /// instead, since spawning many real exec surfaces back-to-back (as the
+    /// cap tests do) is what made `swift test` segfault inside libghostty's
+    /// config finalization.
+    private let makeHost: (URL, String, @escaping (Bool) -> Void) -> TerminalSurfaceHost
+
+    public init() {
+        makeHost = { cwd, command, onExit in
+            TerminalSurfaceHost(workingDirectory: cwd, command: command, onExit: onExit)
+        }
+    }
+
+    init(makeHost: @escaping (URL, String, @escaping (Bool) -> Void) -> TerminalSurfaceHost) {
+        self.makeHost = makeHost
+    }
 
     /// Panes for `taskId`, oldest first.
     public func panes(forTask taskId: Int64) -> [ChildPane] {
@@ -61,7 +77,7 @@ public final class SubagentPaneStore {
         // Starts not-visible: whether this task is the currently selected
         // one is `MainAreaView`'s business, not this store's — it corrects
         // this via `syncVisibility()`, triggered by `version` changing.
-        let host = TerminalSurfaceHost(workingDirectory: cwd, command: command) { [weak self] _ in
+        let host = makeHost(cwd, command) { [weak self] _ in
             self?.close(taskId: taskId, childId: childId)
         }
         host.isVisible = false
