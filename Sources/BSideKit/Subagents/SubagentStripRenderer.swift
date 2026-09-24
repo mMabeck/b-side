@@ -152,7 +152,7 @@ public enum SubagentStripRenderer {
             return color + vertical + SGR.reset + " " + textColor + visible + SGR.reset + " " + color + vertical + SGR.reset
         }
 
-        var toolRows = run.toolLines.suffix(cardBodyRowCount - 1).map { line in bodyRow(line, textColor: bodyColor) }
+        var toolRows = run.toolLines.suffix(cardBodyRowCount - 1).map { line in bodyRow("→ \(line)", textColor: bodyColor) }
         while toolRows.count < cardBodyRowCount - 1 {
             toolRows.append(bodyRow("", textColor: bodyColor))
         }
