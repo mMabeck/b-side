@@ -43,6 +43,10 @@ struct SubagentEventServerTests {
         #expect(responseBody.isEmpty)
     }
 
+    private func fakeHostFactory(cwd: URL, command: String, onExit: @escaping (Bool) -> Void) -> TerminalSurfaceHost {
+        TerminalSurfaceHost.makeInMemoryForTesting()
+    }
+
     private func tempDir() -> URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("subagent-server-spawn-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -52,7 +56,7 @@ struct SubagentEventServerTests {
     @Test("Spawn creates a pane and returns 204 for a known task")
     func spawnCreatesPaneAndReturns204() async throws {
         let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore()
+        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
         let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in true })
         try await server.start()
         defer { server.stop() }
@@ -68,7 +72,7 @@ struct SubagentEventServerTests {
     @Test("Spawn for an unknown task returns 404 and registers no pane")
     func spawnUnknownTaskReturns404() async throws {
         let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore()
+        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
         let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in false })
         try await server.start()
         defer { server.stop() }
@@ -84,7 +88,7 @@ struct SubagentEventServerTests {
     @Test("Spawn past the pane cap returns 429")
     func spawnOverCapReturns429() async throws {
         let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore()
+        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
         for index in 0..<SubagentPaneStore.maxPanesPerTask {
             paneStore.spawn(taskId: 1, childId: "existing\(index)", label: "x", cwd: tempDir(), command: "/bin/sh")
         }
@@ -103,7 +107,7 @@ struct SubagentEventServerTests {
     @Test("Spawn with a malformed body returns 400")
     func spawnMalformedBodyReturns400() async throws {
         let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore()
+        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
         let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in true })
         try await server.start()
         defer { server.stop() }

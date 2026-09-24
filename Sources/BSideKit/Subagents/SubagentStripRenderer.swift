@@ -81,6 +81,21 @@ public enum SubagentStripRenderer {
             return Result(lines: [], slots: [], mainHintRange: nil)
         }
 
+        // Too narrow for even one card: rendering at `minCardWidth` anyway
+        // (the old behavior) produced lines wider than the surface's real
+        // column count, which Ghostty then wrapped onto an extra row —
+        // clamp to just the label row instead, which already fits `columns`
+        // exactly via `fit()`.
+        guard columns >= minCardWidth else {
+            let (labelLine, mainHintRange) = renderLabelRow(runs: runs, columns: columns, hiddenCount: 0)
+            let blankRow = String(repeating: " ", count: columns)
+            return Result(
+                lines: Array(repeating: blankRow, count: cardRowCount) + [labelLine],
+                slots: [],
+                mainHintRange: mainHintRange
+            )
+        }
+
         let widthBudget = max(columns, minCardWidth)
         let maxCards = max(1, (widthBudget + columnGap) / (minCardWidth + columnGap))
         let shown = Array(runs.prefix(maxCards))

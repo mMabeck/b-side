@@ -22,6 +22,31 @@ struct SubagentStripRendererTests {
         #expect(result.slots.isEmpty)
     }
 
+    @Test("A width under the minimum card width never produces a line wider than the columns given")
+    func narrowWidthClampsLineLength() {
+        let run = makeRun(id: "c1")
+        let columns = SubagentStripRenderer.minCardWidth - 5
+        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: columns, now: Date())
+        #expect(result.lines.count == SubagentStripRenderer.totalRowCount)
+        #expect(result.slots.isEmpty)
+        for line in result.lines {
+            #expect(Self.stripANSI(line).count == columns)
+        }
+    }
+
+    private static func stripANSI(_ text: String) -> String {
+        var result = ""
+        var chars = text.makeIterator()
+        while let char = chars.next() {
+            if char == "\u{1B}" {
+                while let next = chars.next(), next != "m" {}
+                continue
+            }
+            result.append(char)
+        }
+        return result
+    }
+
     @Test("A single run renders the fixed row count, top-to-bottom border then label row")
     func singleRunRowCount() {
         let run = makeRun(id: "c1")

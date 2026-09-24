@@ -30,4 +30,12 @@ struct SubagentSwapCommandsTests {
         #expect(SubagentSwapShortcut.previous.key.character == "[")
         #expect(SubagentSwapShortcut.previous.modifiers == [.control, .command])
     }
+
+    @Test("Next/Previous also have arrow-key equivalents, for keyboard layouts where [/] need Option")
+    func nextPreviousArrowShortcuts() {
+        #expect(SubagentSwapShortcut.nextArrow.key.character == KeyEquivalent.rightArrow.character)
+        #expect(SubagentSwapShortcut.nextArrow.modifiers == [.control, .command])
+        #expect(SubagentSwapShortcut.previousArrow.key.character == KeyEquivalent.leftArrow.character)
+        #expect(SubagentSwapShortcut.previousArrow.modifiers == [.control, .command])
+    }
 }

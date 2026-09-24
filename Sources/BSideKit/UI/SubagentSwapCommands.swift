@@ -45,31 +45,40 @@ public struct SubagentSwapCommands: Commands {
 
             Divider()
 
-            Button("Next Subagent") {
-                withSelectedTask { taskId in
-                    let strip = store.stripChildIDsWithLiveSurface(forTask: taskId)
-                    let shown = store.subagentSwap.shownChildID(forTask: taskId)
-                    if let next = SubagentSwapNavigation.next(after: shown, strip: strip) {
-                        store.subagentSwap.show(childId: next, forTask: taskId)
-                    } else {
-                        store.subagentSwap.showMain(forTask: taskId)
-                    }
-                }
-            }
-            .keyboardShortcut(SubagentSwapShortcut.next)
+            Button("Next Subagent") { advance(next: true) }
+                .keyboardShortcut(SubagentSwapShortcut.next)
 
-            Button("Previous Subagent") {
-                withSelectedTask { taskId in
-                    let strip = store.stripChildIDsWithLiveSurface(forTask: taskId)
-                    let shown = store.subagentSwap.shownChildID(forTask: taskId)
-                    if let previous = SubagentSwapNavigation.previous(before: shown, strip: strip) {
-                        store.subagentSwap.show(childId: previous, forTask: taskId)
-                    } else {
-                        store.subagentSwap.showMain(forTask: taskId)
-                    }
-                }
+            Button("Previous Subagent") { advance(next: false) }
+                .keyboardShortcut(SubagentSwapShortcut.previous)
+
+            // Same two actions again, under the arrow-key equivalents
+            // (`⌃⌘←`/`⌃⌘→`) — hidden from the menu so "Next"/"Previous
+            // Subagent" above aren't listed twice, but still registered with
+            // `NSApp.mainMenu` so `MainMenuKeyRouter` dispatches the arrow
+            // form too. `⌃⌘[`/`⌃⌘]` need ⌥ on a Danish keyboard to type at
+            // all, which the arrow keys don't.
+            Button("Next Subagent (Arrow)") { advance(next: true) }
+                .keyboardShortcut(SubagentSwapShortcut.nextArrow)
+                .hidden()
+
+            Button("Previous Subagent (Arrow)") { advance(next: false) }
+                .keyboardShortcut(SubagentSwapShortcut.previousArrow)
+                .hidden()
+        }
+    }
+
+    private func advance(next: Bool) {
+        withSelectedTask { taskId in
+            let strip = store.stripChildIDsWithLiveSurface(forTask: taskId)
+            let shown = store.subagentSwap.shownChildID(forTask: taskId)
+            let target = next
+                ? SubagentSwapNavigation.next(after: shown, strip: strip)
+                : SubagentSwapNavigation.previous(before: shown, strip: strip)
+            if let target {
+                store.subagentSwap.show(childId: target, forTask: taskId)
+            } else {
+                store.subagentSwap.showMain(forTask: taskId)
             }
-            .keyboardShortcut(SubagentSwapShortcut.previous)
         }
     }
 
@@ -94,4 +103,10 @@ public enum SubagentSwapShortcut {
 
     public static let next = KeyboardShortcut("]", modifiers: [.control, .command])
     public static let previous = KeyboardShortcut("[", modifiers: [.control, .command])
+
+    /// Same actions as `next`/`previous`, under the arrow keys instead of
+    /// brackets — a Danish keyboard layout needs ⌥ to type `[`/`]` at all, so
+    /// `⌃⌘[`/`⌃⌘]` alone is unreachable there without a third modifier.
+    public static let nextArrow = KeyboardShortcut(.rightArrow, modifiers: [.control, .command])
+    public static let previousArrow = KeyboardShortcut(.leftArrow, modifiers: [.control, .command])
 }

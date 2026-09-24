@@ -6,6 +6,10 @@ import Testing
 @MainActor
 @Suite("SubagentPaneStore")
 struct SubagentPaneStoreTests {
+    private func fakeHostFactory(cwd: URL, command: String, onExit: @escaping (Bool) -> Void) -> TerminalSurfaceHost {
+        TerminalSurfaceHost.makeInMemoryForTesting()
+    }
+
     private func tempDir() -> URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("subagent-pane-store-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -43,7 +47,7 @@ struct SubagentPaneStoreTests {
 
     @Test("Spawning past the cap fails and does not register a pane")
     func spawnRespectsCap() {
-        let store = SubagentPaneStore()
+        let store = SubagentPaneStore(makeHost: fakeHostFactory)
         for index in 0..<SubagentPaneStore.maxPanesPerTask {
             let created = store.spawn(taskId: 1, childId: "c\(index)", label: "child \(index)", cwd: tempDir(), command: "/bin/sh")
             #expect(created)
@@ -58,7 +62,7 @@ struct SubagentPaneStoreTests {
 
     @Test("A closed task's cap frees up for a new child")
     func closingFreesCapSlot() {
-        let store = SubagentPaneStore()
+        let store = SubagentPaneStore(makeHost: fakeHostFactory)
         for index in 0..<SubagentPaneStore.maxPanesPerTask {
             store.spawn(taskId: 1, childId: "c\(index)", label: "child \(index)", cwd: tempDir(), command: "/bin/sh")
         }
