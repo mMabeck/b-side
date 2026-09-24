@@ -25,7 +25,16 @@ public final class SubagentStripBatchTracker {
     public func visibleRuns(forTask taskId: Int64, allRuns: [ChildRun]) -> [ChildRun] {
         let current = batchByTask[taskId] ?? []
         let next = Self.nextBatch(currentBatch: current, allRuns: allRuns)
-        batchByTask[taskId] = next
+        // Only write when the batch actually changed: this is called from
+        // view bodies (`TaskTerminalAreaView`), and `@Observable` fires a
+        // change notification on every assignment regardless of whether the
+        // value moved — with two or more mounted task areas, an
+        // unconditional write here re-invalidated every reader of
+        // `batchByTask` (including the very body doing the writing) on
+        // every render, driving continuous re-render/CPU use.
+        if next != current {
+            batchByTask[taskId] = next
+        }
         return allRuns.filter { next.contains($0.id) }
     }
 

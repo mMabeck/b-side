@@ -1,7 +1,25 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import BSideKit
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+
+    func set() {
+        lock.lock()
+        flag = true
+        lock.unlock()
+    }
+
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return flag
+    }
+}
 
 @MainActor
 @Suite("SubagentStripBatchTracker")
@@ -69,6 +87,22 @@ struct SubagentStripBatchTrackerTests {
         let b = makeRun(id: "b", state: .active)
         let visible = tracker.visibleRuns(forTask: 1, allRuns: [a, b])
         #expect(Set(visible.map(\.id)) == ["a", "b"])
+    }
+
+    @Test("Reading an unchanged batch does not mutate observed state")
+    func readingUnchangedBatchDoesNotMutate() {
+        let tracker = SubagentStripBatchTracker()
+        let a = makeRun(id: "a", state: .active)
+        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
+
+        let changed = LockedFlag()
+        withObservationTracking {
+            _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
+        } onChange: {
+            changed.set()
+        }
+
+        #expect(!changed.value)
     }
 
     @Test("reset clears the tracked batch for a task, independent of other tasks")
