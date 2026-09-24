@@ -14,8 +14,12 @@ import Foundation
 @Observable
 public final class SubagentPaneStore {
     /// Cap on live panes per task before the spawner is told to fall back to
-    /// headless (card only) for extra children.
-    public static let maxPanesPerTask = 4
+    /// headless (card only) for extra children. The task's main area only
+    /// ever shows one surface at a time now (swap, not a split), so this
+    /// cap is about how many child surfaces stay mounted — memory/pty cost,
+    /// not screen space — which is why it can sit higher than the old
+    /// split-pane limit.
+    public static let maxPanesPerTask = 8
 
     public struct ChildPane: Identifiable, Sendable {
         public let id: String

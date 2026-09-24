@@ -456,6 +456,19 @@ public final class TerminalSurfaceHost: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Backs a surface with an `InMemoryTerminalSession` instead of a real
+    /// pty (`.exec`) — used only by `SubagentStripHost` today. No
+    /// `workingDirectory`/`command`/`onExit`: there is no process, so
+    /// nothing about process lifecycle applies.
+    fileprivate init(inMemorySession: InMemoryTerminalSession) {
+        let resolvedConfig = GhosttyBridge.resolveUserConfig()
+        state = TerminalViewState(
+            configSource: resolvedConfig.configSource,
+            theme: resolvedConfig.theme
+        )
+        state.configuration = TerminalSurfaceOptions(backend: .inMemory(inMemorySession))
+    }
+
     /// Whether this surface should keep rendering. Per native-rewrite.md §6,
     /// a surface that stops being visible is marked not-visible rather than
     /// torn down: it keeps its grid, scrollback and session, and simply
@@ -512,6 +525,91 @@ public struct TerminalHostView: View {
         } else {
             TerminalSurfaceView(context: host.state)
         }
+    }
+}
+
+/// One in-memory Ghostty surface used purely to render the subagent card
+/// strip (native-rewrite.md §"Subagents, and replacing tmux"): no pty, no
+/// child process — `render(lines:)` writes plain ANSI bytes
+/// (`SubagentStripRenderer`'s output) directly into the terminal's grid, and
+/// mouse clicks over the strip come back out through `onHostInput` as raw
+/// SGR report bytes (`InMemoryTerminalSession`'s `write` handler fires
+/// whenever Ghostty would otherwise have sent bytes to a real pty's stdin —
+/// keystrokes, or here, mouse reports — since there is no pty to send them
+/// to). `SubagentStripMouseParser` turns those bytes into clicks.
+@MainActor
+public final class SubagentStripHost: ObservableObject {
+    public let hostView: TerminalSurfaceHost
+    private let session: InMemoryTerminalSession
+
+    /// Raw bytes Ghostty would have sent to a real process's stdin — in
+    /// practice, for this surface, SGR mouse reports once
+    /// ``enableMouseReporting()`` has run. Set by the caller
+    /// (`SubagentStripView`) before the surface can report anything useful.
+    public var onHostInput: ((Data) -> Void)?
+
+    /// The most recent grid metrics Ghostty has reported for this surface,
+    /// via the in-memory session's resize callback — `nil` until the
+    /// surface first attaches to a real view and reports one.
+    @Published public private(set) var latestViewport: InMemoryTerminalViewport?
+
+    public init() {
+        var capturedSession: InMemoryTerminalSession!
+        let box = HostInputBox()
+        capturedSession = InMemoryTerminalSession(
+            write: { data in
+                Task { @MainActor in box.host?.onHostInput?(data) }
+            },
+            resize: { viewport in
+                Task { @MainActor in box.host?.latestViewport = viewport }
+            }
+        )
+        session = capturedSession
+        hostView = TerminalSurfaceHost(inMemorySession: capturedSession)
+        box.host = self
+    }
+
+    /// Turns on SGR mouse reporting (`\e[?1000h\e[?1006h`) so a click over
+    /// this surface is delivered back through ``onHostInput`` instead of
+    /// being handled as ordinary terminal input. Bytes sent before a real
+    /// view has attached are buffered by the session and flushed on attach,
+    /// so this is safe to call immediately after ``init()``.
+    public func enableMouseReporting() {
+        session.receive("\u{1B}[?1000h\u{1B}[?1006h")
+    }
+
+    /// Clears the grid and redraws it from `lines` — the strip is a
+    /// full-repaint surface, not an incremental one, since
+    /// `SubagentStripRenderer` re-renders the whole thing on every tick
+    /// anyway. Cursor stays hidden: nothing in the strip is ever "typed
+    /// into".
+    public func render(lines: [String]) {
+        let body = (["\u{1B}[H\u{1B}[2J\u{1B}[?25l"] + lines).joined(separator: "\r\n")
+        session.receive(body)
+    }
+
+    /// The point height needed to show `rows` terminal rows, derived from
+    /// the surface's own reported cell metrics once available (device
+    /// pixels, divided by the screen's backing scale), or a reasonable
+    /// fallback for the brief window before the surface has attached and
+    /// reported its first viewport.
+    public func pointHeight(forRows rows: Int) -> CGFloat {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let viewport = latestViewport, viewport.cellHeightPixels > 0 else {
+            return CGFloat(rows) * 18
+        }
+        return CGFloat(viewport.cellHeightPixels) / scale * CGFloat(rows)
+    }
+
+    public var columns: Int {
+        Int(latestViewport?.columns ?? 0)
+    }
+
+    /// `InMemoryTerminalSession`'s closures are captured at `init` time,
+    /// before `self` exists — this indirection lets them reach the fully
+    /// constructed host afterwards instead of requiring a two-phase init.
+    private final class HostInputBox: @unchecked Sendable {
+        weak var host: SubagentStripHost?
     }
 }
 

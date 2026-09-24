@@ -5,14 +5,15 @@ import Testing
 
 @testable import BSideKit
 
-/// Renders a task's terminal area offscreen with a parent host and two
-/// child subagent panes, using the real split layout `MainAreaView` drives
-/// (native-rewrite.md §"The chosen design: native splits, plus cards").
-/// Same offscreen-window-and-sample technique as `SubagentCardSnapshotTests`.
+/// Renders a task's real terminal area \u2014 the subagent strip (a real
+/// in-memory Ghostty surface, not a mock) above the parent terminal \u2014 with
+/// three runs (one active, one blocked, one finished) offscreen and saves a
+/// PNG, same offscreen-window-and-sample technique
+/// `RightSidebarSnapshotTests`/`SidebarSnapshotTests` use.
 @MainActor
-struct SubagentPaneSnapshotTests {
-    @Test("Task area renders parent + child panes as a native horizontal split")
-    func rendersParentAndChildPanes() async throws {
+struct SubagentStripSnapshotTests {
+    @Test("Task area renders the subagent strip above the parent terminal")
+    func rendersStripAboveTerminal() async throws {
         let database = try AppDatabase.openInMemory()
         let store = ProjectsStore(database: database)
 
@@ -21,14 +22,29 @@ struct SubagentPaneSnapshotTests {
         theme.update(ayuMirage)
 
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("subagent-pane-snapshot-test-\(UUID().uuidString)")
+            .appendingPathComponent("subagent-strip-snapshot-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let parentHost = TerminalSurfaceHost(workingDirectory: dir, shell: "/bin/zsh")
-        store.subagentPanes.spawn(taskId: 1, childId: "c1", label: "explorer: map callers", cwd: dir, command: "/bin/sh")
-        store.subagentPanes.spawn(taskId: 1, childId: "c2", label: "builder: add retry logic", cwd: dir, command: "/bin/sh")
+
         store.subagentFeed.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
+        store.subagentFeed.ingest(
+            taskId: 1, childId: "c1",
+            event: .messageEnd(role: "assistant", stopReason: nil, errorMessage: nil, toolCalls: [
+                .init(id: "t1", name: "search", arguments: ["pattern": .string("cacheKey")]),
+            ], text: nil, usage: nil)
+        )
+
         store.subagentFeed.beginRun(taskId: 1, childId: "c2", agent: "builder", taskLabel: "Add retry logic")
+        store.subagentFeed.ingest(
+            taskId: 1, childId: "c2",
+            event: .messageEnd(role: "assistant", stopReason: nil, errorMessage: nil, toolCalls: [
+                .init(id: "t2", name: "question", arguments: [:]),
+            ], text: nil, usage: nil)
+        )
+
+        store.subagentFeed.beginRun(taskId: 1, childId: "c3", agent: "reviewer", taskLabel: "Audit recent commits")
+        store.subagentFeed.markDone(taskId: 1, childId: "c3", payload: SubagentDonePayload(exitCode: 0, stopReason: nil, errorMessage: nil, statistics: nil))
 
         let content = TaskAreaHarness(store: store, host: parentHost, taskID: 1)
             .frame(width: 900, height: 500)
@@ -45,7 +61,7 @@ struct SubagentPaneSnapshotTests {
         hostingView.frame = NSRect(x: 0, y: 0, width: 900, height: 500)
         window.contentView = hostingView
         window.setIsVisible(true)
-        try await Task.sleep(for: .milliseconds(800))
+        try await Task.sleep(for: .milliseconds(1200))
         hostingView.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
@@ -61,35 +77,32 @@ struct SubagentPaneSnapshotTests {
         NSGraphicsContext.restoreGraphicsState()
         window.orderOut(nil)
 
-        let outputPath = "/tmp/bside-subagent-panes.png"
+        let outputPath = "/tmp/bside-strip.png"
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
             Issue.record("Failed to encode PNG")
             return
         }
         try pngData.write(to: URL(fileURLWithPath: outputPath))
 
-        #expect(store.subagentPanes.panes(forTask: 1).count == 2)
+        #expect(store.subagentFeed.runs(forTask: 1).count == 3)
     }
 }
 
 /// Mounts `TaskTerminalAreaView` the way `MainAreaView` does: a real
-/// `@FocusState` and a per-task focused-child binding, since both are
-/// required parameters `TaskTerminalAreaView` cannot be given without a
+/// `@FocusState`, since `TaskTerminalAreaView` cannot be given one without a
 /// hosting `View`.
 private struct TaskAreaHarness: View {
     var store: ProjectsStore
     var host: TerminalSurfaceHost
     var taskID: Int64
     @FocusState private var focusedTaskID: Int64?
-    @State private var focusedChildID: String?
 
     var body: some View {
         TaskTerminalAreaView(
             store: store,
             host: host,
             taskID: taskID,
-            focusedTaskID: $focusedTaskID,
-            focusedChildID: $focusedChildID
+            focusedTaskID: $focusedTaskID
         )
     }
 }

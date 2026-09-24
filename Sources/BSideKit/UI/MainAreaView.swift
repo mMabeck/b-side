@@ -62,20 +62,6 @@ struct MainAreaView: View {
     /// selection changes. See `syncFocus()` for what goes wrong without this.
     @FocusState private var focusedTaskID: Int64?
 
-    /// Which child pane, if any, reads as focused within each task's split
-    /// — purely a presentation flag for `SubagentPaneView`'s accent border;
-    /// actual keyboard focus is real AppKit first-responder state, moved by
-    /// `SubagentPaneView` itself on click. Keyed by task so hidden tasks'
-    /// panes don't lose their own focused-pane highlight while not visible.
-    @State private var focusedChildIDByTask: [Int64: String] = [:]
-
-    private func focusedChildIDBinding(for taskID: Int64) -> Binding<String?> {
-        Binding(
-            get: { focusedChildIDByTask[taskID] },
-            set: { focusedChildIDByTask[taskID] = $0 }
-        )
-    }
-
     private var liveTaskIDs: Set<Int64> {
         Set(store.tasksByProject.values.flatMap { $0.compactMap(\.id) })
     }
@@ -95,7 +81,6 @@ struct MainAreaView: View {
                         host: host,
                         taskID: taskID,
                         focusedTaskID: $focusedTaskID,
-                        focusedChildID: focusedChildIDBinding(for: taskID),
                         isExited: exitedTaskIDs.contains(taskID),
                         onResume: { requestRelaunch(taskID: taskID) }
                     )
@@ -127,16 +112,8 @@ struct MainAreaView: View {
             purgeHosts(keeping: ids)
         }
         .onChange(of: store.subagentPanes.version) { _, _ in
-            let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
-            let lostVisibleFocus = visibleID.map { taskID in
-                focusedChildIDByTask[taskID] != nil
-                    && MainAreaView.prunedFocusedChildIDs(focusedChildIDByTask, panesByTask: store.subagentPanes.panesByTask)[taskID] == nil
-            } ?? false
-            focusedChildIDByTask = MainAreaView.prunedFocusedChildIDs(focusedChildIDByTask, panesByTask: store.subagentPanes.panesByTask)
+            MainAreaView.reconcileSwap(store.subagentSwap, panesByTask: store.subagentPanes.panesByTask)
             syncVisibility()
-            if lostVisibleFocus {
-                syncFocus()
-            }
         }
         .onChange(of: store.closedTerminalTaskID) { _, closedID in
             guard let closedID else { return }
@@ -444,7 +421,8 @@ struct MainAreaView: View {
         store.pruneOpenTerminals(removing: [taskID])
         conversationGate.releaseClaim(for: taskID)
         store.subagentPanes.closeAll(taskId: taskID)
-        focusedChildIDByTask.removeValue(forKey: taskID)
+        store.subagentSwap.closeAll(taskId: taskID)
+        store.subagentStripBatches.reset(taskId: taskID)
         exitedTaskIDs.remove(taskID)
     }
 
@@ -454,7 +432,8 @@ struct MainAreaView: View {
             hostsByTaskID.removeValue(forKey: id)
             autoRenameWatchers.removeValue(forKey: id)?.cancel()
             store.subagentPanes.closeAll(taskId: id)
-            focusedChildIDByTask.removeValue(forKey: id)
+            store.subagentSwap.closeAll(taskId: id)
+            store.subagentStripBatches.reset(taskId: id)
             exitedTaskIDs.remove(id)
         }
         store.pruneOpenTerminals(removing: purged)
@@ -509,19 +488,20 @@ struct MainAreaView: View {
         cachedIDs.subtracting(liveTaskIDs)
     }
 
-    /// Drops any `focusedChildIDByTask` entry whose child id is no longer
-    /// among its task's live panes — a pane can close without its task's
-    /// terminal closing (`SubagentPaneStore.close`), which would otherwise
-    /// leave a stale id pointing at nothing. Pure so it's directly testable;
-    /// the `version`-change handler in `body` is what decides whether the
-    /// *visible* task lost its focused pane this way and needs `syncFocus()`
-    /// to hand keyboard focus back to the parent terminal.
-    static func prunedFocusedChildIDs(
-        _ focusedChildIDByTask: [Int64: String],
-        panesByTask: [Int64: [SubagentPaneStore.ChildPane]]
-    ) -> [Int64: String] {
-        focusedChildIDByTask.filter { taskID, childID in
-            (panesByTask[taskID] ?? []).contains { $0.id == childID }
+    /// A pane can close without the whole task terminal closing
+    /// (`SubagentPaneStore.close`), which would otherwise leave
+    /// `SubagentSwapStore` pointing at a surface that no longer exists —
+    /// reconciles it back to "show the parent" for every task whose shown
+    /// or highlighted child is no longer among its live panes. Pure in
+    /// effect (only touches `swap`, not any `MainAreaView` state), so it's
+    /// directly testable against real `SubagentSwapStore`/`SubagentPaneStore`
+    /// instances.
+    static func reconcileSwap(_ swap: SubagentSwapStore, panesByTask: [Int64: [SubagentPaneStore.ChildPane]]) {
+        for (taskID, childID) in swap.shownChildIDByTask where !(panesByTask[taskID] ?? []).contains(where: { $0.id == childID }) {
+            swap.handleClosed(childId: childID, taskId: taskID)
+        }
+        for (taskID, childID) in swap.highlightedChildIDByTask where !(panesByTask[taskID] ?? []).contains(where: { $0.id == childID }) {
+            swap.handleClosed(childId: childID, taskId: taskID)
         }
     }
 
