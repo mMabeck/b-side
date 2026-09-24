@@ -15,7 +15,13 @@ struct SubagentStripView: View {
     var viewedChildId: String?
     var onSelect: (SubagentStripMouseParser.HitTestResult) -> Void
 
-    @State private var host = SubagentStripHost()
+    // `@StateObject`, not `@State`: the frame height below reads
+    // `host.pointHeight(forRows:)`, which depends on `host`'s own
+    // `@Published latestViewport` — a plain `@State` wrapping a class
+    // doesn't subscribe to that class's own publisher, so the view would
+    // never re-layout once the surface's real cell metrics arrive after
+    // the fallback estimate used for the very first frame.
+    @StateObject private var host = SubagentStripHost()
     @State private var didEnableMouseReporting = false
     @State private var lastResult = SubagentStripRenderer.Result(lines: [], slots: [], mainHintRange: nil)
     @State private var tickTask: Task<Void, Never>?
@@ -26,7 +32,13 @@ struct SubagentStripView: View {
 
     var body: some View {
         TerminalHostView(host: host.hostView)
-            .frame(height: host.pointHeight(forRows: SubagentStripRenderer.totalRowCount))
+            // +1 row of headroom: Ghostty derives its own row count from
+            // this height by flooring `heightPixels / cellHeightPixels`,
+            // so an exact `totalRowCount`-row height can round down to one
+            // row short and scroll the strip's top border off screen the
+            // moment the last line is written. A blank trailing row is
+            // harmless; a missing top border is not.
+            .frame(height: host.pointHeight(forRows: SubagentStripRenderer.totalRowCount + 1))
             .onAppear {
                 host.onHostInput = { data in
                     for event in SubagentStripMouseParser.parse(data) where event.isPress {

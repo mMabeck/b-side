@@ -195,12 +195,19 @@ public enum SubagentStripRenderer {
         let label = " " + parts.joined(separator: " · ") + " "
 
         let hint = "click a card to view · ⌃⌘0 main"
-        let hintStart = max(label.count, columns - hint.count - 1)
+        // Clamped to `columns`: with several states in play (running,
+        // blocked, done, +N more) the label alone can exceed a narrow
+        // strip — `hintStart` must never land past the end of the line, or
+        // the range built below would have its lower bound past its upper
+        // one.
+        let hintStart = min(max(label.count, columns - hint.count - 1), columns)
         let ruleWidth = max(0, hintStart - label.count)
         let plain = label + String(repeating: "─", count: ruleWidth) + " " + hint
         let padded = fit(plain, width: columns)
 
-        let hintRange = (hintStart + 1)..<min(columns, hintStart + 1 + hint.count)
+        let hintLowerBound = min(hintStart + 1, columns)
+        let hintUpperBound = min(columns, hintStart + 1 + hint.count)
+        let hintRange = hintLowerBound..<max(hintLowerBound, hintUpperBound)
         return (SGR.dim + padded + SGR.reset, hintRange.isEmpty ? nil : hintRange)
     }
 
