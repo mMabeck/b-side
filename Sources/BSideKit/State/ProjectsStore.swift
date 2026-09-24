@@ -359,9 +359,29 @@ public final class ProjectsStore {
     /// feed. `MainAreaView` reads this to lay out each task's terminal area.
     public let subagentPanes = SubagentPaneStore()
 
+    /// Which surface (parent or one child) each task's main area currently
+    /// shows — see `SubagentSwapStore`.
+    public let subagentSwap = SubagentSwapStore()
+
+    /// Tracks each task's current "batch" of runs for the subagent strip —
+    /// see `SubagentStripBatchTracker`.
+    public let subagentStripBatches = SubagentStripBatchTracker()
+
     /// The local HTTP endpoint agent processes report status and subagent
     /// events to (native-rewrite.md §5, §6). `nil` until `start()` has bound it.
     public private(set) var subagentServer: SubagentEventServer?
+
+    /// Child ids currently shown in `taskId`'s subagent strip, in strip
+    /// order, filtered to ones with a live surface to swap to — what
+    /// `SubagentSwapNavigation`'s keyboard shortcuts step through. A
+    /// headless, card-only child never appears here: there is nothing for
+    /// the shortcut to swap the main area to.
+    public func stripChildIDsWithLiveSurface(forTask taskId: Int64) -> [String] {
+        let allRuns = subagentFeed.runs(forTask: taskId)
+        let visible = subagentStripBatches.visibleRuns(forTask: taskId, allRuns: allRuns)
+        let liveIDs = Set(subagentPanes.panes(forTask: taskId).map(\.id))
+        return visible.map(\.id).filter { liveIDs.contains($0) }
+    }
 
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?

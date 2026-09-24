@@ -60,6 +60,7 @@ struct BSideApp: App {
             ProjectCommands(store: store)
             NavigationCommands(store: store)
             TerminalCommands(store: store)
+            SubagentSwapCommands(store: store)
         }
 
         Settings {

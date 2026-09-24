@@ -141,38 +141,4 @@ struct MainAreaLogicTests {
         #expect(MainAreaView.visibleTaskID(for: .none) == nil)
     }
 
-    // MARK: - Focused-child pruning
-
-    @Test("A focused child id still among its task's live panes is kept")
-    func prunedFocusedChildIDsKeepsLiveChild() {
-        let paneStore = SubagentPaneStore()
-        paneStore.spawn(taskId: 1, childId: "c1", label: "a", cwd: FileManager.default.temporaryDirectory, command: "/bin/sh")
-        let focused: [Int64: String] = [1: "c1"]
-
-        let pruned = MainAreaView.prunedFocusedChildIDs(focused, panesByTask: paneStore.panesByTask)
-        #expect(pruned == [1: "c1"])
-    }
-
-    @Test("A focused child id whose pane has closed is dropped")
-    func prunedFocusedChildIDsDropsClosedChild() {
-        let paneStore = SubagentPaneStore()
-        paneStore.spawn(taskId: 1, childId: "c1", label: "a", cwd: FileManager.default.temporaryDirectory, command: "/bin/sh")
-        paneStore.close(taskId: 1, childId: "c1")
-        let focused: [Int64: String] = [1: "c1"]
-
-        let pruned = MainAreaView.prunedFocusedChildIDs(focused, panesByTask: paneStore.panesByTask)
-        #expect(pruned.isEmpty)
-    }
-
-    @Test("Pruning only touches the tasks whose focused child actually closed")
-    func prunedFocusedChildIDsLeavesOtherTasksAlone() {
-        let paneStore = SubagentPaneStore()
-        paneStore.spawn(taskId: 1, childId: "c1", label: "a", cwd: FileManager.default.temporaryDirectory, command: "/bin/sh")
-        paneStore.spawn(taskId: 2, childId: "c2", label: "b", cwd: FileManager.default.temporaryDirectory, command: "/bin/sh")
-        paneStore.close(taskId: 1, childId: "c1")
-        let focused: [Int64: String] = [1: "c1", 2: "c2"]
-
-        let pruned = MainAreaView.prunedFocusedChildIDs(focused, panesByTask: paneStore.panesByTask)
-        #expect(pruned == [2: "c2"])
-    }
 }
