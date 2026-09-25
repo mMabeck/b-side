@@ -44,6 +44,29 @@ public final class ProjectsStore {
     /// the next time that task is selected. See `handleTerminalAlert`.
     public private(set) var taskIDsNeedingAttention: Set<Int64> = []
 
+    /// Task ids whose parent Pi agent loop has reported itself busy via
+    /// `POST /agent/{taskId}/busy` and not yet reported idle (`.../idle`) or
+    /// had its process/PTY exit. Folded into `TaskStatus.derive`'s `busy`
+    /// input alongside `activeChildCount`, so the sidebar/dashboard read
+    /// "running" even when no subagent child happens to be active. Always
+    /// empty right after launch — in-memory only, not persisted — since a
+    /// relaunched app has no live agent loop to be busy on behalf of.
+    public private(set) var busyTaskIDs: Set<Int64> = []
+
+    /// Marks `taskId` busy. Idempotent, since `/agent/{taskId}/busy` may be
+    /// repeated.
+    public func setTaskBusy(_ taskId: Int64) {
+        busyTaskIDs.insert(taskId)
+    }
+
+    /// Clears `taskId`'s busy flag — called for `POST .../idle`, and also
+    /// whenever the task's Pi process/PTY exits, is archived, or is deleted,
+    /// so a task can never get stuck reading "running" after the loop that
+    /// reported itself busy has gone away. Idempotent.
+    public func clearTaskBusy(_ taskId: Int64) {
+        busyTaskIDs.remove(taskId)
+    }
+
     /// Last time a terminal alert was accepted (post-debounce) for a task,
     /// keyed by task id — feeds `TaskAlertDebouncer.isDebounced`.
     private var lastTerminalAlertAt: [Int64: Date] = [:]
@@ -461,7 +484,12 @@ public final class ProjectsStore {
             let server = try SubagentEventServer(
                 store: subagentFeed,
                 paneStore: subagentPanes,
-                taskExists: { [weak self] taskId in self?.task(withId: taskId) != nil }
+                taskExists: { [weak self] taskId in self?.task(withId: taskId) != nil },
+                onAgentBusy: { [weak self] taskId in self?.setTaskBusy(taskId) },
+                onAgentIdle: { [weak self] taskId in self?.clearTaskBusy(taskId) },
+                onAgentAlert: { [weak self] taskId, kind, title, body in
+                    self?.handleTerminalAlert(taskID: taskId, kind: kind, title: title, body: body)
+                }
             )
             try await server.start()
             subagentServer = server
@@ -641,6 +669,9 @@ public final class ProjectsStore {
             updated.archived = true
             try updated.update(db)
         }
+        if let id = task.id {
+            clearTaskBusy(id)
+        }
     }
 
     /// Deletes a task: removes its worktree (teardown first), optionally deletes
@@ -664,6 +695,7 @@ public final class ProjectsStore {
         try await database.dbQueue.write { db in
             _ = try TaskRecord.deleteOne(db, key: id)
         }
+        clearTaskBusy(id)
     }
 
     // MARK: - Pi conversations

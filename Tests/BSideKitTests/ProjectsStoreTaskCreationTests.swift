@@ -137,4 +137,36 @@ struct ProjectsStoreTaskCreationTests {
         await store.refreshSyncStatus(for: task, project: project)
         #expect(store.syncStatusByTask[task.id!]?.merged == true)
     }
+
+    @Test("setTaskBusy/clearTaskBusy are idempotent, and archiving or deleting a task clears its busy flag")
+    func busyTaskIDsClearOnArchiveAndDelete() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+        let project = try #require(store.projects.first)
+
+        let archived = try await store.createTask(project: project, name: "Archived", useWorktree: false)
+        store.setTaskBusy(archived.id!)
+        store.setTaskBusy(archived.id!)
+        #expect(store.busyTaskIDs == [archived.id!])
+
+        try await store.archiveTask(archived, project: project, removeWorktree: false)
+        #expect(!store.busyTaskIDs.contains(archived.id!))
+
+        let deleted = try await store.createTask(project: project, name: "Deleted", useWorktree: false)
+        store.setTaskBusy(deleted.id!)
+        #expect(store.busyTaskIDs.contains(deleted.id!))
+
+        try await store.deleteTask(deleted, project: project, deleteLocalBranch: false, deleteRemoteBranch: false)
+        #expect(!store.busyTaskIDs.contains(deleted.id!))
+
+        store.clearTaskBusy(999)
+        #expect(store.busyTaskIDs.isEmpty)
+    }
 }

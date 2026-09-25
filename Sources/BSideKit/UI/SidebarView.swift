@@ -172,7 +172,8 @@ struct SidebarView: View {
             isBlocked: summary.isBlocked,
             isVanished: isVanished,
             activeChildCount: summary.activeCount,
-            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false
+            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
+            busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
         let isMerged = syncStatus?.merged ?? false
         let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.text(for:))

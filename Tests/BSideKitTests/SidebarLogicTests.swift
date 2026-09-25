@@ -71,6 +71,14 @@ struct SidebarLogicTests {
         #expect(TaskStatus.derive(merged: true, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true) == .finished)
     }
 
+    @Test("A busy parent agent reads as running even with no active subagent child, but never outranks merged/needsAttention")
+    func busyFoldsIntoRunningTier() {
+        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, busy: true) == .running)
+        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, busy: false) == .idle)
+        #expect(TaskStatus.derive(merged: true, isBlocked: false, isVanished: false, activeChildCount: 0, busy: true) == .finished)
+        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true, busy: true) == .needsAttention)
+    }
+
     // MARK: - Branch-sync summary formatting
 
     @Test("Branch sync summary formatting")
