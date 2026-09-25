@@ -261,4 +261,133 @@ struct TaskWorktreeServiceTests {
         let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
         #expect(afterMerge.merged == true)
     }
+
+    @Test("syncStatus: a fresh branch that never moved off its base is not merged")
+    func syncStatusFreshBranchIsNotMerged() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "Fresh branch",
+            baseRef: "main"
+        )
+        #expect(result.startCommit != nil)
+
+        let status = try await TaskWorktreeService.syncStatus(
+            project: project,
+            branchName: result.branchName,
+            startCommit: result.startCommit
+        )
+        #expect(status.merged == false)
+    }
+
+    @Test("syncStatus: a branch fast-forward merged into its base is merged")
+    func syncStatusFastForwardMergeIsMerged() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "FF merge",
+            baseRef: "main"
+        )
+        let worktreeURL = URL(fileURLWithPath: result.worktreePath)
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+
+        _ = try await GitCLI.run(["merge", "--ff-only", result.branchName], in: repoURL)
+
+        let status = try await TaskWorktreeService.syncStatus(
+            project: project,
+            branchName: result.branchName,
+            startCommit: result.startCommit
+        )
+        #expect(status.merged == true)
+    }
+
+    @Test("syncStatus: a branch with an unmerged commit is not merged")
+    func syncStatusUnmergedCommitIsNotMerged() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "Unmerged",
+            baseRef: "main"
+        )
+        let worktreeURL = URL(fileURLWithPath: result.worktreePath)
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+
+        let status = try await TaskWorktreeService.syncStatus(
+            project: project,
+            branchName: result.branchName,
+            startCommit: result.startCommit
+        )
+        #expect(status.merged == false)
+    }
+
+    @Test("syncStatus: an in-place task on the base branch itself is never merged")
+    func syncStatusInPlaceOnBaseIsNotMerged() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "In place",
+            useWorktree: false
+        )
+        #expect(result.branchName == "main")
+
+        let status = try await TaskWorktreeService.syncStatus(
+            project: project,
+            branchName: result.branchName,
+            startCommit: result.startCommit
+        )
+        #expect(status.merged == false)
+    }
+
+    @Test("syncStatus: a legacy task with no recorded startCommit falls back to the branch's reflog")
+    func syncStatusLegacyNilStartCommitUsesReflogFallback() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "Legacy",
+            baseRef: "main"
+        )
+        let worktreeURL = URL(fileURLWithPath: result.worktreePath)
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+
+        // No startCommit passed — simulates a task persisted before that column existed.
+        let beforeMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
+        #expect(beforeMerge.merged == false)
+        #expect(beforeMerge.resolvedStartCommit == result.startCommit)
+
+        _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", result.branchName], in: repoURL)
+
+        let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
+        #expect(afterMerge.merged == true)
+    }
 }

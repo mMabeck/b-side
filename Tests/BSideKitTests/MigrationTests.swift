@@ -12,13 +12,22 @@ struct MigrationTests {
         var migrator = DatabaseMigrator()
         Migrations.register(in: &migrator)
 
-        #expect(migrator.migrations == ["v1_initial_schema", "v2_conversation_session_id", "v3_task_awaiting_auto_rename"])
+        #expect(migrator.migrations == [
+            "v1_initial_schema",
+            "v2_conversation_session_id",
+            "v3_task_awaiting_auto_rename",
+            "v4_project_last_task_creation_choices",
+            "v5_task_start_commit",
+        ])
         try migrator.migrate(dbQueue)
 
         try dbQueue.read { db in
             try #expect(db.tableExists("project"))
             try #expect(db.tableExists("task"))
             try #expect(db.tableExists("conversation"))
+            try #expect(db.columns(in: "project").map(\.name).contains("lastUseWorktree"))
+            try #expect(db.columns(in: "project").map(\.name).contains("lastTaskCreationMode"))
+            try #expect(db.columns(in: "task").map(\.name).contains("startCommit"))
         }
     }
 
@@ -34,7 +43,7 @@ struct MigrationTests {
         let appliedCount = try dbQueue.read { db in
             try migrator.appliedMigrations(db).count
         }
-        #expect(appliedCount == 3)
+        #expect(appliedCount == 5)
     }
 }
 

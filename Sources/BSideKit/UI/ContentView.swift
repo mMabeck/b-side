@@ -101,7 +101,11 @@ public struct ContentView: View {
         // presenting its own sheet, so it can never be shown twice at once.
         // See that property's doc comment on `ProjectsStore`.
         .sheet(item: pendingTaskCreationProjectBinding) { project in
-            TaskCreationView(project: project, store: store) {
+            // `project` is a copy captured at the moment its trigger set
+            // `pendingTaskCreationProject`, which can be stale for remembered
+            // task-creation choices persisted moments earlier. Prefer the
+            // current store copy so the sheet reflects the latest choices.
+            TaskCreationView(project: store.projects.first(where: { $0.id == project.id }) ?? project, store: store) {
                 store.pendingTaskCreationProject = nil
             }
         }
