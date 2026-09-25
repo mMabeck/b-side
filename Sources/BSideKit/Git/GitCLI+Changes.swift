@@ -325,8 +325,12 @@ extension GitCLI {
     }
 
     static func gitignorePattern(for filePath: String) -> String {
+        // Trailing spaces are split off first and each re-added escaped, so a
+        // path ending in a backslash and then a space keeps its space.
+        let body = String(filePath.reversed().drop(while: { $0 == " " }).reversed())
+        let trailingSpaces = filePath.count - body.count
         var escaped = ""
-        for char in filePath {
+        for char in body {
             switch char {
             case "*", "?", "[", "\\":
                 escaped.append("\\")
@@ -335,9 +339,7 @@ extension GitCLI {
                 escaped.append(char)
             }
         }
-        while escaped.hasSuffix(" ") && !escaped.hasSuffix("\\ ") {
-            escaped = String(escaped.dropLast()) + "\\ "
-        }
+        escaped += String(repeating: "\\ ", count: trailingSpaces)
         if escaped.hasPrefix("#") || escaped.hasPrefix("!") {
             escaped = "\\" + escaped
         }
@@ -438,14 +440,14 @@ extension GitCLI {
     /// discarding its text) because one file in it is would hide every other
     /// file's diff.
     static func makeDiffText(from data: Data, detectBinary: Bool = true) -> DiffText {
-        if detectBinary, containsBinaryMarker(data) {
+        // Cap before scanning for the binary marker, so a huge diff is never
+        // decoded in full; a binary file's marker line is near the top anyway.
+        let isTruncated = data.count > diffSizeLimit
+        let capped = isTruncated ? data.prefix(diffSizeLimit) : data
+        if detectBinary, containsBinaryMarker(capped) {
             return .binary
         }
-        if data.count > diffSizeLimit {
-            let truncated = data.prefix(diffSizeLimit)
-            return DiffText(text: String(decoding: truncated, as: UTF8.self), isBinary: false, isTruncated: true)
-        }
-        return DiffText(text: String(decoding: data, as: UTF8.self), isBinary: false, isTruncated: false)
+        return DiffText(text: String(decoding: capped, as: UTF8.self), isBinary: false, isTruncated: isTruncated)
     }
 
     private static let binaryMarkerRegex = try! NSRegularExpression(pattern: #"(?m)^Binary files .* differ$"#)
@@ -455,7 +457,8 @@ extension GitCLI {
     // the output, so a text diff that merely contains that phrase in its
     // content isn't misread as a binary file.
     private static func containsBinaryMarker(_ data: Data) -> Bool {
-        guard let text = String(data: data, encoding: .utf8) else { return false }
+        // Lossy decoding: the cap can split a multi-byte character at the end.
+        let text = String(decoding: data, as: UTF8.self)
         let range = NSRange(text.startIndex..., in: text)
         return binaryMarkerRegex.firstMatch(in: text, range: range) != nil
     }

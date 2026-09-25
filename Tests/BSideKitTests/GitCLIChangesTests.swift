@@ -247,6 +247,8 @@ private final class LineCollector: @unchecked Sendable {
         try GitCLI.addToGitignore("star*name.txt", at: repoURL)
         try GitCLI.addToGitignore("!important.txt", at: repoURL)
         try GitCLI.addToGitignore("trailing ", at: repoURL)
+        try "slash\n".write(to: repoURL.appendingPathComponent("slash\\ "), atomically: true, encoding: .utf8)
+        try GitCLI.addToGitignore("slash\\ ", at: repoURL)
 
         let content = try String(contentsOf: repoURL.appendingPathComponent(".gitignore"), encoding: .utf8)
         let lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
@@ -259,6 +261,24 @@ private final class LineCollector: @unchecked Sendable {
         #expect(!changes.contains { $0.path == "star*name.txt" })
         #expect(!changes.contains { $0.path == "!important.txt" })
         #expect(!changes.contains { $0.path == "trailing " })
+        #expect(lines.contains(#"/slash\\\ "#))
+        #expect(!changes.contains { $0.path == #"slash\ "# })
+    }
+
+    @Test func diffTextCapsBeforeDetectingBinary() {
+        let binary = Data("diff --git a/x b/x\nBinary files a/x and b/x differ\n".utf8)
+        #expect(GitCLI.makeDiffText(from: binary).isBinary)
+
+        // A marker past the cap is never scanned, and a multi-byte character
+        // split by the cap doesn't stop detection within it.
+        let filler = String(repeating: "+æ\n", count: GitCLI.diffSizeLimit)
+        let huge = GitCLI.makeDiffText(from: Data((filler + "Binary files a/y and b/y differ\n").utf8))
+        #expect(!huge.isBinary)
+        #expect(huge.isTruncated)
+
+        var split = Data("Binary files a/z and b/z differ\n".utf8)
+        split.append(Data(String(repeating: "æ", count: GitCLI.diffSizeLimit).utf8))
+        #expect(GitCLI.makeDiffText(from: split).isBinary)
     }
 
     @Test func commitStreamsPreCommitHookOutput() async throws {

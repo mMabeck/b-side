@@ -281,6 +281,37 @@ struct SourceControlStoreTests {
         #expect(store.commitMessage.isEmpty)
     }
 
+    @Test("Updating the same task's record mid-commit leaves the commit running")
+    func sameTaskRecordUpdateDoesNotCancelCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let hookURL = repoURL.appendingPathComponent(".git/hooks/pre-commit")
+        try "#!/bin/sh\nsleep 1\necho slow-hook-output\nexit 0\n".write(to: hookURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookURL.path)
+        try "changed\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try await GitCLI.stage(["README.md"], at: repoURL)
+
+        let store = SourceControlStore()
+        store.setTask(makeTask(worktree: repoURL))
+        try await waitUntil { store.staged.contains { $0.path == "README.md" } }
+
+        store.commitMessage = "slow commit"
+        store.commit()
+        try await waitUntil { store.isCommitting }
+
+        // What auto-rename does to the selected task while Pi runs.
+        var renamed = makeTask(worktree: repoURL, branchName: "task/renamed")
+        renamed.name = "Renamed"
+        store.setTask(renamed)
+
+        try await waitUntil { !store.isCommitting }
+        #expect(store.commitMessage.isEmpty)
+        #expect(store.commitLog.contains { $0.contains("slow-hook-output") })
+        try await waitUntil { store.staged.isEmpty }
+    }
+
     @Test("More than 200 untracked files skips line counts rather than spawning one diff per file")
     func manyUntrackedFilesSkipsLineCounts() async throws {
         let root = try TestRepo.makeTempDirectory()
