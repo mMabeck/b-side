@@ -28,6 +28,56 @@ struct TaskAlertSoundTests {
         #expect(Set(ids).count == ids.count)
     }
 
+    // MARK: - Sound file lookup
+
+    @Test("Locate searches directories in order and stops at the first match")
+    func locateSearchesDirectoriesInOrder() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let first = root.appendingPathComponent("first")
+        let second = root.appendingPathComponent("second")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        FileManager.default.createFile(atPath: second.appendingPathComponent("Custom.wav").path, contents: Data())
+        #expect(TaskAlertSound.locate(name: "Custom", in: [first, second]) == second.appendingPathComponent("Custom.wav"))
+
+        FileManager.default.createFile(atPath: first.appendingPathComponent("Custom.aiff").path, contents: Data())
+        #expect(TaskAlertSound.locate(name: "Custom", in: [first, second]) == first.appendingPathComponent("Custom.aiff"))
+    }
+
+    @Test("Locate tries extensions in order within a directory")
+    func locateTriesExtensionsInOrder() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("Custom.mp3").path, contents: Data())
+        #expect(TaskAlertSound.locate(name: "Custom", in: [dir]) == dir.appendingPathComponent("Custom.mp3"))
+
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("Custom.wav").path, contents: Data())
+        #expect(TaskAlertSound.locate(name: "Custom", in: [dir]) == dir.appendingPathComponent("Custom.wav"))
+    }
+
+    @Test("Locate returns nil when no directory has a matching file")
+    func locateReturnsNilWhenNotFound() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(TaskAlertSound.locate(name: "NoSuchSound", in: [dir]) == nil)
+    }
+
+    @Test("Search directories are user sounds, then machine sounds, then system sounds")
+    func searchDirectoriesOrder() {
+        let dirs = TaskAlertSound.searchDirectories()
+        #expect(dirs == [
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Sounds"),
+            URL(fileURLWithPath: "/Library/Sounds"),
+            URL(fileURLWithPath: "/System/Library/Sounds"),
+        ])
+    }
+
     // MARK: - Defaults
 
     @Test("Finished defaults to Glass, question defaults to Tink")
