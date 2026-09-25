@@ -65,4 +65,13 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Seal the bundle with an ad-hoc signature. The linker's own signature covers
+# only the binary, under the identifier "BSide", with Info.plist unbound, so
+# usernotificationsd rejects every notification request ("addRequest not
+# allowed: ai.syv.bside"). Signing the assembled .app binds Info.plist and
+# makes the code identity match the bundle identifier.
+echo "Signing $APP_DIR (ad-hoc)..."
+codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"
+codesign --verify --strict "$APP_DIR"
+
 echo "Built $APP_DIR"

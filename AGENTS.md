@@ -110,5 +110,8 @@ swift test --filter GitCLITests
   legacy projects as test fixtures — loading them migrates them.
 - **Auto-rename changes a task's title and app-created branch, not its
   worktree directory** (`<adjective>-<noun>-<4 hex>` stays, e.g. `quiet-otter-3f9a`).
+- **`bundle.sh` must ad-hoc sign the assembled `.app`.** With only the
+  linker's signature (identifier `BSide`, Info.plist unbound),
+  usernotificationsd rejects every request (`addRequest not allowed`).
 - **After moving the checkout**, run `git worktree repair` and
   `swift package reset`; SwiftPM caches absolute XCFramework paths.
