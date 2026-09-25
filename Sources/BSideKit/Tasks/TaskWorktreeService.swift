@@ -137,16 +137,40 @@ public enum TaskWorktreeService {
     static let maxUniqueSlugAttempts = 1000
 
     /// A stable, neutral slug for a task created with a blank name —
-    /// `new-task-<4 hex chars>` — rather than one derived from the
-    /// placeholder "New Task" title. Its worktree directory is never renamed
-    /// (see `TaskAutoRenameService`), so this name has to be a permanent,
-    /// content-free identifier from the start instead of something that
-    /// would read oddly once the task's real name is applied later.
-    static func randomNewTaskSlug() -> String {
+    /// `<adjective>-<noun>-<4 hex chars>`, e.g. `quiet-otter-3f9a` — rather
+    /// than one derived from the placeholder "New Task" title. Its worktree
+    /// directory is never renamed (see `TaskAutoRenameService`), so this name
+    /// has to be a permanent, content-free identifier from the start; the
+    /// word pair keeps it memorable and distinguishable at a glance, and the
+    /// hex suffix makes collisions (which `uniqueSlug` would still resolve)
+    /// vanishingly rare.
+    static func randomTaskSlug() -> String {
         let hexDigits = Array("0123456789abcdef")
         let suffix = String((0..<4).map { _ in hexDigits.randomElement()! })
-        return "new-task-\(suffix)"
+        return "\(slugAdjectives.randomElement()!)-\(slugNouns.randomElement()!)-\(suffix)"
     }
+
+    static let slugAdjectives = [
+        "amber", "bold", "brave", "brisk", "calm", "clever", "cosy", "crisp",
+        "dapper", "eager", "fancy", "fleet", "fond", "gentle", "glad", "golden",
+        "grand", "happy", "hardy", "hazel", "humble", "jolly", "keen", "kind",
+        "lively", "lucky", "mellow", "merry", "mighty", "misty", "nimble", "noble",
+        "patient", "plucky", "polite", "proud", "quick", "quiet", "rapid", "ready",
+        "rosy", "rustic", "sandy", "shiny", "silent", "silver", "sleek", "snowy",
+        "solid", "spry", "steady", "stout", "sunny", "swift", "tidy", "tranquil",
+        "vivid", "warm", "wise", "witty", "young", "zany", "zesty", "breezy",
+    ]
+
+    static let slugNouns = [
+        "badger", "beacon", "birch", "bison", "brook", "canyon", "cedar", "comet",
+        "coral", "crane", "delta", "dune", "ember", "falcon", "fern", "finch",
+        "fjord", "fox", "glacier", "harbor", "hawk", "heron", "island", "lark",
+        "lynx", "maple", "meadow", "mesa", "moose", "moth", "nebula", "oak",
+        "orca", "otter", "owl", "panda", "pebble", "pine", "plover", "prairie",
+        "puffin", "quartz", "raven", "reef", "ridge", "river", "robin", "saturn",
+        "sparrow", "spruce", "summit", "swan", "thistle", "tiger", "tundra", "valley",
+        "walrus", "willow", "wren", "yak", "zebra", "aurora", "heath", "lagoon",
+    ]
 
     /// A variant of `baseSlug` whose worktree directory and `task/`-prefixed
     /// branch name are both free, suffixing with `-2`, `-3`, … so repeated task
@@ -179,7 +203,7 @@ public enum TaskWorktreeService {
     /// `baseSlugOverride`, when given, is used as the base slug for the
     /// worktree directory and branch instead of one derived from `taskName`
     /// — used for tasks created with a blank name so their worktree
-    /// directory gets a stable, neutral name (`new-task-<hex>`) rather than
+    /// directory gets a stable, neutral name (`quiet-otter-3f9a`) rather than
     /// one derived from the "New Task" placeholder title.
     @discardableResult
     public static func createWorktree(

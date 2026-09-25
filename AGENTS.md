@@ -109,6 +109,6 @@ swift test --filter GitCLITests
   never create an empty destination that suppresses retries. Don't use real
   legacy projects as test fixtures — loading them migrates them.
 - **Auto-rename changes a task's title and app-created branch, not its
-  worktree directory** (`new-task-<4 hex>` stays).
+  worktree directory** (`<adjective>-<noun>-<4 hex>` stays, e.g. `quiet-otter-3f9a`).
 - **After moving the checkout**, run `git worktree repair` and
   `swift package reset`; SwiftPM caches absolute XCFramework paths.

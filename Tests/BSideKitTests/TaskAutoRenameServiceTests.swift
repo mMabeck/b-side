@@ -306,7 +306,7 @@ struct ProjectsStoreAutoRenameTests {
         #expect(refetchedNamed?.name == "Explicit name")
     }
 
-    @Test("a blank-name task gets a stable new-task-<hex> worktree directory, not one derived from the placeholder title")
+    @Test("a blank-name task gets a stable <adjective>-<noun>-<hex> worktree directory, not one derived from the placeholder title")
     func blankNameTaskGetsNeutralWorktreeSlug() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
@@ -323,12 +323,15 @@ struct ProjectsStoreAutoRenameTests {
         let store = await ProjectsStore(database: database)
         let task = try await store.createTask(project: insertedProject, name: "")
 
-        let expectedPrefix = "\(repoURL.path)-worktrees/new-task-"
+        let expectedPrefix = "\(repoURL.path)-worktrees/"
         #expect(task.worktreePath.hasPrefix(expectedPrefix))
         let slug = String(task.worktreePath.dropFirst(expectedPrefix.count))
-        #expect(slug.count == 4)
-        #expect(slug.allSatisfy { $0.isHexDigit })
-        #expect(task.branchName == "task/new-task-\(slug)")
+        let parts = slug.split(separator: "-").map(String.init)
+        #expect(parts.count == 3)
+        #expect(TaskWorktreeService.slugAdjectives.contains(parts[0]))
+        #expect(TaskWorktreeService.slugNouns.contains(parts[1]))
+        #expect(parts[2].count == 4 && parts[2].allSatisfy { $0.isHexDigit })
+        #expect(task.branchName == "task/\(slug)")
         #expect(FileManager.default.fileExists(atPath: task.worktreePath))
     }
 

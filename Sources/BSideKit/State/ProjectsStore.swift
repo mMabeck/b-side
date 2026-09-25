@@ -680,7 +680,7 @@ public final class ProjectsStore {
             existingBranch: existingBranch,
             useWorktree: useWorktree ?? config.taskDefaults.useWorktree,
             setupCommand: config.setupCommand,
-            baseSlugOverride: nameWasBlank ? TaskWorktreeService.randomNewTaskSlug() : nil,
+            baseSlugOverride: nameWasBlank ? TaskWorktreeService.randomTaskSlug() : nil,
             onOutput: onOutput
         )
 

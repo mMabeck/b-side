@@ -390,4 +390,16 @@ struct TaskWorktreeServiceTests {
         let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
         #expect(afterMerge.merged == true)
     }
+
+    @Test("random task slugs are adjective-noun-hex built from slug-safe words")
+    func randomTaskSlugShape() {
+        let words = TaskWorktreeService.slugAdjectives + TaskWorktreeService.slugNouns
+        #expect(words.allSatisfy { !$0.isEmpty && $0.allSatisfy { ("a"..."z").contains($0) } })
+        #expect(Set(TaskWorktreeService.slugAdjectives).count == TaskWorktreeService.slugAdjectives.count)
+        #expect(Set(TaskWorktreeService.slugNouns).count == TaskWorktreeService.slugNouns.count)
+
+        let slug = TaskWorktreeService.randomTaskSlug()
+        #expect(slug == TaskWorktreeService.slug(forTaskName: slug))
+        #expect(slug.split(separator: "-").count == 3)
+    }
 }
