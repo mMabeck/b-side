@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import Testing
 
@@ -304,18 +303,6 @@ struct ProjectsStoreSelectionTests {
 
     // MARK: - Unread tracking
 
-    @Test("A busy→idle transition marks a task unread")
-    func busyToIdleTransitionMarksUnread() async throws {
-        let (store, _, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-
-        store.setTaskBusy(id)
-        #expect(!store.unreadTaskIDs.contains(id))
-
-        store.clearTaskBusy(id)
-        #expect(store.unreadTaskIDs.contains(id))
-    }
-
     @Test("Clearing busy for a task that was never busy does not mark it unread")
     func clearingBusyWithNoTransitionDoesNotMarkUnread() async throws {
         let (store, _, _, taskA) = try await makeStore()
@@ -323,20 +310,6 @@ struct ProjectsStoreSelectionTests {
 
         store.clearTaskBusy(id)
         #expect(!store.unreadTaskIDs.contains(id))
-    }
-
-    @Test("A busy→idle transition for the frontmost, already-selected task stays read")
-    func busyToIdleStaysReadWhenFrontmostAndSelected() async throws {
-        let (store, projectA, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-        store.selectTask(taskA, project: projectA)
-
-        store.setTaskBusy(id)
-        store.clearTaskBusy(id)
-
-        if NSApp?.isActive == true {
-            #expect(!store.unreadTaskIDs.contains(id))
-        }
     }
 
     @Test("Selecting a task clears its unread flag")

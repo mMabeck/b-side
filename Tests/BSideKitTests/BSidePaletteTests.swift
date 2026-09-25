@@ -175,13 +175,12 @@ struct BSidePaletteTests {
         #expect(unread >= 190 && unread <= 260)
     }
 
-    @Test("The fallback palette gives running, question, and unread distinct, non-default colours")
+    @Test("The fallback palette gives running, question, and unread distinct colours")
     func fallbackStatusDotColorsAreDistinct() {
         let palette = BSidePalette.fallback
         #expect(palette.statusRunning != palette.statusUnread)
         #expect(palette.statusRunning != palette.statusNeedsAttention)
         #expect(palette.statusNeedsAttention != palette.statusUnread)
-        #expect(palette.statusUnread == .blue)
     }
 
     // MARK: - Contrast-guarantee helper

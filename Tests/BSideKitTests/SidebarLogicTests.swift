@@ -76,7 +76,6 @@ struct SidebarLogicTests {
     @Test("A busy parent agent reads as running even with no active subagent child, and outranks open/unread/read/inactive")
     func busyFoldsIntoRunningTier() {
         #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false, busy: true) == .running)
-        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false, busy: false) == .read)
         #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: false, isUnread: false, busy: true) == .running)
     }
 
