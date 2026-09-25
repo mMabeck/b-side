@@ -12,6 +12,7 @@ struct RightSidebarView: View {
     @State private var selection: Set<String> = []
     @State private var diffSheetData: DiffSheetData?
     @State private var discardConfirmation: DiscardConfirmation?
+    @State private var historyExpanded = false
     @FocusState private var commitFieldFocused: Bool
 
     private let editorLauncher = EditorLauncher()
@@ -22,12 +23,24 @@ struct RightSidebarView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if scStore.task != nil {
+                if scStore.hasRemote {
+                    Rectangle().fill(theme.palette.separator).frame(height: 1)
+                    PushAreaView(
+                        aheadCount: scStore.aheadBehind?.ahead,
+                        isPushing: scStore.isPushing,
+                        canPush: !scStore.isPushing && !scStore.isCommitting,
+                        log: scStore.pushLog,
+                        palette: theme.palette,
+                        onPush: { scStore.push() },
+                        onCancel: { scStore.cancelPush() }
+                    )
+                }
                 Rectangle().fill(theme.palette.separator).frame(height: 1)
                 CommitAreaView(
                     message: $scStore.commitMessage,
                     isCommitting: scStore.isCommitting,
                     log: scStore.commitLog,
-                    canCommit: !scStore.isCommitting && !scStore.staged.isEmpty
+                    canCommit: !scStore.isCommitting && !scStore.isPushing && !scStore.staged.isEmpty
                         && !scStore.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     palette: theme.palette,
                     isFocused: $commitFieldFocused,
@@ -48,7 +61,7 @@ struct RightSidebarView: View {
                 diffText: data.diffText,
                 isBinary: data.isBinary,
                 isTruncated: data.isTruncated,
-                onOpenInEditor: { openInEditor(data.row) }
+                onOpenInEditor: data.row.map { row in { openInEditor(row) } }
             )
         }
         .confirmationDialog(
@@ -157,6 +170,18 @@ struct RightSidebarView: View {
                     }
                 }
             }
+
+            if !scStore.history.isEmpty {
+                Section {
+                    DisclosureGroup(isExpanded: $historyExpanded) {
+                        ForEach(scStore.history) { commit in
+                            historyRowView(commit)
+                        }
+                    } label: {
+                        Text("History")
+                    }
+                }
+            }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
@@ -232,6 +257,42 @@ struct RightSidebarView: View {
         Button("Reveal in Finder") { revealInFinder(row) }
     }
 
+    // MARK: - History
+
+    private func historyRowView(_ commit: GitCLI.CommitSummary) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(commit.subject)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text("\(commit.shortSha) \u{2022} \(commit.author)")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.palette.textDisabled)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { openCommitDiff(commit) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Commit \(commit.shortSha), \(commit.subject), by \(commit.author)")
+    }
+
+    private func openCommitDiff(_ commit: GitCLI.CommitSummary) {
+        Task {
+            let diff = try? await scStore.diffText(forCommit: commit.sha)
+            diffSheetData = DiffSheetData(
+                id: "commit:\(commit.sha)",
+                title: commit.subject,
+                subtitle: "\(commit.shortSha) \u{2022} \(commit.author)",
+                diffText: diff?.text ?? "",
+                isBinary: diff?.isBinary ?? false,
+                isTruncated: diff?.isTruncated ?? false,
+                row: nil
+            )
+        }
+    }
+
     // MARK: - Diff sheet
 
     private func openDiff(for row: SourceControlStore.Row) {
@@ -280,7 +341,9 @@ private struct DiffSheetData: Identifiable {
     let diffText: String
     let isBinary: Bool
     let isTruncated: Bool
-    let row: SourceControlStore.Row
+    /// `nil` for a commit shown from History — hides the DiffSheet's "Open
+    /// in Editor" button, which only makes sense for a specific file.
+    let row: SourceControlStore.Row?
 }
 
 private struct DiscardConfirmation: Identifiable {

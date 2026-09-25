@@ -81,6 +81,25 @@ public final class SourceControlStore {
     public private(set) var isCommitting = false
     public private(set) var commitLog: [String] = []
 
+    public struct AheadBehind: Equatable, Sendable {
+        public let ahead: Int
+        public let behind: Int
+    }
+
+    /// Whether this task's worktree has an `origin` remote configured; the
+    /// Push button and History section are both hidden without one.
+    public private(set) var hasRemote = false
+    /// `nil` before the first refresh, or when the branch has no upstream
+    /// yet (still shows the Push button — pushing sets the upstream).
+    public private(set) var aheadBehind: AheadBehind?
+    public private(set) var isPushing = false
+    public private(set) var pushLog: [String] = []
+
+    /// Commits on this branch since it diverged from base, most recent
+    /// first — the History section. Same baseline as `branchChanges`.
+    public private(set) var history: [GitCLI.CommitSummary] = []
+    private static let historyLimit = 50
+
     /// Moves untracked files to the Trash. Injected so tests can assert
     /// discard behaviour without touching a real Trash.
     @ObservationIgnored
@@ -94,6 +113,7 @@ public final class SourceControlStore {
     @ObservationIgnored private var watcher: WorktreeWatcher?
     @ObservationIgnored private var refreshGeneration = 0
     @ObservationIgnored private var commitTask: Task<Void, Never>?
+    @ObservationIgnored private var pushTask: Task<Void, Never>?
     @ObservationIgnored nonisolated(unsafe) private var activationObserver: NSObjectProtocol?
 
     public init() {
@@ -131,12 +151,17 @@ public final class SourceControlStore {
         }
 
         cancelCommit()
+        cancelPush()
         task = newTask
         commitMessage = ""
         commitLog = []
+        pushLog = []
         staged = []
         unstaged = []
         branchChanges = []
+        history = []
+        hasRemote = false
+        aheadBehind = nil
         loadState = .idle
         watcher?.stop()
         watcher = nil
@@ -164,6 +189,9 @@ public final class SourceControlStore {
             staged = []
             unstaged = []
             branchChanges = []
+            history = []
+            hasRemote = false
+            aheadBehind = nil
             return
         }
 
@@ -173,6 +201,9 @@ public final class SourceControlStore {
             staged = []
             unstaged = []
             branchChanges = []
+            history = []
+            hasRemote = false
+            aheadBehind = nil
             return
         }
 
@@ -207,6 +238,17 @@ public final class SourceControlStore {
         } else {
             branchChanges = []
         }
+
+        async let originTask = GitCLI.originRemote(at: worktreeURL)
+        async let aheadBehindTask = GitCLI.aheadBehind(at: worktreeURL)
+        async let historyTask = try? GitCLI.history(since: baseline, limit: Self.historyLimit, at: worktreeURL)
+        let origin = await originTask
+        let remoteAheadBehind = await aheadBehindTask
+        let branchHistory = await historyTask
+        guard generation == refreshGeneration else { return }
+        hasRemote = origin != nil
+        aheadBehind = remoteAheadBehind.map { AheadBehind(ahead: $0.ahead, behind: $0.behind) }
+        history = branchHistory ?? []
     }
 
     private func applyLineCounts(
@@ -415,6 +457,54 @@ public final class SourceControlStore {
 
     public func cancelCommit() {
         commitTask?.cancel()
+    }
+
+    // MARK: - Push
+
+    /// Pushes `HEAD` to `origin`, setting the upstream if none exists yet,
+    /// streaming output into `pushLog` the same way `commit()` streams hook
+    /// output. Mutually exclusive with committing: the UI disables commit
+    /// while a push is in flight and vice versa.
+    public func push() {
+        guard let worktreeURL, !isPushing, !isCommitting else { return }
+
+        isPushing = true
+        pushLog = []
+
+        pushTask = Task { [weak self] in
+            guard let self else { return }
+            let (stream, continuation) = AsyncStream<String>.makeStream()
+            let consumer = Task { @MainActor in
+                for await line in stream {
+                    self.pushLog.append(line)
+                }
+            }
+            do {
+                try await GitCLI.push(at: worktreeURL) { line in
+                    continuation.yield(line)
+                }
+                continuation.finish()
+                _ = await consumer.value
+                await self.refresh()
+            } catch {
+                continuation.finish()
+                _ = await consumer.value
+            }
+            await MainActor.run { self.isPushing = false }
+        }
+    }
+
+    public func cancelPush() {
+        pushTask?.cancel()
+    }
+
+    // MARK: - History
+
+    public func diffText(forCommit sha: String) async throws -> GitCLI.DiffText {
+        guard let worktreeURL else {
+            return GitCLI.DiffText(text: "", isBinary: false, isTruncated: false)
+        }
+        return try await GitCLI.showCommit(sha, at: worktreeURL)
     }
 
     private static func describe(_ error: Error) -> String {
