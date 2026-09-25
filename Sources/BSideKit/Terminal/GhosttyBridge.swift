@@ -510,6 +510,38 @@ public final class TerminalSurfaceHost: ObservableObject {
 
     public var title: String { state.title }
 
+    /// Makes this surface the window's first responder, replaying once its
+    /// view is attached if it isn't yet. See ``TerminalHostView`` for why
+    /// focus is driven imperatively rather than through `@FocusState`.
+    public func focus() {
+        state.requestFocus()
+    }
+
+    /// Whether `responder` is some terminal surface's view — lets callers
+    /// outside this file ask "is a terminal already taking keystrokes?"
+    /// without importing `GhosttyTerminal`.
+    public static func isTerminalView(_ responder: NSResponder?) -> Bool {
+        responder is TerminalView
+    }
+
+    /// Whether this surface's view currently holds keyboard focus.
+    public var hasKeyboardFocus: Bool {
+        guard let view = state.attachedPlatformView, let window = view.window else { return false }
+        return window.firstResponder === view
+    }
+
+    /// Hands first responder back to the window if this surface holds it,
+    /// so a hidden surface stops receiving keystrokes. Deferred one runloop
+    /// hop so it lands after any `focus()` replay already queued for this
+    /// surface (`requestFocus()` hops the runloop too) instead of being
+    /// undone by it.
+    public func resignFocus() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, hasKeyboardFocus else { return }
+            state.attachedPlatformView?.window?.makeFirstResponder(nil)
+        }
+    }
+
     /// Sends `text` as a paste, not keystrokes: a program with bracketed
     /// paste enabled receives it framed as a paste, so embedded newlines
     /// land in its edit line instead of running anything. Distinct from a
@@ -531,30 +563,23 @@ public final class TerminalSurfaceHost: ObservableObject {
 /// file that wants a terminal on screen goes through this type; nothing else
 /// needs to import `GhosttyTerminal`.
 ///
-/// `focusedTaskID`/`taskID` are optional and only wired up by callers that
-/// keep several hosts mounted at once and need real (not merely visual)
-/// first-responder control over which one is live — see `MainAreaView`'s doc
-/// comment for why `opacity`/`allowsHitTesting` alone cannot move keyboard
-/// focus away from a hidden host. Left `nil` for a single-host caller like
-/// `TerminalDrawerView`, where there is nothing else competing for focus.
+/// Deliberately *not* bound to a `@FocusState` via `.terminalFocused`:
+/// that bridge re-syncs first responder on every `updateNSView`, resigning
+/// the surface whenever the binding reads false — and SwiftUI resets an
+/// unanchored `@FocusState` to nil on its own. Any re-render of this view
+/// (a title change, a bell, ...) could then silently take keyboard focus
+/// away from the terminal being typed in until it was clicked. Callers move
+/// focus with ``TerminalSurfaceHost/focus()``/``TerminalSurfaceHost/resignFocus()``
+/// instead.
 public struct TerminalHostView: View {
     @ObservedObject var host: TerminalSurfaceHost
-    var focusedTaskID: FocusState<Int64?>.Binding?
-    var taskID: Int64?
 
-    public init(host: TerminalSurfaceHost, focusedTaskID: FocusState<Int64?>.Binding? = nil, taskID: Int64? = nil) {
+    public init(host: TerminalSurfaceHost) {
         self.host = host
-        self.focusedTaskID = focusedTaskID
-        self.taskID = taskID
     }
 
     public var body: some View {
-        if let focusedTaskID, let taskID {
-            TerminalSurfaceView(context: host.state)
-                .terminalFocused(focusedTaskID, equals: taskID)
-        } else {
-            TerminalSurfaceView(context: host.state)
-        }
+        TerminalSurfaceView(context: host.state)
     }
 }
 
