@@ -43,6 +43,17 @@ struct SidebarView: View {
                         }
                     }
 
+                    if !store.projects.isEmpty {
+                        Section {
+                            EmptyView()
+                        } header: {
+                            Text("Projects")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(theme.palette.textSecondary)
+                                .textCase(.uppercase)
+                        }
+                    }
+
                     ForEach(store.projects) { project in
                         let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
                         let isExpandedBinding = Binding<Bool>(
@@ -309,14 +320,14 @@ struct SidebarView: View {
     /// The leading inset a task row sits at, aligned with where the project
     /// title's text begins (`projectRow`'s own horizontal padding) so the
     /// nesting reads visually, not just via `List`'s section indentation.
-    private static let taskLeadingIndent: CGFloat = 16
+    private static let taskLeadingIndent: CGFloat = 8
 
     /// Where the vertical indent-guide line sits within that inset — drawn
     /// manually per row (not as one tall shape spanning the section) because
     /// `List` gives each row its own `NSHostingView`; stacking these
     /// borderless per-row segments with no vertical gap between them is what
     /// makes the line read as continuous down the whole task group.
-    private static let taskIndentGuideX: CGFloat = 6
+    private static let taskIndentGuideX: CGFloat = 3
 
     /// A task row nested beneath its project. The leading status-dot column
     /// is reserved at a fixed width even when no dot is shown, so every
