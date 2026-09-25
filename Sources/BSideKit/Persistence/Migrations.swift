@@ -56,5 +56,17 @@ enum Migrations {
                 t.add(column: "awaitingAutoRename", .boolean).notNull().defaults(to: false)
             }
         }
+
+        // Added so merged status can tell a fresh (or merely behind) branch
+        // apart from one that actually gained and merged commits of its own
+        // (see `GitCLI.isMerged`): the branch's tip commit right after the
+        // task was created. `nil` for rows from before this column existed;
+        // `TaskWorktreeService.syncStatus` falls back to the branch's reflog
+        // creation entry for those.
+        migrator.registerMigration("v4_task_base_commit") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "baseCommit", .text)
+            }
+        }
     }
 }

@@ -140,6 +140,139 @@ struct SubagentEventServerTests {
         #expect(neverSpawnedClose == 204)
     }
 
+    @Test("busy and idle dispatch to their callbacks and return 204 for a known task")
+    func agentBusyAndIdleDispatch() async throws {
+        let store = SubagentFeedStore()
+        var busyCalls: [Int64] = []
+        var idleCalls: [Int64] = []
+        let server = try SubagentEventServer(
+            store: store,
+            paneStore: SubagentPaneStore(),
+            taskExists: { _ in true },
+            onAgentBusy: { busyCalls.append($0) },
+            onAgentIdle: { idleCalls.append($0) }
+        )
+        try await server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+
+        let busyStatus = try await postAndReadStatus(path: "/agent/1/busy", body: "", port: port)
+        #expect(busyStatus == 204)
+        try await waitUntil { busyCalls == [1] }
+
+        let idleStatus = try await postAndReadStatus(path: "/agent/1/idle", body: "", port: port)
+        #expect(idleStatus == 204)
+        try await waitUntil { idleCalls == [1] }
+
+        // Repeatable, in any order.
+        _ = try await postAndReadStatus(path: "/agent/1/busy", body: "", port: port)
+        _ = try await postAndReadStatus(path: "/agent/1/busy", body: "", port: port)
+        try await waitUntil { busyCalls == [1, 1, 1] }
+    }
+
+    @Test("busy and idle return 404 for an unknown task and never dispatch")
+    func agentBusyIdleUnknownTaskReturns404() async throws {
+        let store = SubagentFeedStore()
+        var calls = 0
+        let server = try SubagentEventServer(
+            store: store,
+            paneStore: SubagentPaneStore(),
+            taskExists: { _ in false },
+            onAgentBusy: { _ in calls += 1 },
+            onAgentIdle: { _ in calls += 1 }
+        )
+        try await server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+
+        let busyStatus = try await postAndReadStatus(path: "/agent/99/busy", body: "", port: port)
+        let idleStatus = try await postAndReadStatus(path: "/agent/99/idle", body: "", port: port)
+
+        #expect(busyStatus == 404)
+        #expect(idleStatus == 404)
+        #expect(calls == 0)
+    }
+
+    @Test("alert decodes kind/title/body and dispatches to its callback")
+    func agentAlertDispatches() async throws {
+        let store = SubagentFeedStore()
+        var alerts: [(Int64, TaskAlertKind, String, String)] = []
+        let server = try SubagentEventServer(
+            store: store,
+            paneStore: SubagentPaneStore(),
+            taskExists: { _ in true },
+            onAgentAlert: { taskId, kind, title, body in alerts.append((taskId, kind, title, body)) }
+        )
+        try await server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+
+        let body = #"{"kind":"question","title":"Pi has a question","body":"Continue?"}"#
+        let status = try await postAndReadStatus(path: "/agent/1/alert", body: body, port: port)
+
+        #expect(status == 204)
+        try await waitUntil { alerts.count == 1 }
+        #expect(alerts.first?.0 == 1)
+        #expect(alerts.first?.1 == .question)
+        #expect(alerts.first?.2 == "Pi has a question")
+        #expect(alerts.first?.3 == "Continue?")
+    }
+
+    @Test("alert with an unrecognised kind returns 400 and never dispatches")
+    func agentAlertUnknownKindReturns400() async throws {
+        let store = SubagentFeedStore()
+        var alerts = 0
+        let server = try SubagentEventServer(
+            store: store,
+            paneStore: SubagentPaneStore(),
+            taskExists: { _ in true },
+            onAgentAlert: { _, _, _, _ in alerts += 1 }
+        )
+        try await server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+
+        let body = #"{"kind":"celebration","title":"x","body":"y"}"#
+        let status = try await postAndReadStatus(path: "/agent/1/alert", body: body, port: port)
+
+        #expect(status == 400)
+        #expect(alerts == 0)
+    }
+
+    @Test("alert with a malformed body returns 400")
+    func agentAlertMalformedBodyReturns400() async throws {
+        let store = SubagentFeedStore()
+        let server = try SubagentEventServer(store: store, paneStore: SubagentPaneStore(), taskExists: { _ in true })
+        try await server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+
+        let status = try await postAndReadStatus(path: "/agent/1/alert", body: #"{"title":"missing kind and body"}"#, port: port)
+
+        #expect(status == 400)
+    }
+
+    @Test("alert for an unknown task returns 404")
+    func agentAlertUnknownTaskReturns404() async throws {
+        let store = SubagentFeedStore()
+        var alerts = 0
+        let server = try SubagentEventServer(
+            store: store,
+            paneStore: SubagentPaneStore(),
+            taskExists: { _ in false },
+            onAgentAlert: { _, _, _, _ in alerts += 1 }
+        )
+        try await server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+
+        let body = #"{"kind":"finished","title":"x","body":"y"}"#
+        let status = try await postAndReadStatus(path: "/agent/99/alert", body: body, port: port)
+
+        #expect(status == 404)
+        #expect(alerts == 0)
+    }
+
     private func waitUntil(timeout: TimeInterval = 5, _ condition: @MainActor () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {

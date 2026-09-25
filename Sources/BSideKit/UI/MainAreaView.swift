@@ -238,8 +238,9 @@ struct MainAreaView: View {
             // `closeHost`/`relaunchHost` instead, which remove the id from
             // `hostsByTaskID` outright rather than leaving a dead surface
             // behind for this to mark exited).
-            onExit: { [exitedBinding] _ in
+            onExit: { [exitedBinding, store] _ in
                 exitedBinding.wrappedValue = MainAreaView.exitedTaskIDs(afterExit: id, current: exitedBinding.wrappedValue)
+                store.clearTaskBusy(id)
             }
         )
         store.noteTerminalOpened(taskID: id)
@@ -472,6 +473,7 @@ struct MainAreaView: View {
         store.subagentSwap.closeAll(taskId: taskID)
         store.subagentStripBatches.reset(taskId: taskID)
         exitedTaskIDs.remove(taskID)
+        store.clearTaskBusy(taskID)
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
@@ -483,6 +485,7 @@ struct MainAreaView: View {
             store.subagentSwap.closeAll(taskId: id)
             store.subagentStripBatches.reset(taskId: id)
             exitedTaskIDs.remove(id)
+            store.clearTaskBusy(id)
         }
         store.pruneOpenTerminals(removing: purged)
         conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)

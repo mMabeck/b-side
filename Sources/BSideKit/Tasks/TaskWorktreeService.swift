@@ -43,6 +43,11 @@ public enum TaskWorktreeService {
         public let branchCreatedByApp: Bool
         public let worktreePath: String
         public let copiedIgnoredFiles: [String]
+        /// The branch's tip commit right after creation/attachment — the
+        /// baseline `TaskRecord.baseCommit` is persisted from, so `syncStatus`
+        /// can tell "gained no commits of its own yet" apart from "merged".
+        /// `nil` only if the `rev-parse` that resolves it fails outright.
+        public let baseCommit: String?
     }
 
     public struct BranchSyncStatus: Sendable, Equatable {
@@ -177,11 +182,13 @@ public enum TaskWorktreeService {
 
         guard useWorktree else {
             let branch = await GitCLI.currentBranch(at: projectURL) ?? project.baseRef
+            let baseCommit = try? await GitCLI.revParse(branch, at: projectURL)
             return WorktreeSetupResult(
                 branchName: branch,
                 branchCreatedByApp: false,
                 worktreePath: project.path,
-                copiedIgnoredFiles: []
+                copiedIgnoredFiles: [],
+                baseCommit: baseCommit
             )
         }
 
@@ -208,6 +215,7 @@ public enum TaskWorktreeService {
             try await GitCLI.addWorktree(at: worktreeURL, newBranch: branchName, from: resolvedBaseRef, in: projectURL)
         }
 
+        let baseCommit = try? await GitCLI.revParse(branchName, at: worktreeURL)
         let copied = try await copyIgnoredFiles(from: projectURL, to: worktreeURL)
 
         if let setupCommand, !setupCommand.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -218,7 +226,8 @@ public enum TaskWorktreeService {
             branchName: branchName,
             branchCreatedByApp: branchCreatedByApp,
             worktreePath: worktreePathString,
-            copiedIgnoredFiles: copied
+            copiedIgnoredFiles: copied,
+            baseCommit: baseCommit
         )
     }
 
@@ -354,11 +363,21 @@ public enum TaskWorktreeService {
     // MARK: - Sync status
 
     /// Ahead/behind counts and merged status for `branchName` against `baseRef`.
-    public static func syncStatus(project: Project, branchName: String, baseRef: String? = nil) async throws -> BranchSyncStatus {
+    /// `baseCommit` is the branch's starting commit, normally
+    /// `TaskRecord.baseCommit`; when `nil` (rows created before that column
+    /// existed), falls back to the branch's reflog creation entry, or
+    /// "not merged" if even that can't be resolved.
+    public static func syncStatus(project: Project, branchName: String, baseCommit: String? = nil, baseRef: String? = nil) async throws -> BranchSyncStatus {
         let projectURL = URL(fileURLWithPath: project.path)
         let resolvedBaseRef = baseRef ?? project.baseRef
         let (ahead, behind) = try await GitCLI.aheadBehind(branch: branchName, baseRef: resolvedBaseRef, at: projectURL)
-        let merged = try await GitCLI.isMerged(branch: branchName, into: resolvedBaseRef, at: projectURL)
+        let effectiveBaseCommit: String?
+        if let baseCommit {
+            effectiveBaseCommit = baseCommit
+        } else {
+            effectiveBaseCommit = await GitCLI.reflogCreationCommit(forBranch: branchName, at: projectURL)
+        }
+        let merged = try await GitCLI.isMerged(branch: branchName, into: resolvedBaseRef, since: effectiveBaseCommit, at: projectURL)
         return BranchSyncStatus(ahead: ahead, behind: behind, merged: merged)
     }
 }

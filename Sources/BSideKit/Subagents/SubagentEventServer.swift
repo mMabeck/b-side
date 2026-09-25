@@ -21,6 +21,16 @@ import OSLog
 ///   headless); `400` for a malformed body.
 /// - `POST /subagents/{taskId}/{childId}/close` — empty body; tears down
 ///   that child's pane. Always `204`, idempotent.
+/// - `POST /agent/{taskId}/busy` — empty body; the parent Pi agent loop
+///   started working. `204` on success, `404` for an unknown task id.
+/// - `POST /agent/{taskId}/idle` — empty body; the parent Pi agent loop
+///   ended, with no sound (unlike `alert`). `204`/`404` as above.
+/// - `POST /agent/{taskId}/alert` — body
+///   `{"kind":"finished"|"question","title":string,"body":string}`; routed
+///   into the same path as terminal alerts (sound, native notification,
+///   needs-attention for `question`, debounced). `204`/`404` as above;
+///   `400` for a malformed body or unrecognised `kind`. Every route may
+///   arrive in any order and be repeated.
 ///
 /// `spawn`/`close` hop to the main actor to touch `SubagentPaneStore` (and,
 /// for `spawn`, to create a `TerminalSurfaceHost`) before responding, unlike
@@ -65,15 +75,24 @@ public final class SubagentEventServer: @unchecked Sendable {
 
     private let paneStore: SubagentPaneStore
     private let taskExists: @MainActor (Int64) -> Bool
+    private let onAgentBusy: @MainActor (Int64) -> Void
+    private let onAgentIdle: @MainActor (Int64) -> Void
+    private let onAgentAlert: @MainActor (Int64, TaskAlertKind, String, String) -> Void
 
     public init(
         store: SubagentFeedStore,
         paneStore: SubagentPaneStore,
-        taskExists: @escaping @MainActor (Int64) -> Bool
+        taskExists: @escaping @MainActor (Int64) -> Bool,
+        onAgentBusy: @escaping @MainActor (Int64) -> Void = { _ in },
+        onAgentIdle: @escaping @MainActor (Int64) -> Void = { _ in },
+        onAgentAlert: @escaping @MainActor (Int64, TaskAlertKind, String, String) -> Void = { _, _, _, _ in }
     ) throws {
         self.store = store
         self.paneStore = paneStore
         self.taskExists = taskExists
+        self.onAgentBusy = onAgentBusy
+        self.onAgentIdle = onAgentIdle
+        self.onAgentAlert = onAgentAlert
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -138,6 +157,11 @@ public final class SubagentEventServer: @unchecked Sendable {
 
     private func handle(_ request: ParsedHTTPRequest, on connection: NWConnection) {
         let components = request.path.split(separator: "/").map(String.init)
+
+        if components.count == 3, components[0] == "agent", let taskId = Int64(components[1]) {
+            handleAgentStatus(taskId: taskId, action: components[2], body: request.body, on: connection)
+            return
+        }
 
         guard components.count == 4, components[0] == "subagents",
               let taskId = Int64(components[1])
@@ -242,6 +266,61 @@ public final class SubagentEventServer: @unchecked Sendable {
             }
             self.paneStore.close(taskId: taskId, childId: childId)
             self.respond(status: 204, on: connection)
+        }
+    }
+
+    /// `busy`/`idle`/`alert` for a task's own parent Pi agent loop, distinct
+    /// from the per-child `subagents/...` routes above. `busy`/`idle` just
+    /// flip `ProjectsStore.busyTaskIDs`; `alert` decodes its JSON body first
+    /// (`400` if that fails or `kind` isn't recognised) before hopping to the
+    /// main actor to check the task exists (`404` if not) and dispatch.
+    private func handleAgentStatus(taskId: Int64, action: String, body: Data, on connection: NWConnection) {
+        switch action {
+        case "busy":
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                guard self.taskExists(taskId) else { self.respond(status: 404, on: connection); return }
+                self.onAgentBusy(taskId)
+                self.respond(status: 204, on: connection)
+            }
+        case "idle":
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                guard self.taskExists(taskId) else { self.respond(status: 404, on: connection); return }
+                self.onAgentIdle(taskId)
+                self.respond(status: 204, on: connection)
+            }
+        case "alert":
+            guard let value = try? JSONDecoder().decode(JSONValue.self, from: body),
+                  let object = value.objectValue,
+                  let kindString = object["kind"]?.stringValue,
+                  let kind = Self.alertKind(fromWireValue: kindString),
+                  let title = object["title"]?.stringValue,
+                  let alertBody = object["body"]?.stringValue
+            else {
+                respond(status: 400, on: connection)
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                guard self.taskExists(taskId) else { self.respond(status: 404, on: connection); return }
+                self.onAgentAlert(taskId, kind, title, alertBody)
+                self.respond(status: 204, on: connection)
+            }
+        default:
+            Self.logger.notice("Ignoring unrecognised agent action \(action, privacy: .public)")
+            respond(status: 204, on: connection)
+        }
+    }
+
+    /// Maps the wire contract's `"finished"`/`"question"` strings to
+    /// `TaskAlertKind` — `nil` for anything else, which `handleAgentStatus`
+    /// turns into a `400`.
+    private static func alertKind(fromWireValue value: String) -> TaskAlertKind? {
+        switch value {
+        case "finished": return .finished
+        case "question": return .question
+        default: return nil
         }
     }
 

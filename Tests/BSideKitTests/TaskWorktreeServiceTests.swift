@@ -251,14 +251,61 @@ struct TaskWorktreeServiceTests {
         _ = try await GitCLI.run(["add", "."], in: worktreeURL)
         _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
 
-        let beforeMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
+        let beforeMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: result.baseCommit)
         #expect(beforeMerge.ahead == 1)
         #expect(beforeMerge.behind == 0)
         #expect(beforeMerge.merged == false)
 
         _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", result.branchName], in: repoURL)
 
-        let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
+        let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: result.baseCommit)
         #expect(afterMerge.merged == true)
+    }
+
+    @Test("syncStatus reads a freshly created task as not merged, even though its branch trivially traces back to base")
+    func syncStatusFreshTaskIsNotMerged() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "Fresh task",
+            baseRef: "main"
+        )
+
+        #expect(result.baseCommit != nil)
+
+        let status = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: result.baseCommit)
+        #expect(status.merged == false)
+    }
+
+    @Test("syncStatus with no recorded baseCommit falls back to the branch's reflog creation entry")
+    func syncStatusFallsBackToReflogWithoutBaseCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "No stored baseline",
+            baseRef: "main"
+        )
+        let worktreeURL = URL(fileURLWithPath: result.worktreePath)
+
+        let freshStatus = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: nil)
+        #expect(freshStatus.merged == false)
+
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+        _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", result.branchName], in: repoURL)
+
+        let mergedStatus = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: nil)
+        #expect(mergedStatus.merged == true)
     }
 }
