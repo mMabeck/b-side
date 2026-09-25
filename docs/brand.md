@@ -2,7 +2,7 @@
 
 ## Name
 
-**B-Side** — bundle `B-Side.app`, id `ai.syv.bside`.
+**B-Side** — bundle `B-Side.app`, id `dev.mabeck.bside`.
 
 A worktree app is a machine for second takes: every task is an alternate cut of
 the same record, kept off the A-side until it's good. One syllable and a half,

@@ -8,7 +8,7 @@ import OSLog
 public final class AppDatabase: Sendable {
     public let dbQueue: DatabaseQueue
 
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "database")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "database")
 
     public init(dbQueue: DatabaseQueue) throws {
         self.dbQueue = dbQueue

@@ -30,7 +30,7 @@ public struct ProjectConfig: Codable, Equatable, Sendable {
         self.taskDefaults = taskDefaults
     }
 
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "project-config")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "project-config")
 
     /// The path this config would live at for a project rooted at `projectPath`.
     public static func configFileURL(forProjectAt projectPath: URL) -> URL {

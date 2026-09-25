@@ -3,13 +3,16 @@ import BSideKit
 import OSLog
 import SwiftUI
 
-private let logger = Logger(subsystem: "ai.syv.bside", category: "app")
+private let logger = Logger(subsystem: "dev.mabeck.bside", category: "app")
 
 @main
 struct BSideApp: App {
     private let store: ProjectsStore
 
     init() {
+        // First, so the theme and everything below read carried-over
+        // settings from the old `ai.syv.bside` identifier.
+        LegacyDefaultsMigration.importIfNeeded()
         // Resolved before any window is built: without this, the palette
         // stays `.fallback` (light system colours) until a terminal surface
         // happens to construct one, which never occurs at all for windows

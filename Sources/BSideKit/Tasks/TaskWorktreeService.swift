@@ -6,7 +6,7 @@ import OSLog
 /// commands, and tearing worktrees down again. Pure git/filesystem orchestration —
 /// callers own persisting the result to the database.
 public enum TaskWorktreeService {
-    static let logger = Logger(subsystem: "ai.syv.bside", category: "task-worktree")
+    static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-worktree")
 
     public enum ServiceError: Error, Sendable, CustomStringConvertible {
         case branchAlreadyCheckedOut(branch: String, path: String)

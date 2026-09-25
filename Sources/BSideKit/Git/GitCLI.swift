@@ -7,7 +7,7 @@ import OSLog
 /// section of the native rewrite plan. Every subcommand that has a porcelain or
 /// `-z`-delimited format uses it instead of parsing human-readable output.
 public enum GitCLI {
-    static let logger = Logger(subsystem: "ai.syv.bside", category: "git")
+    static let logger = Logger(subsystem: "dev.mabeck.bside", category: "git")
 
     /// A failed `git` invocation: exit status and stderr, plus the arguments that
     /// produced it, so callers and logs can tell commands apart.

@@ -49,7 +49,7 @@ import SwiftUI
 /// | Desktop notification (OSC 777) | `TerminalViewState.lastDesktopNotificationTitle`/`Body`/`At` (published) | republished as `TerminalSurfaceHost.lastDesktopNotification*`; `TerminalAlertBridge` forwards it to `ProjectsStore.handleTerminalDesktopNotification`, classified via `TaskAlertClassifier` into a question or finished alert |
 /// | Open URL, mouse shape, scrollbar, focus, resize, grid resize, pwd, hover link, progress report, text selection request | *(no delegate adopted)* | Ghostty's own default behaviour for each; none is claimed as app-handled |
 public enum GhosttyBridge {
-    static let logger = Logger(subsystem: "ai.syv.bside", category: "terminal-theme")
+    static let logger = Logger(subsystem: "dev.mabeck.bside", category: "terminal-theme")
 
     /// The user's own Ghostty config, if present. Respects `XDG_CONFIG_HOME`
     /// like Ghostty itself does, falling back to `~/.config/ghostty/config`.
@@ -382,7 +382,7 @@ public final class GhosttyResolvedTheme: ObservableObject {
 /// native-rewrite.md §6, "what this buys for free").
 @MainActor
 public final class TerminalSurfaceHost: ObservableObject {
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "terminal")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "terminal")
 
     let state: TerminalViewState
 

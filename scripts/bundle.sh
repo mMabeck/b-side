@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_NAME="B-Side"
-BUNDLE_ID="ai.syv.bside"
+BUNDLE_ID="dev.mabeck.bside"
 DIST_DIR="dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 ICNS_PATH="assets/icon/AppIcon.icns"
@@ -68,7 +68,7 @@ PLIST
 # Seal the bundle with an ad-hoc signature. The linker's own signature covers
 # only the binary, under the identifier "BSide", with Info.plist unbound, so
 # usernotificationsd rejects every notification request ("addRequest not
-# allowed: ai.syv.bside"). Signing the assembled .app binds Info.plist and
+# allowed: dev.mabeck.bside"). Signing the assembled .app binds Info.plist and
 # makes the code identity match the bundle identifier.
 echo "Signing $APP_DIR (ad-hoc)..."
 codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"

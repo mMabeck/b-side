@@ -499,7 +499,7 @@ public final class ProjectsStore {
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?
     private var stripPruneTask: Task<Void, Never>?
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "projects-store")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "projects-store")
 
     public init(database: AppDatabase) {
         self.database = database

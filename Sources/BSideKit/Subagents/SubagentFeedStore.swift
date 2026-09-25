@@ -7,7 +7,7 @@ import OSLog
 @MainActor
 @Observable
 public final class SubagentFeedStore {
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "subagent-feed")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "subagent-feed")
 
     public private(set) var runsByTask: [Int64: [ChildRun]] = [:]
 

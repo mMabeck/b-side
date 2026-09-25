@@ -55,10 +55,10 @@ private final class ResumeBox: @unchecked Sendable {
 }
 
 public final class SubagentEventServer: @unchecked Sendable {
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "subagent-server")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "subagent-server")
 
     private let listener: NWListener
-    private let queue = DispatchQueue(label: "ai.syv.bside.subagent-server")
+    private let queue = DispatchQueue(label: "dev.mabeck.bside.subagent-server")
     private let store: SubagentFeedStore
 
     /// Per-child incremental parser, since a child's events may arrive split

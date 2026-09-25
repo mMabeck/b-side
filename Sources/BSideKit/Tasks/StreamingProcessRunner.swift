@@ -7,7 +7,7 @@ import OSLog
 /// machine-readable output — this is for opaque project commands whose only
 /// useful output is "show it to the user".
 enum StreamingProcessRunner {
-    private static let logger = Logger(subsystem: "ai.syv.bside", category: "process")
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "process")
 
     /// Thrown when the command exits non-zero. All output was already delivered to
     /// `onOutput` before this is thrown.

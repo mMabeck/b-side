@@ -13,7 +13,7 @@ import OSLog
 /// The transcript parsing and title derivation below are pure and call no
 /// model; only `applyRename` touches git or the filesystem.
 public enum TaskAutoRenameService {
-    static let logger = Logger(subsystem: "ai.syv.bside", category: "task-auto-rename")
+    static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-auto-rename")
 
     // MARK: - Transcript parsing
 
