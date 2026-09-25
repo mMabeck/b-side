@@ -47,13 +47,23 @@ enum TaskCreationValidation {
 /// like the rest of the app's chrome — see `SidebarView`/`ProjectDashboardView`
 /// for the same `.plain`-button-over-palette-fill convention.
 struct TaskCreationView: View {
-    let project: Project
     var store: ProjectsStore
     var onFinished: () -> Void
 
     private typealias Mode = TaskCreationMode
 
     @ObservedObject private var theme: GhosttyResolvedTheme = .shared
+
+    /// The project this task will be created in. Defaults to the project the
+    /// sheet was opened for, but changeable via `projectField`'s fuzzy search
+    /// — every field below that depends on the project (base ref, branches,
+    /// worktree/mode defaults) is re-seeded when this changes, in
+    /// `applyProjectDefaults(_:)`.
+    @State private var selectedProject: Project
+    @State private var isProjectPickerOpen = false
+    @State private var projectQuery = ""
+    @State private var highlightedProjectIndex = 0
+    @FocusState private var projectQueryFocused: Bool
 
     @State private var name = ""
     @State private var baseRef: String
@@ -62,7 +72,6 @@ struct TaskCreationView: View {
     @State private var branches: [TaskWorktreeService.BranchOption] = []
     @State private var baseRefOptions: [String] = []
     @State private var selectedBranch: String?
-    @State private var branchesLoaded = false
 
     @State private var isCreating = false
     @State private var isFinished = false
@@ -72,9 +81,9 @@ struct TaskCreationView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(project: Project, store: ProjectsStore, onFinished: @escaping () -> Void) {
-        self.project = project
         self.store = store
         self.onFinished = onFinished
+        _selectedProject = State(initialValue: project)
         _baseRef = State(initialValue: project.baseRef)
         _useWorktree = State(
             initialValue: project.lastUseWorktree
@@ -112,14 +121,19 @@ struct TaskCreationView: View {
         // system-drawn text inside it renders in light `aqua` over this dark
         // background.
         .themedWindow(theme.palette)
-        .task {
-            guard !branchesLoaded else { return }
-            branchesLoaded = true
-            branches = (try? await TaskWorktreeService.availableBranches(for: project)) ?? []
+        // Keyed on the selected project's id, so switching projects in
+        // `projectField` reruns this rather than only firing once. The
+        // `guard` after both awaits drops a stale load's results if the
+        // project changed again before it finished.
+        .task(id: selectedProject.id) {
+            let project = selectedProject
+            let loadedBranches = (try? await TaskWorktreeService.availableBranches(for: project)) ?? []
             var baseRefs = (try? await TaskWorktreeService.availableBaseRefs(for: project)) ?? []
             if !baseRefs.isEmpty, !baseRefs.contains(project.baseRef) {
                 baseRefs.insert(project.baseRef, at: 0)
             }
+            guard selectedProject.id == project.id else { return }
+            branches = loadedBranches
             baseRefOptions = baseRefs
         }
     }
@@ -131,7 +145,7 @@ struct TaskCreationView: View {
             Text("New Task")
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(theme.palette.textPrimary)
-            Text("in \(project.displayName)")
+            Text("in \(selectedProject.displayName)")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.palette.textSecondary)
         }
@@ -144,6 +158,10 @@ struct TaskCreationView: View {
 
     private var formView: some View {
         VStack(alignment: .leading, spacing: 16) {
+            formRow("Project") {
+                projectField
+            }
+
             formRow("Task name (optional)") {
                 themedTextField("New Task", text: $name)
             }
@@ -205,6 +223,150 @@ struct TaskCreationView: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .stroke(theme.palette.separator, lineWidth: 1)
             )
+    }
+
+    // MARK: - Project picker
+
+    private var projectMatches: [Project] {
+        FuzzyMatcher.rank(query: projectQuery, items: store.projects) { [$0.displayName, $0.path] }
+    }
+
+    /// The "Project" field: a themed menu-label button showing the current
+    /// selection that swaps to a fuzzy-search text field plus a ranked
+    /// dropdown while open, closed only by choosing a project or Escape (not
+    /// by focus loss) so a click on a dropdown row is never raced against a
+    /// focus-driven close.
+    private var projectField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if isProjectPickerOpen {
+                themedTextField("Search projects…", text: $projectQuery)
+                    .focused($projectQueryFocused)
+                    .accessibilityLabel("Search projects")
+                    .onChange(of: projectQuery) { _, _ in highlightedProjectIndex = 0 }
+                    .onKeyPress(.downArrow) {
+                        guard !projectMatches.isEmpty else { return .ignored }
+                        highlightedProjectIndex = min(highlightedProjectIndex + 1, projectMatches.count - 1)
+                        return .handled
+                    }
+                    .onKeyPress(.upArrow) {
+                        guard !projectMatches.isEmpty else { return .ignored }
+                        highlightedProjectIndex = max(highlightedProjectIndex - 1, 0)
+                        return .handled
+                    }
+                    .onKeyPress(.return) {
+                        guard projectMatches.indices.contains(highlightedProjectIndex) else { return .ignored }
+                        chooseProject(projectMatches[highlightedProjectIndex])
+                        return .handled
+                    }
+                    .onKeyPress(.escape) {
+                        closeProjectPicker()
+                        return .handled
+                    }
+                    .task { projectQueryFocused = true }
+
+                projectDropdown
+            } else {
+                Button {
+                    projectQuery = ""
+                    highlightedProjectIndex = 0
+                    isProjectPickerOpen = true
+                } label: {
+                    themedMenuLabel(selectedProject.displayName, isPlaceholder: false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Project")
+                .accessibilityValue(selectedProject.displayName)
+                .accessibilityHint("Change the project this task belongs to")
+            }
+        }
+    }
+
+    private var projectDropdown: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if projectMatches.isEmpty {
+                Text("No matching projects")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.palette.textDisabled)
+                    .padding(10)
+            } else {
+                ForEach(Array(projectMatches.enumerated()), id: \.element.id) { index, candidate in
+                    Button {
+                        chooseProject(candidate)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(candidate.displayName)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(theme.palette.textPrimary)
+                                Text(candidate.path)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.palette.textSecondary)
+                            }
+                            Spacer()
+                            if candidate.id == selectedProject.id {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.palette.accent)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .background(
+                            index == highlightedProjectIndex
+                                ? theme.palette.elevatedSurfaceBackground
+                                : Color.clear
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        if hovering { highlightedProjectIndex = index }
+                    }
+                    .accessibilityLabel(candidate.displayName)
+                    .accessibilityValue(candidate.id == selectedProject.id ? "Selected" : "")
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(theme.palette.surfaceBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(theme.palette.separator, lineWidth: 1)
+        )
+        .frame(maxHeight: 180)
+    }
+
+    private func chooseProject(_ candidate: Project) {
+        closeProjectPicker()
+        guard candidate.id != selectedProject.id else { return }
+        selectedProject = candidate
+        applyProjectDefaults(candidate)
+    }
+
+    private func closeProjectPicker() {
+        isProjectPickerOpen = false
+        projectQuery = ""
+        highlightedProjectIndex = 0
+        projectQueryFocused = false
+    }
+
+    /// Re-seeds every field that depends on the project when the selection
+    /// changes in `projectField`: branches/base refs are reloaded by the
+    /// `.task(id: selectedProject.id)` in `body` reacting to `selectedProject`
+    /// changing, not here, so clearing them to empty just avoids showing the
+    /// old project's options while that reload is in flight.
+    private func applyProjectDefaults(_ project: Project) {
+        baseRef = project.baseRef
+        useWorktree = project.lastUseWorktree
+            ?? ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path)).taskDefaults.useWorktree
+        mode = project.lastTaskCreationMode.flatMap(Mode.init(rawValue:)) ?? .newBranch
+        selectedBranch = nil
+        branches = []
+        baseRefOptions = []
     }
 
     private var modeToggle: some View {
@@ -449,7 +611,7 @@ struct TaskCreationView: View {
             do {
                 let newBaseRef = useWorktree && mode == .newBranch ? baseRef : nil
                 _ = try await store.createTask(
-                    project: project,
+                    project: selectedProject,
                     name: name,
                     baseRef: newBaseRef,
                     existingBranch: useWorktree && mode == .existingBranch ? selectedBranch : nil,
@@ -459,7 +621,7 @@ struct TaskCreationView: View {
                     }
                 )
                 try? await store.rememberTaskCreationChoices(
-                    project: project,
+                    project: selectedProject,
                     baseRef: newBaseRef,
                     useWorktree: useWorktree,
                     mode: mode
