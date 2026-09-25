@@ -133,10 +133,12 @@ struct SidebarView: View {
         }
     }
 
-    /// Open task terminals in the order they were opened, paired with the
-    /// task and owning project each id resolves to — the same order
+    /// Open task terminals ordered by recent activity (opened last sorts
+    /// first once bumped by a real agent event), paired with the task and
+    /// owning project each id resolves to — the same order
     /// `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes into, so a
-    /// row's position here always matches the ⌘-digit that selects it.
+    /// row's position here always matches the ⌘-digit that selects it, even
+    /// as that position shifts with activity.
     /// Entries whose task has since been archived/deleted resolve to `nil`
     /// and are dropped rather than shown as a dead row; `MainAreaView`
     /// prunes `openTerminalTaskIDs` on the same event, so that's normally

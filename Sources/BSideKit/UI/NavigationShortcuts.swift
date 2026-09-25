@@ -4,9 +4,11 @@ import SwiftUI
 /// tasks or projects, as plain data \u2014 same rationale as
 /// `WindowLayoutShortcut`: directly testable without introspecting a
 /// rendered `Commands` scene. Cmd+1\u20269 picks by position among currently
-/// open task terminals (`ProjectsStore.openTerminalTaskIDs`); Ctrl+1\u20269
-/// picks by position among sidebar projects (`ProjectsStore.projects`).
-/// Both stop at 9 since that's all a single digit key can address.
+/// open task terminals (`ProjectsStore.openTerminalTaskIDs`), which reorders
+/// on recent activity \u2014 so a given Cmd+digit's target task can shift as
+/// tasks become active. Ctrl+1\u20269 picks by position among sidebar
+/// projects (`ProjectsStore.projects`), whose order is unaffected. Both stop
+/// at 9 since that's all a single digit key can address.
 public enum NavigationShortcuts {
     /// How many digit shortcuts exist in each family (1\u20269).
     public static let digitCount = 9
