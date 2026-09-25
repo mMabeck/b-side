@@ -110,30 +110,52 @@ struct ProjectsStoreActivityOrderingTests {
         let (store, project, taskA, taskB) = try await makeStore()
         let idA = try #require(taskA.id)
         let idB = try #require(taskB.id)
+        let projectID = try #require(project.id)
+        func lastActivity(_ id: Int64) -> Date? {
+            store.tasksByProject[projectID]?.first { $0.id == id }?.lastActivityAt
+        }
         store.noteTerminalOpened(taskID: idA)
         store.noteTerminalOpened(taskID: idB)
 
+        // Both busy, B most recent: A is *not* at the front, so a bump from
+        // dropping it would be visible.
+        store.setTaskBusy(idA)
         store.setTaskBusy(idB)
         #expect(store.openTerminalTaskIDs == [idB, idA])
         try await waitUntil {
-            store.tasksByProject[project.id!]?.first?.id == idB
+            store.tasksByProject[projectID]?.map(\.id) == [idB, idA]
+                && lastActivity(idA) != nil && lastActivity(idB) != nil
         }
+        let aBeforeDrop = try #require(lastActivity(idA))
+        let bBeforeDrop = try #require(lastActivity(idB))
 
         // Simulates closing a busy task's terminal (or its process exiting,
-        // or it being purged/archived/deleted): the busy flag must clear
-        // without reordering the project's task list or openTerminalTaskIDs.
-        store.setTaskBusy(idA)
-        #expect(store.openTerminalTaskIDs == [idA, idB])
-        try await waitUntil {
-            store.tasksByProject[project.id!]?.first?.id == idA
-        }
-        let orderBeforeDrop = store.openTerminalTaskIDs
-        let projectOrderBeforeDrop = store.tasksByProject[project.id!]
-
+        // or it being purged/archived/deleted).
         store.dropTaskBusy(idA)
 
-        #expect(store.openTerminalTaskIDs == orderBeforeDrop)
-        #expect(store.tasksByProject[project.id!]?.map(\.id) == projectOrderBeforeDrop?.map(\.id))
+        #expect(!store.busyTaskIDs.contains(idA))
+        #expect(store.openTerminalTaskIDs == [idB, idA])
+
+        // A later, real bump of B is written after any write the drop could
+        // have queued, so once it lands, A's timestamp must be unchanged.
+        store.setTaskBusy(idB)
+        try await waitUntil { (lastActivity(idB) ?? .distantPast) > bBeforeDrop }
+        #expect(lastActivity(idA) == aBeforeDrop)
+        #expect(store.tasksByProject[projectID]?.map(\.id) == [idB, idA])
+    }
+
+    @Test("the optimistic insert never duplicates a row the observation already delivered")
+    func insertingIfAbsentDoesNotDuplicate() {
+        let existing = TaskRecord(
+            id: 2, projectId: 1, name: "New", branchName: "task/new",
+            worktreePath: "/tmp/new", harness: "claude", permissionLevel: "default"
+        )
+        let older = TaskRecord(
+            id: 1, projectId: 1, name: "Old", branchName: "task/old",
+            worktreePath: "/tmp/old", harness: "claude", permissionLevel: "default"
+        )
+        #expect(ProjectsStore.insertingIfAbsent(existing, into: [existing, older]).map(\.id) == [2, 1])
+        #expect(ProjectsStore.insertingIfAbsent(existing, into: [older]).map(\.id) == [2, 1])
     }
 
     @Test("An accepted question alert bumps ordering")
