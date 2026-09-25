@@ -145,4 +145,57 @@ struct SourceControlStoreTests {
         #expect(brokenStore.staged.isEmpty)
         #expect(brokenStore.unstaged.isEmpty)
     }
+
+    @Test("Pushing to a local bare origin updates ahead/behind and shows output in the log")
+    func pushUpdatesAheadBehindAndLog() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let remoteURL = root.appendingPathComponent("origin.git")
+        _ = try await GitCLI.run(["init", "--bare", remoteURL.path], in: root)
+        _ = try await GitCLI.run(["remote", "add", "origin", remoteURL.path], in: repoURL)
+        _ = try await GitCLI.run(["push", "-u", "origin", "main"], in: repoURL)
+
+        try "changed\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: repoURL)
+        _ = try await GitCLI.run(["commit", "-m", "second"], in: repoURL)
+
+        let store = SourceControlStore()
+        store.setTask(makeTask(worktree: repoURL))
+        try await waitUntil { store.hasRemote }
+        try await waitUntil { store.aheadBehind?.ahead == 1 }
+
+        store.push()
+
+        try await waitUntil(.seconds(10)) { !store.isPushing }
+        #expect(!store.pushLog.isEmpty)
+
+        try await waitUntil { store.aheadBehind?.ahead == 0 }
+        #expect(store.aheadBehind?.ahead == 0)
+        #expect(store.aheadBehind?.behind == 0)
+    }
+
+    @Test("History lists the commits made on the task's branch")
+    func historyListsBranchCommits() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let baseCommit = try await GitCLI.revParse("HEAD", at: repoURL)
+
+        for index in 1...2 {
+            try "commit \(index)\n".write(
+                to: repoURL.appendingPathComponent("file\(index).txt"), atomically: true, encoding: .utf8
+            )
+            _ = try await GitCLI.run(["add", "."], in: repoURL)
+            _ = try await GitCLI.run(["commit", "-m", "commit \(index)"], in: repoURL)
+        }
+
+        let store = SourceControlStore()
+        store.setTask(makeTask(worktree: repoURL, baseCommit: baseCommit))
+
+        try await waitUntil { store.history.map(\.subject) == ["commit 2", "commit 1"] }
+        #expect(store.history.map(\.subject) == ["commit 2", "commit 1"])
+        #expect(!store.history.contains { $0.subject == "init" })
+    }
 }
