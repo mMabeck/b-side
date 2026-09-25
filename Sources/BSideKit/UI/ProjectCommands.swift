@@ -15,10 +15,21 @@ public struct ProjectCommands: Commands {
         self.store = store
     }
 
+    /// Which project a bare "New Task"/Cmd+N should target when nothing is
+    /// selected: `selection`'s own target (the most recently selected task's
+    /// or project's project — `selectedProjectID` is sticky across
+    /// deselection, so this already covers "most recently selected") if
+    /// there is one, else the first project in list order, else `nil` so the
+    /// action can no-op rather than guessing when there are no projects at
+    /// all. Pure so it's directly testable without a store.
+    static func defaultTaskCreationProject(selection: MainSelection, projects: [Project]) -> Project? {
+        selection.taskCreationTarget ?? projects.first
+    }
+
     public var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Task") {
-                if let project = store.mainSelection.taskCreationTarget {
+                if let project = Self.defaultTaskCreationProject(selection: store.mainSelection, projects: store.projects) {
                     store.pendingTaskCreationProject = project
                 }
             }
