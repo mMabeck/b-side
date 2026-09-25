@@ -197,7 +197,7 @@ struct SidebarSnapshotTests {
             }
             let bitmap = NSBitmapImageRep(cgImage: cgImage)
             if let pngData = bitmap.representation(using: .png, properties: [:]) {
-                try? pngData.write(to: URL(fileURLWithPath: "/tmp/bside-sidebar.png"))
+                try? pngData.write(to: URL(fileURLWithPath: "/tmp/bside-sidebar-legacy.png"))
             }
 
             let windowFrame = window.frame
@@ -308,7 +308,7 @@ struct SidebarSnapshotTests {
         defaults.set(SidebarCollapseState().rawValue, forKey: "sidebarCollapsedProjectIDs")
 
         let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 190, height: 640),
+            contentRect: NSRect(x: -20000, y: -20000, width: 240, height: 640),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -377,22 +377,98 @@ struct SidebarSnapshotTests {
             return nil
         }
 
-        // A dot's true left edge: `firstMatch`'s topmost-row scan can land
-        // on a row near the top of the circle, where the visible arc is
-        // narrower and further right than the circle's actual left edge -
-        // so this re-scans a band of rows spanning the dot's full diameter
-        // around that anchor and takes the minimum x seen, which is the
-        // left edge regardless of which row the initial scan happened to
-        // hit first.
-        func dotLeftEdge(_ bitmap: NSBitmapImageRep, target: NSColor, tolerance: CGFloat = 0.16, minY: Int = 0, maxX: Int? = nil, rowScale: CGFloat) -> (x: Int, y: Int)? {
+        // A shape's true left edge: `firstMatch`'s topmost-row scan can land
+        // on a row near the top of a circle or glyph, where the visible arc
+        // or stroke is narrower and further right than the shape's actual
+        // left edge - so this re-scans a band of rows spanning the shape's
+        // full height around that anchor and takes the minimum x seen, which
+        // is the left edge regardless of which row the initial scan happened
+        // to hit first.
+        func leftEdge(_ bitmap: NSBitmapImageRep, target: NSColor, tolerance: CGFloat = 0.16, minY: Int = 0, maxX: Int? = nil, upBand: Int, downBand: Int) -> (x: Int, y: Int)? {
             guard let anchor = firstMatch(bitmap, target: target, tolerance: tolerance, minY: minY, maxX: maxX) else { return nil }
-            let band = Int(TaskRowLayout.statusDotDiameter * rowScale) + 2
             var best = anchor
-            for y in max(0, anchor.y - band)...min(bitmap.pixelsHigh - 1, anchor.y + band) {
+            for y in max(minY, anchor.y - upBand)...min(bitmap.pixelsHigh - 1, anchor.y + downBand) {
                 guard let x = leftmostMatch(bitmap, target: target, y: y, xRange: 0..<(maxX ?? bitmap.pixelsWide), tolerance: tolerance, yBand: 0) else { continue }
                 if x < best.x { best = (x, y) }
             }
             return best
+        }
+
+        func dotLeftEdge(_ bitmap: NSBitmapImageRep, target: NSColor, tolerance: CGFloat = 0.16, minY: Int = 0, maxX: Int? = nil, rowScale: CGFloat) -> (x: Int, y: Int)? {
+            let band = Int(TaskRowLayout.statusDotDiameter * rowScale) + 2
+            return leftEdge(bitmap, target: target, tolerance: tolerance, minY: minY, maxX: maxX, upBand: band, downBand: band)
+        }
+
+        // A themed sidebar's two text colours (`textPrimary`,
+        // `textSecondary`) are close enough after antialiasing that
+        // colour-matching one against the other is unreliable - a header's
+        // own trailing antialiased pixels can pass a title's colour
+        // tolerance and vice versa. Contrast against the surface background
+        // instead is unambiguous (background is dark, every label colour is
+        // light, or the reverse for a light theme), so a text row is found
+        // by "not background" rather than by matching a specific label
+        // colour.
+        let backgroundNS = NSColor(palette.surfaceBackground)
+        func isTextPixel(_ color: NSColor) -> Bool {
+            let c = color.usingColorSpace(.deviceRGB) ?? color
+            let b = backgroundNS.usingColorSpace(.deviceRGB) ?? backgroundNS
+            let diff = abs(c.redComponent - b.redComponent) + abs(c.greenComponent - b.greenComponent) + abs(c.blueComponent - b.blueComponent)
+            return diff > 0.3
+        }
+        func rowHasText(_ bitmap: NSBitmapImageRep, y: Int, maxX: Int) -> Bool {
+            guard y >= 0, y < bitmap.pixelsHigh else { return false }
+            for x in 0..<maxX {
+                if let color = bitmap.colorAt(x: x, y: y), isTextPixel(color) { return true }
+            }
+            return false
+        }
+
+        /// The bounding box of the first contiguous run of text-coloured
+        /// rows at or below `minY` and above `maxY`, scoped to `x < maxX` so
+        /// a row's trailing icon/count doesn't get swept in - one line of
+        /// text (a header or a title), isolated by vertical contrast against
+        /// the background rather than by matching either label colour
+        /// against the other. `maxY` matters as much as `minY`: without it,
+        /// a small gap between two text lines (e.g. a header and the title
+        /// right below it) reads as just another "transitional dip" and the
+        /// scan silently swallows the next line's text into the same block -
+        /// callers bound `maxY` using an unambiguous landmark (a status dot's
+        /// colour) just below the line they actually want.
+        func textBlock(_ bitmap: NSBitmapImageRep, minY: Int, maxY: Int, maxX: Int) -> (top: Int, bottom: Int, leftX: Int)? {
+            var top: Int?
+            var y = minY
+            while y <= maxY {
+                if rowHasText(bitmap, y: y, maxX: maxX) { top = y; break }
+                y += 1
+            }
+            guard let top else { return nil }
+            var bottom = top
+            var consecutiveBlank = 0
+            y = top + 1
+            // A row transitional between two thick strokes (or two letters'
+            // serifs) can occasionally dip under the contrast threshold
+            // without the glyph actually having ended - tolerate a couple of
+            // such rows rather than stopping the block early.
+            while y <= maxY {
+                if rowHasText(bitmap, y: y, maxX: maxX) {
+                    bottom = y
+                    consecutiveBlank = 0
+                } else {
+                    consecutiveBlank += 1
+                    if consecutiveBlank > 2 { break }
+                }
+                y += 1
+            }
+            var leftX = maxX
+            for row in top...bottom {
+                for x in 0..<maxX {
+                    if let color = bitmap.colorAt(x: x, y: row), isTextPixel(color) {
+                        leftX = min(leftX, x)
+                        break
+                    }
+                }
+            }
+            return (top, bottom, leftX)
         }
 
         var bitmap: NSBitmapImageRep?
@@ -425,7 +501,6 @@ struct SidebarSnapshotTests {
         // title bar / toolbar strip (traffic lights, the sidebar toggle
         // button) above it, where a light system icon can otherwise read as
         // a false match for this fairly light grey.
-        let activeHeaderPixel = firstMatch(bitmap, target: NSColor(palette.textSecondary), tolerance: 0.05, minY: Int(40 * scaleY), maxX: Int(120 * scaleX))
         // The running dot is the first (topmost) of the four Active rows.
         // Blue/green ("unread"/"read") are used for every other measurement
         // below because, empirically, this screenshot pipeline's colour
@@ -433,6 +508,14 @@ struct SidebarSnapshotTests {
         // orange-red "question") aren't reliably distinguishable from one
         // another, while blue and green stay unambiguous.
         let runningDotPixel = dotLeftEdge(bitmap, target: NSColor(palette.statusRunning), rowScale: scaleY)
+        // The dot's own topmost row (unadjusted for its left edge) bounds
+        // the ACTIVE header's text block from below, so a small gap between
+        // the header and the first Active row's own title/subtitle text
+        // can't be mistaken for a mere transitional dip and swallow that
+        // row's text into the header's block.
+        let runningDotTopY = firstMatch(bitmap, target: NSColor(palette.statusRunning), minY: Int(40 * scaleY), maxX: Int(120 * scaleX))?.y
+        let activeHeaderBlock = textBlock(bitmap, minY: Int(40 * scaleY), maxY: (runningDotTopY ?? bitmap.pixelsHigh) - 1, maxX: Int(120 * scaleX))
+        let activeHeaderPixel = activeHeaderBlock.map { (x: $0.leftX, y: $0.top) }
 
         #expect(activeHeaderPixel != nil, "Could not find the ACTIVE header in the capture")
         #expect(runningDotPixel != nil, "Could not find the running status dot in the capture")
@@ -460,10 +543,26 @@ struct SidebarSnapshotTests {
         // the project header.
         var projectSectionTaskDotX: Int?
         if let questionDotPixel {
-            let projectsHeaderPixel = firstMatch(bitmap, target: NSColor(palette.textSecondary), tolerance: 0.05, minY: questionDotPixel.y + Int(4 * scaleY), maxX: Int(120 * scaleX))
-            if let projectsHeaderPixel {
-                let titlePixel = firstMatch(bitmap, target: NSColor(palette.textPrimary), tolerance: 0.05, minY: projectsHeaderPixel.y + Int(4 * scaleY), maxX: Int(120 * scaleX))
-                projectTitleX = titlePixel?.x
+            // Found first (before the header/title text blocks below) so
+            // both blocks can be bounded from below by this task row's own
+            // dot - without that ceiling, the small gaps between "PROJECTS",
+            // the project title, and the task row's own title read as mere
+            // transitional dips and everything fuses into one block.
+            let secondQuestionDotTopY = firstMatch(bitmap, target: NSColor(palette.statusNeedsAttention), tolerance: 0.10, minY: questionDotPixel.y + Int(30 * scaleY))?.y
+            let sectionFloor = (secondQuestionDotTopY ?? bitmap.pixelsHigh) - 1
+            // The last Active row (Question task) has its own subtitle line
+            // (its project's folder name) directly below its dot, in the
+            // same secondary colour as the "PROJECTS" header - so the first
+            // text block below the dot is that subtitle, not the header.
+            // Three text blocks follow the dot in order: the subtitle, the
+            // "PROJECTS" header, then the project title.
+            let subtitleBlock = textBlock(bitmap, minY: questionDotPixel.y + Int(4 * scaleY), maxY: sectionFloor, maxX: Int(150 * scaleX))
+            if let subtitleBlock {
+                let projectsHeaderBlock = textBlock(bitmap, minY: subtitleBlock.bottom + Int(2 * scaleY), maxY: sectionFloor, maxX: Int(120 * scaleX))
+                if let projectsHeaderBlock {
+                    let titleBlock = textBlock(bitmap, minY: projectsHeaderBlock.bottom + Int(2 * scaleY), maxY: sectionFloor, maxX: Int(150 * scaleX))
+                    projectTitleX = titleBlock?.leftX
+                }
 
                 let secondQuestionDotPixel = dotLeftEdge(bitmap, target: NSColor(palette.statusNeedsAttention), tolerance: 0.10, minY: questionDotPixel.y + Int(30 * scaleY), rowScale: scaleY)
                 projectSectionTaskDotX = secondQuestionDotPixel?.x
@@ -479,21 +578,14 @@ struct SidebarSnapshotTests {
             let headerX = points(activeHeaderPixel.x, scale: scaleX)
             let dotX = points(runningDotPixel.x, scale: scaleX)
             print("Measured alignment: ACTIVE header x=\(headerX)pt, Active-row running dot x=\(dotX)pt, delta=\(abs(headerX - dotX))pt")
-            // A few points of residual delta is the glyph's own left-side
-            // bearing (the "A" glyph's ink starts a little after its type
-            // box's left edge) rather than a layout bug - a plain box-edge
-            // comparison against a circle can't be pixel-exact the way two
-            // box edges could.
-            #expect(abs(headerX - dotX) <= 5, "Active-row dot (x=\(dotX)) should left-align with the ACTIVE header (x=\(headerX))")
+            #expect(abs(headerX - dotX) <= 1, "Active-row dot (x=\(dotX)) should left-align with the ACTIVE header (x=\(headerX))")
         }
 
         if let projectSectionTaskDotX, let projectTitleX {
             let dotX = points(projectSectionTaskDotX, scale: scaleX)
             let titleX = points(projectTitleX, scale: scaleX)
             print("Measured alignment: project title x=\(titleX)pt, task dot x=\(dotX)pt, delta=\(abs(titleX - dotX))pt")
-            // Same glyph left-side-bearing allowance as the ACTIVE header
-            // comparison above.
-            #expect(abs(titleX - dotX) <= 5, "Task dot (x=\(dotX)) should left-align with the project title (x=\(titleX))")
+            #expect(abs(titleX - dotX) <= 1, "Task dot (x=\(dotX)) should left-align with the project title (x=\(titleX))")
         }
 
         // No stray 1pt hairline: the old per-row indent guide is gone, and

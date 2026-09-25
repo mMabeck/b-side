@@ -329,7 +329,7 @@ struct SidebarView: View {
     /// leading indent from `.sidebar`'s built-in disclosure-chevron space, so
     /// this needed a bigger inset than `projectRow`'s own horizontal padding
     /// alone would suggest to land at the same x.
-    private static let taskLeadingIndent: CGFloat = 28.5
+    private static let taskLeadingIndent: CGFloat = 3
 
     /// The leading inset an "Active" section row sits at. Measured against a
     /// snapshot capture (see `SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`):
@@ -337,7 +337,7 @@ struct SidebarView: View {
     /// built-in leading inset to "ACTIVE" that differs from a `List` row's
     /// own `listRowInsets` + padding, so this needed its own constant rather
     /// than sharing `taskLeadingIndent`.
-    private static let activeRowLeadingIndent: CGFloat = 2
+    private static let activeRowLeadingIndent: CGFloat = -5
 
     /// A task row nested beneath its project. The leading status-dot column
     /// is reserved at a fixed width even when no dot is shown, so every
