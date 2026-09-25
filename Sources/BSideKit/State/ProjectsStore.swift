@@ -801,7 +801,7 @@ public final class ProjectsStore {
     }
 
     /// Drops `taskId`'s busy and unread flags without the "mark unread on a
-    /// genuine busy\u2192idle transition" side effect `clearTaskBusy` has —
+    /// genuine busy→idle transition" side effect `clearTaskBusy` has —
     /// used when a task is archived or deleted, where there is no sidebar row
     /// left for "unread" to mean anything about.
     private func discardBusyAndUnread(_ taskId: Int64) {

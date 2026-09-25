@@ -19,11 +19,10 @@ extension EnvironmentValues {
     }
 }
 
-/// The five states a task's sidebar dot can read as. Whether a branch is
-/// merged no longer feeds this at all — that's shown by the separate
-/// "Merged" pill (`SidebarView.mergedBadge`) so the two never say the same
-/// thing twice, and a merged-but-still-open task can still read as unread,
-/// running, etc.
+/// The five states a task's sidebar dot can read as. Merge state is
+/// deliberately not an input; it's shown by the separate "Merged" pill
+/// (`SidebarView.mergedBadge`) so the two never say the same thing twice,
+/// and a merged-but-still-open task can still read as unread, running, etc.
 public enum TaskStatus: Hashable, Sendable {
     /// A terminal alert classified as a question, or the task's worktree is
     /// blocked/vanished. Reads as the palette's most attention-grabbing

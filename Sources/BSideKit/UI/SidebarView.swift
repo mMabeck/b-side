@@ -326,9 +326,9 @@ struct SidebarView: View {
     /// title's text begins. Measured against a snapshot capture (see
     /// `SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`): a collapsible
     /// `Section(isExpanded:)` header (`projectRow`) gets its own extra
-    /// leading indent from `.sidebar`'s built-in disclosure-chevron space, so
-    /// this needed a bigger inset than `projectRow`'s own horizontal padding
-    /// alone would suggest to land at the same x.
+    /// leading indent from `.sidebar`'s built-in disclosure-chevron space,
+    /// which already covers part of `projectRow`'s own horizontal padding,
+    /// so this needed a smaller inset to land at the same x.
     private static let taskLeadingIndent: CGFloat = 3
 
     /// The leading inset an "Active" section row sits at. Measured against a
@@ -344,9 +344,9 @@ struct SidebarView: View {
     /// title starts at the same x (`TaskRowLayout.statusDotColumnWidth`).
     /// The trailing edge carries the subagent child count/blocked indicator
     /// and the branch sync summary, in that order, quiet and compact. Smaller
-    /// and lighter than the project title above it, and indented beneath it
-    /// with a low-opacity guide line, so tasks read as the project's children
-    /// rather than its peers — a project is a container, never a terminal.
+    /// and lighter than the project title above it, and indented beneath it,
+    /// so tasks read as the project's children rather than its peers — a
+    /// project is a container, never a terminal.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let info = taskStatusInfo(for: task)
         let summary = info.summary
