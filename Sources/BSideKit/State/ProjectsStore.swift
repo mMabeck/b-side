@@ -621,20 +621,35 @@ public final class ProjectsStore {
         }
     }
 
-    /// Persists a new default base ref for `project`, e.g. when a task is
-    /// created from a base other than the project's saved default. Updates
+    /// Persists the New Task sheet's choices for `project` after a
+    /// successful creation: the worktree toggle and mode always, the base
+    /// ref only when a non-blank new-branch base was actually used. Updates
     /// `projects` in place too, so a task-creation sheet opened right after
-    /// preselects the new default without waiting for the next
+    /// preselects the new defaults without waiting for the next
     /// `ValueObservation` tick.
-    public func updateProjectBaseRef(_ project: Project, baseRef: String) async throws {
+    public func rememberTaskCreationChoices(
+        project: Project,
+        baseRef: String?,
+        useWorktree: Bool,
+        mode: TaskCreationMode
+    ) async throws {
         guard let id = project.id else { return }
         try await database.dbQueue.write { db in
-            var updated = project
-            updated.baseRef = baseRef
-            try updated.update(db)
+            guard var current = try Project.fetchOne(db, key: id) else { return }
+            try current.updateChanges(db) { row in
+                if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {
+                    row.baseRef = baseRef
+                }
+                row.lastUseWorktree = useWorktree
+                row.lastTaskCreationMode = mode.rawValue
+            }
         }
         if let index = projects.firstIndex(where: { $0.id == id }) {
-            projects[index].baseRef = baseRef
+            if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {
+                projects[index].baseRef = baseRef
+            }
+            projects[index].lastUseWorktree = useWorktree
+            projects[index].lastTaskCreationMode = mode.rawValue
         }
     }
 
@@ -833,12 +848,28 @@ public final class ProjectsStore {
     }
 
     /// Refreshes ahead/behind/merged status for `task` against its project's base ref.
+    /// A legacy task with no recorded `baseCommit` has one backfilled from
+    /// `syncStatus`'s reflog fallback, so the lookup isn't repeated on every refresh.
     public func refreshSyncStatus(for task: TaskRecord, project: Project) async {
         guard let id = task.id else { return }
-        guard let status = try? await TaskWorktreeService.syncStatus(project: project, branchName: task.branchName, baseCommit: task.baseCommit) else {
+        guard let status = try? await TaskWorktreeService.syncStatus(
+            project: project,
+            branchName: task.branchName,
+            baseCommit: task.baseCommit
+        ) else {
             return
         }
         syncStatusByTask[id] = status
+        if task.baseCommit == nil, let resolvedBaseCommit = status.resolvedBaseCommit {
+            try? await database.dbQueue.write { db in
+                guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
+                updated.baseCommit = resolvedBaseCommit
+                try updated.update(db)
+            }
+            if let index = tasksByProject[task.projectId]?.firstIndex(where: { $0.id == id }) {
+                tasksByProject[task.projectId]?[index].baseCommit = resolvedBaseCommit
+            }
+        }
     }
 
     /// Prunes worktree metadata and detects worktrees whose directories vanished

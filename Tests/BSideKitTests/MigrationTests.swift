@@ -12,13 +12,22 @@ struct MigrationTests {
         var migrator = DatabaseMigrator()
         Migrations.register(in: &migrator)
 
-        #expect(migrator.migrations == ["v1_initial_schema", "v2_conversation_session_id", "v3_task_awaiting_auto_rename", "v4_task_base_commit"])
+        #expect(migrator.migrations == [
+            "v1_initial_schema",
+            "v2_conversation_session_id",
+            "v3_task_awaiting_auto_rename",
+            "v4_task_base_commit",
+            "v5_project_last_task_creation_choices",
+        ])
         try migrator.migrate(dbQueue)
 
         try dbQueue.read { db in
             try #expect(db.tableExists("project"))
             try #expect(db.tableExists("task"))
             try #expect(db.tableExists("conversation"))
+            try #expect(db.columns(in: "project").map(\.name).contains("lastUseWorktree"))
+            try #expect(db.columns(in: "project").map(\.name).contains("lastTaskCreationMode"))
+            try #expect(db.columns(in: "task").map(\.name).contains("baseCommit"))
         }
     }
 
@@ -34,7 +43,31 @@ struct MigrationTests {
         let appliedCount = try dbQueue.read { db in
             try migrator.appliedMigrations(db).count
         }
-        #expect(appliedCount == 4)
+        #expect(appliedCount == 5)
+    }
+
+    @Test("v5 is idempotent when the project columns were already added under an old migration name")
+    func v5IsIdempotentAgainstPreexistingColumns() throws {
+        let dbQueue = try DatabaseQueue()
+        var migrator = DatabaseMigrator()
+        Migrations.register(in: &migrator)
+        // Migrate through v3 only, then simulate a dev DB that already added
+        // the project columns under a different (now-dropped) migration name
+        // before v4/v5 ran.
+        try migrator.migrate(dbQueue, upTo: "v3_task_awaiting_auto_rename")
+        try dbQueue.write { db in
+            try db.alter(table: "project") { t in
+                t.add(column: "lastUseWorktree", .boolean)
+                t.add(column: "lastTaskCreationMode", .text)
+            }
+        }
+
+        try migrator.migrate(dbQueue)
+
+        try dbQueue.read { db in
+            try #expect(db.columns(in: "project").map(\.name).contains("lastUseWorktree"))
+            try #expect(db.columns(in: "project").map(\.name).contains("lastTaskCreationMode"))
+        }
     }
 }
 

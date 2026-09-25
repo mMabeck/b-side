@@ -8,8 +8,8 @@ import Testing
 @MainActor
 @Suite("ProjectsStore task creation")
 struct ProjectsStoreTaskCreationTests {
-    @Test("updateProjectBaseRef persists the new default and updates the in-memory project")
-    func updateProjectBaseRefPersists() async throws {
+    @Test("rememberTaskCreationChoices persists the new default and updates the in-memory project")
+    func rememberTaskCreationChoicesPersists() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
         let repoURL = try await TestRepo.makeRepo(in: root)
@@ -22,15 +22,94 @@ struct ProjectsStoreTaskCreationTests {
 
         let project = try #require(store.projects.first)
         #expect(project.baseRef == "main")
+        #expect(project.lastUseWorktree == nil)
+        #expect(project.lastTaskCreationMode == nil)
 
-        try await store.updateProjectBaseRef(project, baseRef: "develop")
+        try await store.rememberTaskCreationChoices(
+            project: project,
+            baseRef: "develop",
+            useWorktree: false,
+            mode: .existingBranch
+        )
 
         #expect(store.projects.first?.baseRef == "develop")
+        #expect(store.projects.first?.lastUseWorktree == false)
+        #expect(store.projects.first?.lastTaskCreationMode == TaskCreationMode.existingBranch.rawValue)
 
         let persisted = try await database.dbQueue.read { db in
             try Project.fetchOne(db, key: project.id)
         }
         #expect(persisted?.baseRef == "develop")
+        #expect(persisted?.lastUseWorktree == false)
+        #expect(persisted?.lastTaskCreationMode == TaskCreationMode.existingBranch.rawValue)
+    }
+
+    @Test("rememberTaskCreationChoices keeps the existing base ref when no new base was used")
+    func rememberTaskCreationChoicesKeepsBaseRefWhenNil() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+
+        try await store.rememberTaskCreationChoices(
+            project: project,
+            baseRef: nil,
+            useWorktree: true,
+            mode: .newBranch
+        )
+
+        #expect(store.projects.first?.baseRef == "main")
+        #expect(store.projects.first?.lastUseWorktree == true)
+        #expect(store.projects.first?.lastTaskCreationMode == TaskCreationMode.newBranch.rawValue)
+    }
+
+    @Test("rememberTaskCreationChoices survives a concurrent displayName change")
+    func rememberTaskCreationChoicesSurvivesConcurrentRename() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        // A stale copy of the project, as `rememberTaskCreationChoices`'s
+        // caller would hold if a rename lands after the copy was read.
+        let staleProject = try #require(store.projects.first)
+        guard let id = staleProject.id else {
+            Issue.record("expected an id")
+            return
+        }
+
+        try await database.dbQueue.write { db in
+            var renamed = try #require(try Project.fetchOne(db, key: id))
+            renamed.displayName = "Renamed Concurrently"
+            try renamed.update(db)
+        }
+
+        try await store.rememberTaskCreationChoices(
+            project: staleProject,
+            baseRef: "develop",
+            useWorktree: false,
+            mode: .existingBranch
+        )
+
+        let persisted = try await database.dbQueue.read { db in
+            try Project.fetchOne(db, key: id)
+        }
+        #expect(persisted?.displayName == "Renamed Concurrently")
+        #expect(persisted?.baseRef == "develop")
+        #expect(persisted?.lastUseWorktree == false)
+        #expect(persisted?.lastTaskCreationMode == TaskCreationMode.existingBranch.rawValue)
     }
 
     @Test("createTask(useWorktree: false) runs the task in the project directory with no worktree created")
@@ -136,6 +215,38 @@ struct ProjectsStoreTaskCreationTests {
 
         await store.refreshSyncStatus(for: task, project: project)
         #expect(store.syncStatusByTask[task.id!]?.merged == true)
+    }
+
+    @Test("refreshSyncStatus backfills baseCommit for a legacy task via the reflog fallback")
+    func refreshSyncStatusBackfillsLegacyBaseCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let created = try await store.createTask(project: project, name: "Legacy", baseRef: "main")
+        let taskId = try #require(created.id)
+
+        // Simulate a task persisted before `baseCommit` existed.
+        let legacyTask: TaskRecord = {
+            var task = created
+            task.baseCommit = nil
+            return task
+        }()
+        try await database.dbQueue.write { db in try legacyTask.update(db) }
+
+        await store.refreshSyncStatus(for: legacyTask, project: project)
+
+        let persisted = try await database.dbQueue.read { db in
+            try TaskRecord.fetchOne(db, key: taskId)
+        }
+        #expect(persisted?.baseCommit != nil)
     }
 
     @Test("setTaskBusy/clearTaskBusy are idempotent, and archiving or deleting a task clears its busy flag")

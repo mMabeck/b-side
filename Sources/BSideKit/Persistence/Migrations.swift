@@ -68,5 +68,25 @@ enum Migrations {
                 t.add(column: "baseCommit", .text)
             }
         }
+
+        // Added to remember a project's last-used task-creation choices (New
+        // Task sheet: worktree toggle, new-branch/existing-branch mode) so
+        // reopening the sheet preselects them instead of always resetting to
+        // the project config defaults. Renamed from this branch's original
+        // "v4_project_last_task_creation_choices" to land after main's
+        // "v4_task_base_commit"; column adds are guarded because a dev DB may
+        // already have applied the old v4 (or the since-dropped
+        // "v5_task_start_commit") migration under its previous name.
+        migrator.registerMigration("v5_project_last_task_creation_choices") { db in
+            let existingColumns = Set(try db.columns(in: "project").map(\.name))
+            try db.alter(table: "project") { t in
+                if !existingColumns.contains("lastUseWorktree") {
+                    t.add(column: "lastUseWorktree", .boolean)
+                }
+                if !existingColumns.contains("lastTaskCreationMode") {
+                    t.add(column: "lastTaskCreationMode", .text)
+                }
+            }
+        }
     }
 }
