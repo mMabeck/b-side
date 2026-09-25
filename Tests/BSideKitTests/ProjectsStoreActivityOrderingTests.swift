@@ -105,6 +105,37 @@ struct ProjectsStoreActivityOrderingTests {
         #expect(store.openTerminalTaskIDs == orderBeforeNoOpClear)
     }
 
+    @Test("dropTaskBusy clears the busy flag but never bumps ordering, unlike clearTaskBusy")
+    func dropTaskBusyDoesNotBumpOrdering() async throws {
+        let (store, project, taskA, taskB) = try await makeStore()
+        let idA = try #require(taskA.id)
+        let idB = try #require(taskB.id)
+        store.noteTerminalOpened(taskID: idA)
+        store.noteTerminalOpened(taskID: idB)
+
+        store.setTaskBusy(idB)
+        #expect(store.openTerminalTaskIDs == [idB, idA])
+        try await waitUntil {
+            store.tasksByProject[project.id!]?.first?.id == idB
+        }
+
+        // Simulates closing a busy task's terminal (or its process exiting,
+        // or it being purged/archived/deleted): the busy flag must clear
+        // without reordering the project's task list or openTerminalTaskIDs.
+        store.setTaskBusy(idA)
+        #expect(store.openTerminalTaskIDs == [idA, idB])
+        try await waitUntil {
+            store.tasksByProject[project.id!]?.first?.id == idA
+        }
+        let orderBeforeDrop = store.openTerminalTaskIDs
+        let projectOrderBeforeDrop = store.tasksByProject[project.id!]
+
+        store.dropTaskBusy(idA)
+
+        #expect(store.openTerminalTaskIDs == orderBeforeDrop)
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == projectOrderBeforeDrop?.map(\.id))
+    }
+
     @Test("An accepted question alert bumps ordering")
     func questionAlertBumpsOrdering() async throws {
         let (store, project, taskA, taskB) = try await makeStore()
