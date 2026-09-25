@@ -104,6 +104,29 @@ struct SourceControlStoreTests {
         #expect(content == "staged change\n")
     }
 
+    @Test("Discarding a staged modification only unstages it, keeping its content")
+    func discardStagedModificationKeepsContent() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let fileURL = repoURL.appendingPathComponent("README.md")
+
+        try "staged change\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try await GitCLI.stage(["README.md"], at: repoURL)
+
+        let store = SourceControlStore()
+        store.setTask(makeTask(worktree: repoURL))
+        try await waitUntil { store.staged.contains { $0.path == "README.md" } }
+
+        let row = try #require(store.staged.first { $0.path == "README.md" })
+        await store.discard([row])
+
+        try await waitUntil { store.unstaged.contains { $0.path == "README.md" } }
+        #expect(!store.staged.contains { $0.path == "README.md" })
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(content == "staged change\n")
+    }
+
     @Test("Discarding a staged-new row unstages and recycles it, rather than deleting it outright")
     func discardStagedNewRowRecyclesInsteadOfDeleting() async throws {
         let root = try TestRepo.makeTempDirectory()

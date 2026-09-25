@@ -395,19 +395,23 @@ public final class SourceControlStore {
     /// so a discard is always recoverable.
     ///
     /// A staged row can still arrive here through a mixed bulk selection.
-    /// Reverting it to `HEAD` is safe when `HEAD` actually has the path; a
-    /// file staged as newly added (or a rename's new name) has no `HEAD`
-    /// entry, so it's unstaged and sent to the Trash instead — see
-    /// `GitCLI.discardTracked`.
+    /// One whose path `HEAD` has is only unstaged, never reverted: the staged
+    /// content stays in the working tree rather than being lost with no copy
+    /// in the Trash. A file staged as newly added (or a rename's new name)
+    /// has no `HEAD` entry, so it's unstaged and sent to the Trash instead.
+    /// Conflicted rows are skipped — `restore` refuses unmerged paths, which
+    /// would abort the rest of the batch.
     public func discard(_ rows: [Row]) async {
         guard let worktreeURL else { return }
 
         let untrackedRows = rows.filter { $0.kind == .untracked }
 
-        let unstagedRows = rows.filter { $0.origin == .unstaged && $0.kind != .untracked }
+        let unstagedRows = rows.filter {
+            $0.origin == .unstaged && $0.kind != .untracked && $0.kind != .conflicted
+        }
         let unstagedPaths = Self.expandedPaths(for: unstagedRows)
 
-        let stagedRows = rows.filter { $0.origin == .staged }
+        let stagedRows = rows.filter { $0.origin == .staged && $0.kind != .conflicted }
         let stagedHeadBacked = stagedRows.filter { $0.kind != .added && $0.kind != .renamed }
         let stagedHeadless = stagedRows.filter { $0.kind == .added || $0.kind == .renamed }
 
@@ -416,7 +420,7 @@ public final class SourceControlStore {
                 try await GitCLI.discardWorktree(unstagedPaths, at: worktreeURL)
             }
             if !stagedHeadBacked.isEmpty {
-                try await GitCLI.discardTracked(Self.expandedPaths(for: stagedHeadBacked), at: worktreeURL)
+                try await GitCLI.unstage(Self.expandedPaths(for: stagedHeadBacked), at: worktreeURL)
             }
             for row in stagedHeadless where row.kind == .renamed {
                 if let origPath = row.origPath {
