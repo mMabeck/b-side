@@ -408,13 +408,46 @@ public final class ProjectsStore {
     /// the shortcut to swap the main area to.
     public func stripChildIDsWithLiveSurface(forTask taskId: Int64) -> [String] {
         let allRuns = subagentFeed.runs(forTask: taskId)
-        let visible = subagentStripBatches.visibleRuns(forTask: taskId, allRuns: allRuns)
+        let swappedIn = subagentSwap.shownChildID(forTask: taskId)
+        let visible = subagentStripBatches.visibleRuns(forTask: taskId, allRuns: allRuns, swappedInChildID: swappedIn)
         let liveIDs = Set(subagentPanes.panes(forTask: taskId).map(\.id))
         return visible.map(\.id).filter { liveIDs.contains($0) }
     }
 
+    /// Bumped once per strip-prune tick (see `start()`); views read it to
+    /// subscribe their body to the passage of time without polling — a
+    /// finished card leaving the strip after its linger is otherwise not
+    /// triggered by any event, since nothing else about the run changes.
+    public private(set) var stripTickToken = 0
+
+    /// For every task with subagent runs, tears down any live pane whose
+    /// card has aged out of the strip (`SubagentStripBatchTracker.nextBatch`
+    /// says it's no longer visible) so a finished child stops holding a
+    /// `SubagentPaneStore.maxPanesPerTask` slot. Driven by a periodic tick
+    /// from `start()`, not from view rendering.
+    private func pruneAgedOutStripPanes() {
+        let now = Date()
+        for taskId in subagentFeed.runsByTask.keys {
+            let allRuns = subagentFeed.runs(forTask: taskId)
+            let livePaneIDs = Set(subagentPanes.panes(forTask: taskId).map(\.id))
+            guard !livePaneIDs.isEmpty else { continue }
+            let swappedIn = subagentSwap.shownChildID(forTask: taskId)
+            let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
+                allRuns: allRuns,
+                livePaneIDs: livePaneIDs,
+                now: now,
+                swappedInChildID: swappedIn
+            )
+            for childId in agedOut {
+                subagentPanes.close(taskId: taskId, childId: childId)
+            }
+        }
+        stripTickToken &+= 1
+    }
+
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?
+    private var stripPruneTask: Task<Void, Never>?
     private static let logger = Logger(subsystem: "ai.syv.bside", category: "projects-store")
 
     public init(database: AppDatabase) {
@@ -469,6 +502,14 @@ public final class ProjectsStore {
 
         Task { [weak self] in
             await self?.startSubagentServer()
+        }
+
+        stripPruneTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.pruneAgedOutStripPanes()
+            }
         }
 
         TaskAlertNotificationCenter.shared.activateIfSupported()
@@ -537,6 +578,8 @@ public final class ProjectsStore {
         observationTask = nil
         subagentServer?.stop()
         subagentServer = nil
+        stripPruneTask?.cancel()
+        stripPruneTask = nil
         if let fileURL = Self.subagentEndpointFileURL() {
             Self.removeSubagentEndpointFile(at: fileURL)
         }
