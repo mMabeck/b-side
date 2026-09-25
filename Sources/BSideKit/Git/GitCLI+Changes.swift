@@ -395,7 +395,7 @@ extension GitCLI {
         return changes
     }
 
-    private static func makeDiffText(from data: Data) -> DiffText {
+    static func makeDiffText(from data: Data) -> DiffText {
         // `git diff` marks binary files with a "Binary files ... differ" line
         // instead of hunks; detect it in the raw bytes before decoding.
         if data.range(of: Data("Binary files ".utf8)) != nil {
