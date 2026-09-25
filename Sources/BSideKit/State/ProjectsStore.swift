@@ -771,9 +771,22 @@ public final class ProjectsStore {
         // immediately instead of a stale `.project`/`.none` that only
         // self-corrects once the observation catches up. The later refresh
         // overwrites this with the same (authoritative) row, so it's harmless.
-        tasksByProject[inserted.projectId, default: []].insert(inserted, at: 0)
+        // The observation can also win the race and deliver the row before
+        // this resumes, so only insert it if it isn't already there, or the
+        // task shows twice until the next refresh.
+        tasksByProject[inserted.projectId] = Self.insertingIfAbsent(
+            inserted,
+            into: tasksByProject[inserted.projectId] ?? []
+        )
         selectTask(inserted, project: project)
         return inserted
+    }
+
+    /// `tasks` with `task` prepended, unless a row with its id is already
+    /// present (see `createTask`'s optimistic insert).
+    static func insertingIfAbsent(_ task: TaskRecord, into tasks: [TaskRecord]) -> [TaskRecord] {
+        guard !tasks.contains(where: { $0.id == task.id }) else { return tasks }
+        return [task] + tasks
     }
 
     /// Archives a task: hides it (already excluded from `tasksByProject` once
