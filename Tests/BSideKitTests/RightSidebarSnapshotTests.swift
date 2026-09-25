@@ -5,16 +5,14 @@ import Testing
 
 @testable import BSideKit
 
-/// Renders the right sidebar (now just the Source Control placeholder — the
-/// Subagents tab and its strip were removed, see `SubagentStripView`)
-/// offscreen and samples real composited pixels, following the same
-/// conventions as `AuxiliaryWindowThemeSnapshotTests`.
+/// Renders the right sidebar offscreen and samples real composited pixels,
+/// following the same conventions as `AuxiliaryWindowThemeSnapshotTests`.
 @Suite(.serialized)
 @MainActor
 struct RightSidebarSnapshotTests {
     @Test("The Source Control placeholder is themed and legible")
     func placeholderIsThemedAndLegible() async throws {
-        let (window, palette) = try await renderOffscreen()
+        let (window, palette, _) = try await renderOffscreen(populated: false)
         defer { window.orderOut(nil) }
 
         let deadline = Date().addingTimeInterval(3)
@@ -53,6 +51,40 @@ struct RightSidebarSnapshotTests {
         #expect(maxLuminance - luminance(of: placeholderAreaSample) > 0.3)
     }
 
+    @Test("A populated Source Control panel renders readable rows over a themed background")
+    func populatedPanelIsThemedAndLegible() async throws {
+        let (window, palette, repoRoot) = try await renderOffscreen(populated: true)
+        defer {
+            window.orderOut(nil)
+            if let repoRoot { try? FileManager.default.removeItem(at: repoRoot) }
+        }
+
+        let deadline = Date().addingTimeInterval(5)
+        var capturedBitmap: NSBitmapImageRep?
+        repeat {
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            if let candidate = try? capture(window) {
+                capturedBitmap = candidate
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        } while Date() < deadline
+
+        let bitmap = try #require(capturedBitmap)
+        let surfaceBackground = NSColor(palette.surfaceBackground)
+        let (minLuminance, maxLuminance) = luminanceRange(
+            in: bitmap,
+            xRange: 10..<(bitmap.pixelsWide - 10),
+            yRange: 10..<(bitmap.pixelsHigh - 10)
+        )
+        // Row text (light against a dark themed surface, or vice versa) needs
+        // to actually paint distinguishable pixels, not just the sidebar's
+        // own flat background colour.
+        #expect(maxLuminance - minLuminance > 0.15)
+        let backgroundSample = try #require(bitmap.colorAt(x: 4, y: bitmap.pixelsHigh - 4))
+        #expect(isCloseToDarkThemeFamily(backgroundSample, background: surfaceBackground))
+    }
+
     /// Cheap, non-asserting re-check of the same conditions the real
     /// assertions below make, used only to decide whether polling can stop.
     private func looksSettled(_ bitmap: NSBitmapImageRep, palette: BSidePalette) -> Bool {
@@ -69,7 +101,11 @@ struct RightSidebarSnapshotTests {
 
     // MARK: - Shared offscreen render/capture plumbing
 
-    private func renderOffscreen() async throws -> (NSWindow, BSidePalette) {
+    /// When `populated` is true, backs the rendered sidebar with a real
+    /// throwaway git repo (via `TestRepo`) that has one staged file, one
+    /// unstaged edit, and one untracked file, and selects the task pointed
+    /// at it so the panel actually renders rows rather than an empty state.
+    private func renderOffscreen(populated: Bool) async throws -> (NSWindow, BSidePalette, URL?) {
         let configHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("bside-sidebar-test-\(UUID().uuidString)")
         let ghosttyConfigDir = configHome.appendingPathComponent("ghostty")
@@ -97,8 +133,32 @@ struct RightSidebarSnapshotTests {
         #expect(GhosttyResolvedTheme.shared.definition?.name == ayuMirage.name)
         let theme = GhosttyResolvedTheme.shared
 
+        // Per-test suite, not `.standard`: guards against the leaked
+        // `settings.appearance.*` keys this suite's own comment history
+        // warns about (see AGENTS.md's snapshot-testing gotchas).
+        let defaults = UserDefaults(suiteName: "bside-sidebar-test-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.description) }
+
         let database = try AppDatabase.openInMemory()
         let store = ProjectsStore(database: database)
+
+        var repoRoot: URL?
+        if populated {
+            let root = try TestRepo.makeTempDirectory()
+            repoRoot = root
+            let repoURL = try await TestRepo.makeRepo(in: root)
+            try "unstaged edit\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+            try "new file\n".write(to: repoURL.appendingPathComponent("NOTES.md"), atomically: true, encoding: .utf8)
+            try "staged content\n".write(to: repoURL.appendingPathComponent("staged.txt"), atomically: true, encoding: .utf8)
+            try await GitCLI.stage(["staged.txt"], at: repoURL)
+
+            try await store.addProject(at: repoURL)
+            store.start()
+            try await waitUntil { !store.projects.isEmpty }
+            let project = try #require(store.projects.first)
+            let task = try await store.createTask(project: project, name: "Sidebar Snapshot", useWorktree: false)
+            store.selectTask(task, project: project)
+        }
 
         let window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 300, height: 500),
@@ -119,7 +179,7 @@ struct RightSidebarSnapshotTests {
         window.setIsVisible(true)
         window.contentView?.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
-        return (window, theme.palette)
+        return (window, theme.palette, repoRoot)
     }
 
     private func capture(_ window: NSWindow) throws -> NSBitmapImageRep {

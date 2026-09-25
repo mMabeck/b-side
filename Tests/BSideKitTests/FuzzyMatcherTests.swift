@@ -69,6 +69,27 @@ struct FuzzyMatcherTests {
         #expect(ranked.map(\.name) == ["Personal Site"])
     }
 
+    @Test("secondary text matches only as a substring, and ranks below name matches")
+    func secondaryTextIsSubstringOnly() {
+        struct Candidate { let name: String; let path: String }
+        let items = [
+            Candidate(name: "rotmg-rl", path: "/Users/me/Documents/rotmg-rl"),
+            Candidate(name: "dotfiles", path: "/Users/me/Claude/dotfiles"),
+            Candidate(name: "b-side", path: "/Users/me/Claude/b-side"),
+        ]
+        let rank = { (query: String) in
+            FuzzyMatcher.rank(query: query, items: items, text: { [$0.name] }, secondaryText: { [$0.path] })
+                .map(\.name)
+        }
+        // "bsd" is a scattered subsequence of every path ("/Users/..."),
+        // but should only hit the name it fuzzily matches.
+        #expect(rank("bsd") == ["b-side"])
+        // A contiguous path fragment still finds projects, shorter paths first…
+        #expect(rank("claude") == ["b-side", "dotfiles"])
+        // …and name hits always outrank path-only hits.
+        #expect(rank("d") == ["dotfiles", "b-side", "rotmg-rl"])
+    }
+
     @Test("a blank query returns items unchanged, in their original order")
     func blankQueryReturnsOriginalOrder() {
         let items = ["zeta", "alpha", "beta"]

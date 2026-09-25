@@ -65,13 +65,32 @@ enum FuzzyMatcher {
     /// against `query`, dropping items that don't match at all. A blank
     /// query returns `items` unchanged, so an empty search field browses the
     /// full list in its original order.
-    static func rank<Item>(query: String, items: [Item], text: (Item) -> [String]) -> [Item] {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return items }
-        let scored: [(item: Item, score: Int)] = items.compactMap { item in
-            let bestScore = text(item).compactMap { score(query: query, candidate: $0) }.max()
-            guard let bestScore else { return nil }
-            return (item, bestScore)
+    ///
+    /// `secondaryText` strings (e.g. long paths) only match when they contain
+    /// the query as a contiguous substring, and always rank below every
+    /// `text` match: a scattered subsequence through a long path like
+    /// `/Users/…/project` matches almost any short query, which would make
+    /// filtering useless.
+    static func rank<Item>(
+        query: String,
+        items: [Item],
+        text: (Item) -> [String],
+        secondaryText: (Item) -> [String] = { _ in [] }
+    ) -> [Item] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return items }
+        let lowerQuery = trimmedQuery.lowercased()
+        let scored: [(item: Item, tier: Int, score: Int)] = items.compactMap { item in
+            if let best = text(item).compactMap({ score(query: trimmedQuery, candidate: $0) }).max() {
+                return (item, 1, best)
+            }
+            let substringHits = secondaryText(item).filter { $0.lowercased().contains(lowerQuery) }
+            guard let shortest = substringHits.map(\.count).min() else { return nil }
+            return (item, 0, -shortest)
         }
-        return scored.sorted { $0.score > $1.score }.map(\.item)
+        // Stable on ties, so equally good matches keep their original order.
+        return scored.enumerated().sorted { lhs, rhs in
+            (lhs.element.tier, lhs.element.score, -lhs.offset) > (rhs.element.tier, rhs.element.score, -rhs.offset)
+        }.map(\.element.item)
     }
 }

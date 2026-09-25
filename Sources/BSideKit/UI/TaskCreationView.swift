@@ -63,6 +63,10 @@ struct TaskCreationView: View {
     @State private var isProjectPickerOpen = false
     @State private var projectQuery = ""
     @State private var highlightedProjectIndex = 0
+    /// Row to scroll into view; set only by arrow keys so hovering a
+    /// half-visible row doesn't make the list jump under the pointer.
+    @State private var projectScrollTarget: Int?
+    @State private var projectDropdownContentHeight: CGFloat = 0
     @FocusState private var projectQueryFocused: Bool
 
     @State private var name = ""
@@ -228,7 +232,12 @@ struct TaskCreationView: View {
     // MARK: - Project picker
 
     private var projectMatches: [Project] {
-        FuzzyMatcher.rank(query: projectQuery, items: store.projects) { [$0.displayName, $0.path] }
+        FuzzyMatcher.rank(
+            query: projectQuery,
+            items: store.projects,
+            text: { [$0.displayName] },
+            secondaryText: { [$0.path] }
+        )
     }
 
     /// The "Project" field: a themed menu-label button showing the current
@@ -246,11 +255,13 @@ struct TaskCreationView: View {
                     .onKeyPress(.downArrow) {
                         guard !projectMatches.isEmpty else { return .ignored }
                         highlightedProjectIndex = min(highlightedProjectIndex + 1, projectMatches.count - 1)
+                        projectScrollTarget = highlightedProjectIndex
                         return .handled
                     }
                     .onKeyPress(.upArrow) {
                         guard !projectMatches.isEmpty else { return .ignored }
                         highlightedProjectIndex = max(highlightedProjectIndex - 1, 0)
+                        projectScrollTarget = highlightedProjectIndex
                         return .handled
                     }
                     .onKeyPress(.return) {
@@ -281,7 +292,43 @@ struct TaskCreationView: View {
         }
     }
 
+    /// Scrolls once the matches outgrow `maxHeight`; below that it hugs its
+    /// rows (measured into `projectDropdownContentHeight`) instead of letting
+    /// the greedy `ScrollView` claim the full height, which would otherwise
+    /// push or overlap the fields beneath it.
     private var projectDropdown: some View {
+        let maxHeight: CGFloat = 220
+        return ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                projectDropdownRows
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: DropdownHeightKey.self, value: geometry.size.height)
+                        }
+                    )
+            }
+            .scrollIndicators(.automatic)
+            .onPreferenceChange(DropdownHeightKey.self) { projectDropdownContentHeight = $0 }
+            .onChange(of: projectScrollTarget) { _, target in
+                guard let target else { return }
+                proxy.scrollTo(target)
+                projectScrollTarget = nil
+            }
+            .onChange(of: projectQuery) { _, _ in proxy.scrollTo(0, anchor: .top) }
+        }
+        .frame(height: min(max(projectDropdownContentHeight, 1), maxHeight))
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(theme.palette.surfaceBackground)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(theme.palette.separator, lineWidth: 1)
+        )
+    }
+
+    private var projectDropdownRows: some View {
         VStack(alignment: .leading, spacing: 0) {
             if projectMatches.isEmpty {
                 Text("No matching projects")
@@ -320,6 +367,7 @@ struct TaskCreationView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .id(index)
                     .onHover { hovering in
                         if hovering { highlightedProjectIndex = index }
                     }
@@ -329,15 +377,6 @@ struct TaskCreationView: View {
             }
         }
         .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(theme.palette.surfaceBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(theme.palette.separator, lineWidth: 1)
-        )
-        .frame(maxHeight: 180)
     }
 
     private func chooseProject(_ candidate: Project) {
@@ -647,5 +686,12 @@ private extension View {
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DropdownHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
