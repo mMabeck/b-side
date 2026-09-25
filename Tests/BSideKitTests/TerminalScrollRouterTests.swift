@@ -40,19 +40,19 @@ struct TerminalScrollRouterTests {
         #expect(!TerminalScrollRouter.route(event))
     }
 
-    @Test func mapsMomentumPhases() {
-        #expect(TerminalScrollRouter.momentum(for: .began) == .began)
-        #expect(TerminalScrollRouter.momentum(for: .changed) == .changed)
-        #expect(TerminalScrollRouter.momentum(for: .stationary) == .stationary)
-        #expect(TerminalScrollRouter.momentum(for: []) == .none)
+    @Test func mapsMomentumPhasesLikeGhosttyApp() {
+        let expected: [(NSEvent.Phase, Int32)] = [
+            ([], 0), (.began, 1), (.stationary, 2), (.changed, 3),
+            (.ended, 4), (.cancelled, 5), (.mayBegin, 6),
+        ]
+        for (phase, value) in expected {
+            #expect(TerminalScrollRouter.momentum(for: phase) == value)
+        }
     }
 
-    /// `TerminalScrollModifiers.Momentum` has no cases for these phases
-    /// (see the doc comment on `momentum(for:)`), so they collapse to
-    /// `.none` just like the package's own `momentumFrom` does.
-    @Test func collapsesUnrepresentablePhasesToNone() {
-        #expect(TerminalScrollRouter.momentum(for: .ended) == .none)
-        #expect(TerminalScrollRouter.momentum(for: .cancelled) == .none)
-        #expect(TerminalScrollRouter.momentum(for: .mayBegin) == .none)
+    @Test func packsPrecisionAndMomentumLikeGhosttyScrollMods() {
+        #expect(TerminalScrollRouter.scrollMods(precise: true, phase: []).rawValue == 0b0001)
+        #expect(TerminalScrollRouter.scrollMods(precise: true, phase: .ended).rawValue == 0b1001)
+        #expect(TerminalScrollRouter.scrollMods(precise: false, phase: .mayBegin).rawValue == 0b1100)
     }
 }

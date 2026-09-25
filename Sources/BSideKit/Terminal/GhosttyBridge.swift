@@ -799,35 +799,33 @@ public enum TerminalScrollRouter {
         terminal.sendMouseScroll(
             x: event.scrollingDeltaX * preciseMultiplier,
             y: event.scrollingDeltaY * preciseMultiplier,
-            mods: TerminalScrollModifiers(precision: true, momentum: momentum(for: event.momentumPhase))
+            mods: scrollMods(precise: true, phase: event.momentumPhase)
         )
         return true
     }
 
-    /// Mirrors the package's internal `TerminalScrollModifiers.momentumFrom`.
-    ///
-    /// Ghostty.app's own `Ghostty.Input.Momentum` also maps `.ended`,
-    /// `.cancelled`, and `.mayBegin` to dedicated `GHOSTTY_MOUSE_MOMENTUM_*`
-    /// cases, but `libghostty-spm`'s `TerminalScrollModifiers` — the only
-    /// path `sendMouseScroll` exposes to callers outside
-    /// `Terminal/GhosttyBridge.swift` — packs momentum into just 2 bits
-    /// (`momentum.rawValue << 1`, decoded with `& 0x3`) and its `Momentum`
-    /// enum only declares `none`/`began`/`stationary`/`changed`. The
-    /// `GhosttyKit.xcframework` header confirms `ghostty_input_mouse_momentum_e`
-    /// has all seven upstream cases but, per its own comment, says only that
-    /// `ghostty_input_scroll_mods_t` is "a packed struct … built up from
-    /// scratch" without stating its bit width — the packing lives in
-    /// vendored Zig source this checkout doesn't carry. Constructing a raw
-    /// `TerminalScrollModifiers(rawValue:)` with `ended`/`cancelled`/`mayBegin`
-    /// shifted into bit 1 would collide with whatever the real Zig struct
-    /// places past the 2 bits this package already claims, with no way to
-    /// verify safety from here. So this mirrors the package's mapping
-    /// exactly, collapsing those three phases to `.none` like it does.
-    static func momentum(for phase: NSEvent.Phase) -> TerminalScrollModifiers.Momentum {
-        if phase.contains(.began) { return .began }
-        if phase.contains(.stationary) { return .stationary }
-        if phase.contains(.changed) { return .changed }
-        return .none
+    /// Ghostty's momentum value for `phase`, mapped exactly as Ghostty.app's
+    /// `Ghostty.Input.Momentum` does. The package's own
+    /// `TerminalScrollModifiers.Momentum` stops at `.changed`, collapsing
+    /// `.ended`/`.cancelled`/`.mayBegin` to none, so the full set is built
+    /// here and packed by `scrollMods(precise:phase:)`. Values are
+    /// Ghostty's `input.mouse.Momentum` (`enum(u3)` in `src/input/mouse.zig`).
+    static func momentum(for phase: NSEvent.Phase) -> Int32 {
+        switch phase {
+        case .began: 1
+        case .stationary: 2
+        case .changed: 3
+        case .ended: 4
+        case .cancelled: 5
+        case .mayBegin: 6
+        default: 0
+        }
+    }
+
+    /// Ghostty's `ScrollMods` `packed struct(u8)`: bit 0 `precision`, bits
+    /// 1–3 `momentum`, rest padding.
+    static func scrollMods(precise: Bool, phase: NSEvent.Phase) -> TerminalScrollModifiers {
+        TerminalScrollModifiers(rawValue: (precise ? 1 : 0) | momentum(for: phase) << 1)
     }
 
     private static func terminalView(under event: NSEvent) -> TerminalView? {
