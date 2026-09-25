@@ -228,11 +228,11 @@ public enum TaskWorktreeService {
 
         let copied = try await copyIgnoredFiles(from: projectURL, to: worktreeURL)
 
+        let startCommit = await GitCLI.resolveCommit(branchName, at: projectURL)
+
         if let setupCommand, !setupCommand.trimmingCharacters(in: .whitespaces).isEmpty {
             try await runCommand(setupCommand, in: worktreeURL, onOutput: onOutput)
         }
-
-        let startCommit = await GitCLI.resolveCommit(branchName, at: projectURL)
 
         return WorktreeSetupResult(
             branchName: branchName,

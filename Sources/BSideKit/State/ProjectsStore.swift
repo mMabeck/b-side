@@ -542,13 +542,14 @@ public final class ProjectsStore {
     ) async throws {
         guard let id = project.id else { return }
         try await database.dbQueue.write { db in
-            var updated = project
-            if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {
-                updated.baseRef = baseRef
+            guard var current = try Project.fetchOne(db, key: id) else { return }
+            try current.updateChanges(db) { row in
+                if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {
+                    row.baseRef = baseRef
+                }
+                row.lastUseWorktree = useWorktree
+                row.lastTaskCreationMode = mode.rawValue
             }
-            updated.lastUseWorktree = useWorktree
-            updated.lastTaskCreationMode = mode.rawValue
-            try updated.update(db)
         }
         if let index = projects.firstIndex(where: { $0.id == id }) {
             if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {

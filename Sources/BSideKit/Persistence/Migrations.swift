@@ -61,15 +61,16 @@ enum Migrations {
         // Task sheet: worktree toggle, new-branch/existing-branch mode) so
         // reopening the sheet preselects them instead of always resetting to
         // the project config defaults.
-        migrator.registerMigration("v4_project_last_task_creation_choices") { db in            try db.alter(table: "project") { t in
+        migrator.registerMigration("v4_project_last_task_creation_choices") { db in
+            try db.alter(table: "project") { t in
                 t.add(column: "lastUseWorktree", .boolean)
                 t.add(column: "lastTaskCreationMode", .text)
             }
         }
 
-        // Added so `GitCLI.isMerged` can tell a branch that has gained no
-        // commits since the task started from one genuinely merged into its
-        // base (see `GitCLI+Sync.swift`).
+        // Added so `TaskWorktreeService.syncStatus`/`isBranchMerged` can tell
+        // a branch that has gained no commits since the task started from
+        // one genuinely merged into its base.
         migrator.registerMigration("v5_task_start_commit") { db in
             try db.alter(table: "task") { t in
                 t.add(column: "startCommit", .text)

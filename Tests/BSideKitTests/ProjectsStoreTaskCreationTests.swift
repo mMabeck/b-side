@@ -70,6 +70,48 @@ struct ProjectsStoreTaskCreationTests {
         #expect(store.projects.first?.lastTaskCreationMode == TaskCreationMode.newBranch.rawValue)
     }
 
+    @Test("rememberTaskCreationChoices survives a concurrent displayName change")
+    func rememberTaskCreationChoicesSurvivesConcurrentRename() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        // A stale copy of the project, as `rememberTaskCreationChoices`'s
+        // caller would hold if a rename lands after the copy was read.
+        let staleProject = try #require(store.projects.first)
+        guard let id = staleProject.id else {
+            Issue.record("expected an id")
+            return
+        }
+
+        try await database.dbQueue.write { db in
+            var renamed = try #require(try Project.fetchOne(db, key: id))
+            renamed.displayName = "Renamed Concurrently"
+            try renamed.update(db)
+        }
+
+        try await store.rememberTaskCreationChoices(
+            project: staleProject,
+            baseRef: "develop",
+            useWorktree: false,
+            mode: .existingBranch
+        )
+
+        let persisted = try await database.dbQueue.read { db in
+            try Project.fetchOne(db, key: id)
+        }
+        #expect(persisted?.displayName == "Renamed Concurrently")
+        #expect(persisted?.baseRef == "develop")
+        #expect(persisted?.lastUseWorktree == false)
+        #expect(persisted?.lastTaskCreationMode == TaskCreationMode.existingBranch.rawValue)
+    }
+
     @Test("createTask(useWorktree: false) runs the task in the project directory with no worktree created")
     func createTaskWithoutWorktreeStaysInPlace() async throws {
         let root = try TestRepo.makeTempDirectory()
