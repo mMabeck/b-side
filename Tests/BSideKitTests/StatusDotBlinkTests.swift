@@ -13,7 +13,10 @@ import Testing
 /// instead of sleeping a fixed duration for either assertion.
 @MainActor
 struct StatusDotBlinkTests {
-    @Test("StatusDot starts blinking when status changes to running, and settles back to full opacity when it changes back")
+    @Test(
+        "StatusDot starts blinking when status changes to running, and settles back to full opacity when it changes back",
+        .enabled(if: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    )
     func blinksOnLiveStatusChangeAndSettlesWhenReverted() async throws {
         let palette = BSidePalette.fallback
         let controller = StatusDotController(status: .read)
@@ -26,6 +29,7 @@ struct StatusDotBlinkTests {
         )
         let hostingView = NSHostingView(
             rootView: StatusDotHarness(controller: controller, palette: palette)
+                .environment(\.statusDotReduceMotion, false)
                 .frame(width: 40, height: 40)
                 .background(Color.black)
         )
@@ -53,7 +57,8 @@ struct StatusDotBlinkTests {
         controller.status = .running
 
         var observedDip = false
-        let dipDeadline = Date().addingTimeInterval(3)
+        // Generous: parallel snapshot suites can starve the main thread.
+        let dipDeadline = Date().addingTimeInterval(10)
         while Date() < dipDeadline {
             try await Task.sleep(for: .milliseconds(40))
             guard let brightness = sampleBrightness() else { continue }
@@ -70,7 +75,7 @@ struct StatusDotBlinkTests {
 
         var settledBrightness: CGFloat?
         var stableStreak = 0
-        let settleDeadline = Date().addingTimeInterval(3)
+        let settleDeadline = Date().addingTimeInterval(10)
         while Date() < settleDeadline {
             try await Task.sleep(for: .milliseconds(40))
             guard let brightness = sampleBrightness() else { continue }

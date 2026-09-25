@@ -114,7 +114,7 @@ public enum TaskRowLayout {
 
 /// A task's status dot: a themed, fixed-diameter circle that blinks while
 /// `.running` and reads out its status to VoiceOver. Blinking uses local
-/// view state animated in `onAppear` rather than a store-driven timer, since
+/// view state animated from `onChange(of: shouldBlink, initial: true)` rather than a store-driven timer, since
 /// nothing about a running task's *data* changes once a second — only its
 /// dot's opacity does. Solid (no animation) under Reduce Motion, which
 /// snapshot tests also use to get a deterministic, fully-opaque capture.
