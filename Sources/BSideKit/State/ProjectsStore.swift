@@ -61,17 +61,26 @@ public final class ProjectsStore {
         bumpTaskActivity(taskId)
     }
 
-    /// Clears `taskId`'s busy flag — called for `POST .../idle`, and also
-    /// whenever the task's Pi process/PTY exits, is archived, or is deleted,
-    /// so a task can never get stuck reading "running" after the loop that
-    /// reported itself busy has gone away. Idempotent. Bumps the task's
-    /// recency only for a genuine busy→idle transition (the id was actually
-    /// tracked), not a redundant clear of a task that was already idle.
+    /// Clears `taskId`'s busy flag for a genuine `POST .../idle` report from
+    /// the agent loop. Idempotent. Bumps the task's recency only for a
+    /// genuine busy→idle transition (the id was actually tracked), not a
+    /// redundant clear of a task that was already idle.
     public func clearTaskBusy(_ taskId: Int64) {
         let wasBusy = busyTaskIDs.remove(taskId) != nil
         if wasBusy {
             bumpTaskActivity(taskId)
         }
+    }
+
+    /// Clears `taskId`'s busy flag for teardown — the task's Pi process/PTY
+    /// exits, its terminal is closed, its host is purged, or it's archived
+    /// or deleted — so it can never get stuck reading "running" after the
+    /// loop that reported itself busy has gone away. Unlike `clearTaskBusy`,
+    /// never bumps recency: closing/exiting/purging a task isn't a user
+    /// activity signal and must not reorder the project's task list.
+    /// Idempotent.
+    public func dropTaskBusy(_ taskId: Int64) {
+        busyTaskIDs.remove(taskId)
     }
 
     /// Last time a terminal alert was accepted (post-debounce) for a task,
@@ -785,7 +794,7 @@ public final class ProjectsStore {
             try updated.update(db)
         }
         if let id = task.id {
-            clearTaskBusy(id)
+            dropTaskBusy(id)
         }
     }
 
@@ -810,7 +819,7 @@ public final class ProjectsStore {
         try await database.dbQueue.write { db in
             _ = try TaskRecord.deleteOne(db, key: id)
         }
-        clearTaskBusy(id)
+        dropTaskBusy(id)
     }
 
     // MARK: - Pi conversations

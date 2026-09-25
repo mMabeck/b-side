@@ -240,7 +240,7 @@ struct MainAreaView: View {
             // behind for this to mark exited).
             onExit: { [exitedBinding, store] _ in
                 exitedBinding.wrappedValue = MainAreaView.exitedTaskIDs(afterExit: id, current: exitedBinding.wrappedValue)
-                store.clearTaskBusy(id)
+                store.dropTaskBusy(id)
             }
         )
         store.noteTerminalOpened(taskID: id)
@@ -473,7 +473,7 @@ struct MainAreaView: View {
         store.subagentSwap.closeAll(taskId: taskID)
         store.subagentStripBatches.reset(taskId: taskID)
         exitedTaskIDs.remove(taskID)
-        store.clearTaskBusy(taskID)
+        store.dropTaskBusy(taskID)
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
@@ -485,7 +485,7 @@ struct MainAreaView: View {
             store.subagentSwap.closeAll(taskId: id)
             store.subagentStripBatches.reset(taskId: id)
             exitedTaskIDs.remove(id)
-            store.clearTaskBusy(id)
+            store.dropTaskBusy(id)
         }
         store.pruneOpenTerminals(removing: purged)
         conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)
