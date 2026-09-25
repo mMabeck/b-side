@@ -18,6 +18,7 @@ struct MigrationTests {
             "v3_task_awaiting_auto_rename",
             "v4_task_base_commit",
             "v5_project_last_task_creation_choices",
+            "v6_task_last_activity_at",
         ])
         try migrator.migrate(dbQueue)
 
@@ -28,6 +29,7 @@ struct MigrationTests {
             try #expect(db.columns(in: "project").map(\.name).contains("lastUseWorktree"))
             try #expect(db.columns(in: "project").map(\.name).contains("lastTaskCreationMode"))
             try #expect(db.columns(in: "task").map(\.name).contains("baseCommit"))
+            try #expect(db.columns(in: "task").map(\.name).contains("lastActivityAt"))
         }
     }
 
@@ -43,7 +45,7 @@ struct MigrationTests {
         let appliedCount = try dbQueue.read { db in
             try migrator.appliedMigrations(db).count
         }
-        #expect(appliedCount == 5)
+        #expect(appliedCount == 6)
     }
 
     @Test("v5 is idempotent when the project columns were already added under an old migration name")
