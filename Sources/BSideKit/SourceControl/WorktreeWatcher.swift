@@ -23,6 +23,7 @@ final class WorktreeWatcher {
 
     nonisolated(unsafe) private var workTreeStream: FSEventStreamRef?
     nonisolated(unsafe) private var gitDirStream: FSEventStreamRef?
+    nonisolated(unsafe) private var commonGitDirStream: FSEventStreamRef?
     private var debounceWorkItem: DispatchWorkItem?
 
     init(worktreeURL: URL, debounceInterval: TimeInterval = 0.3, onChange: @escaping () -> Void) {
@@ -42,6 +43,11 @@ final class WorktreeWatcher {
             FSEventStreamInvalidate(gitDirStream)
             FSEventStreamRelease(gitDirStream)
         }
+        if let commonGitDirStream {
+            FSEventStreamStop(commonGitDirStream)
+            FSEventStreamInvalidate(commonGitDirStream)
+            FSEventStreamRelease(commonGitDirStream)
+        }
     }
 
     func start() {
@@ -58,10 +64,28 @@ final class WorktreeWatcher {
             }
         }
 
-        if let gitDir = Self.resolveGitDir(forWorktree: worktreeURL) {
+        let gitDir = Self.resolveGitDir(forWorktree: worktreeURL)
+        if let gitDir {
             gitDirStream = Self.makeStream(paths: [gitDir.standardizedFileURL.path], latency: 0.2) { [weak self] paths in
                 MainActor.assumeIsolated {
                     let relevant = paths.contains { Self.isRelevantGitDirPath($0) }
+                    guard relevant else { return }
+                    self?.scheduleRefresh()
+                }
+            }
+        }
+
+        // For a linked worktree, `refs/heads`, `refs/remotes`, and
+        // `packed-refs` live in the *common* git dir shared by every worktree
+        // — not in `gitDir` above, which is this worktree's private
+        // `worktrees/<name>/` directory (HEAD, index, per-worktree refs).
+        // Without this, a commit or fetch made from a terminal in this
+        // worktree never updates `refs/heads/<branch>` where `gitDirStream`
+        // is looking, and the sidebar never refreshes.
+        if let gitDir, let commonGitDir = Self.resolveCommonGitDir(forGitDir: gitDir), commonGitDir != gitDir {
+            commonGitDirStream = Self.makeStream(paths: [commonGitDir.standardizedFileURL.path], latency: 0.2) { [weak self] paths in
+                MainActor.assumeIsolated {
+                    let relevant = paths.contains { Self.isRelevantCommonGitDirPath($0) }
                     guard relevant else { return }
                     self?.scheduleRefresh()
                 }
@@ -82,6 +106,12 @@ final class WorktreeWatcher {
             FSEventStreamRelease(gitDirStream)
             self.gitDirStream = nil
         }
+        if let commonGitDirStream {
+            FSEventStreamStop(commonGitDirStream)
+            FSEventStreamInvalidate(commonGitDirStream)
+            FSEventStreamRelease(commonGitDirStream)
+            self.commonGitDirStream = nil
+        }
         debounceWorkItem?.cancel()
         debounceWorkItem = nil
     }
@@ -100,6 +130,36 @@ final class WorktreeWatcher {
         let name = (path as NSString).lastPathComponent
         if name == "index" || name == "HEAD" { return true }
         return path.contains("/refs/") || path.hasSuffix("/refs")
+    }
+
+    /// In the *common* git dir (shared across worktrees), only branch and
+    /// remote-tracking refs matter to the sidebar — not e.g. `refs/stash` or
+    /// `refs/bisect`, and not the many non-ref files there (`config`,
+    /// `hooks/`, `objects/`, ...).
+    private static func isRelevantCommonGitDirPath(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        if name == "packed-refs" { return true }
+        return path.contains("/refs/heads/") || path.hasSuffix("/refs/heads")
+            || path.contains("/refs/remotes/") || path.hasSuffix("/refs/remotes")
+    }
+
+    /// Resolves the common git dir shared by every worktree of a repository,
+    /// given `gitDir` (a worktree's own, possibly private, git directory) —
+    /// the analogue of `git rev-parse --git-common-dir`, without shelling out.
+    /// A linked worktree's git dir has a `commondir` file with a path (usually
+    /// `../..`) relative to itself pointing at the shared dir; a non-linked
+    /// git dir (the main checkout) has none and *is* the common dir.
+    static func resolveCommonGitDir(forGitDir gitDir: URL) -> URL? {
+        let commondirFile = gitDir.appendingPathComponent("commondir")
+        guard let contents = try? String(contentsOf: commondirFile, encoding: .utf8) else {
+            return gitDir
+        }
+        let rawPath = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawPath.isEmpty else { return gitDir }
+        let resolved = rawPath.hasPrefix("/")
+            ? URL(fileURLWithPath: rawPath)
+            : gitDir.appendingPathComponent(rawPath)
+        return resolved.standardizedFileURL
     }
 
     /// Resolves the real git directory for `worktreeURL`. For a linked
@@ -141,10 +201,18 @@ final class WorktreeWatcher {
             init(_ callback: @escaping ([String]) -> Void) { self.callback = callback }
         }
 
+        // `info` is handed to `FSEventStreamCreate` unretained: the `retain`
+        // callback below is what gives the stream its own +1 when the
+        // context is copied. Using `passRetained` here as well double-counted
+        // the retain (one from here, one from the framework's own `retain`
+        // call), so `release` — called once, on `FSEventStreamInvalidate`/
+        // deinit — only ever brought the count back to 1, leaking `box` (and
+        // its captured `callback`, and whatever it in turn captures) for the
+        // life of the process.
         let box = CallbackBox(callback)
         var context = FSEventStreamContext(
             version: 0,
-            info: Unmanaged.passRetained(box).toOpaque(),
+            info: Unmanaged.passUnretained(box).toOpaque(),
             retain: { info in
                 guard let info else { return nil }
                 _ = Unmanaged<CallbackBox>.fromOpaque(info).retain()
