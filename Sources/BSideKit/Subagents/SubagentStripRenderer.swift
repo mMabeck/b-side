@@ -12,7 +12,6 @@ import Foundation
 ///     │ → search "cacheKey"           │ ║ → read src/net/client.ts     ║
 ///     │ → read src/cache/store.ts     │ ║                              ║
 ///     │                                │ ║                              ║
-///     │                                │ ║                              ║
 ///     │ ⠙ working  18s                 │ ║ ! waiting for you  4s        ║
 ///     └────────────────────────────────┘ ╚══════════════════════════════╝
 ///
@@ -20,7 +19,7 @@ import Foundation
 /// draws with a double-line border instead of the accent single line, so
 /// which surface is live is legible from the strip alone.
 public enum SubagentStripRenderer {
-    /// Fixed body-row budget: 4 tool-call lines plus a status row, framed by
+    /// Fixed body-row budget: 3 tool-call lines plus a status row, framed by
     /// a top and bottom border — 6 rows per card, plus the label/rule row
     /// below. `GhosttyBridge`'s strip host turns this into a point height
     /// using the surface's own cell metrics.
@@ -73,7 +72,6 @@ public enum SubagentStripRenderer {
         static let yellow = "\u{1B}[33m"
         static let red = "\u{1B}[31m"
         static let brightBlack = "\u{1B}[90m"
-        static let reverse = "\u{1B}[7m"
     }
 
     public static func render(runs: [ChildRun], viewedChildId: String?, columns: Int, now: Date) -> Result {
@@ -81,9 +79,8 @@ public enum SubagentStripRenderer {
             return Result(lines: [], slots: [], mainHintRange: nil)
         }
 
-        // Too narrow for even one card: rendering at `minCardWidth` anyway
-        // (the old behavior) produced lines wider than the surface's real
-        // column count, which Ghostty then wrapped onto an extra row —
+        // Too narrow for even one card: cards need `minCardWidth` columns,
+        // and anything wider than the surface would wrap onto an extra row —
         // clamp to just the label row instead, which already fits `columns`
         // exactly via `fit()`.
         guard columns >= minCardWidth else {
@@ -96,14 +93,13 @@ public enum SubagentStripRenderer {
             )
         }
 
-        let widthBudget = max(columns, minCardWidth)
-        let maxCards = max(1, (widthBudget + columnGap) / (minCardWidth + columnGap))
+        let maxCards = max(1, (columns + columnGap) / (minCardWidth + columnGap))
         let shown = Array(runs.prefix(maxCards))
         let hiddenCount = runs.count - shown.count
 
         // Equal width: split the available columns evenly, minimum enforced.
         let totalGaps = columnGap * (shown.count - 1)
-        let cardWidth = max(minCardWidth, (widthBudget - totalGaps) / max(shown.count, 1))
+        let cardWidth = max(minCardWidth, (columns - totalGaps) / max(shown.count, 1))
 
         var cardLines: [[String]] = []
         var slots: [CardSlot] = []

@@ -3,9 +3,8 @@ import SwiftUI
 /// One task's terminal area: the subagent card strip (only while the task
 /// has runs to show), above exactly one live surface — the parent's
 /// `TerminalHostView`, or one child's, per `ProjectsStore.subagentSwap`.
-/// Native splits were removed (they crashed the app during an AppKit
-/// `updateConstraints` pass — see native-rewrite.md); this is a plain
-/// `VStack`/`ZStack`, never an `HSplitView`/`VSplitView`.
+/// Deliberately a plain `VStack`/`ZStack`, never `HSplitView`/`VSplitView`
+/// (AppKit `updateConstraints` crash — native-rewrite.md).
 ///
 /// Every surface — parent and every live child pane — stays mounted in the
 /// `ZStack` at all times; only the shown one is visible (opacity/hit-testing

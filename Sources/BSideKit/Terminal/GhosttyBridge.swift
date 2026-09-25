@@ -617,9 +617,8 @@ extension TerminalSurfaceHost {
     /// A `TerminalSurfaceHost` backed by an in-memory session instead of a
     /// real pty/exec surface — for tests that need to create several panes
     /// at once (`SubagentPaneStoreTests`, `SubagentEventServerTests`) without
-    /// each one spawning a real Ghostty exec surface, which is what made
-    /// `swift test` segfault inside libghostty's config finalization when
-    /// several were spawned back-to-back.
+    /// each one spawning a real Ghostty exec surface: spawning many real
+    /// exec surfaces back-to-back crashes libghostty under `swift test`.
     static func makeInMemoryForTesting() -> TerminalSurfaceHost {
         TerminalSurfaceHost(inMemorySession: InMemoryTerminalSession(write: { _ in }, resize: { _ in }))
     }

@@ -1,24 +1,18 @@
 import Foundation
 
-/// Native split-pane state for subagent children (native-rewrite.md
-/// §"The chosen design: native splits, plus cards"): owns the actual
-/// `TerminalSurfaceHost` for each child's live libghostty surface, keyed by
-/// the task that spawned it. `SubagentFeedStore` is the presentation-free
-/// event feed both this store and the Subagents tab's cards read from; this
-/// store is the live-surface counterpart — panes and cards are two
-/// renderings of one feed, not two mechanisms.
+/// Owns each child's live `TerminalSurfaceHost` surface, keyed by the task
+/// that spawned it.
 ///
-/// Ordered per task, oldest first, so layout is deterministic top to bottom
-/// regardless of dictionary iteration order.
+/// Ordered per task, oldest first — the order the strip and the swap
+/// shortcuts use.
 @MainActor
 @Observable
 public final class SubagentPaneStore {
     /// Cap on live panes per task before the spawner is told to fall back to
     /// headless (card only) for extra children. The task's main area only
-    /// ever shows one surface at a time now (swap, not a split), so this
-    /// cap is about how many child surfaces stay mounted — memory/pty cost,
-    /// not screen space — which is why it can sit higher than the old
-    /// split-pane limit.
+    /// ever shows one surface at a time (swap, not a split), so this cap is
+    /// about how many child surfaces stay mounted — memory/pty cost, not
+    /// screen space.
     public static let maxPanesPerTask = 4
 
     public struct ChildPane: Identifiable, Sendable {
@@ -40,8 +34,7 @@ public final class SubagentPaneStore {
     /// callers get the production closure below (a real pty/Ghostty exec
     /// surface); tests inject `TerminalSurfaceHost.makeInMemoryForTesting()`
     /// instead, since spawning many real exec surfaces back-to-back (as the
-    /// cap tests do) is what made `swift test` segfault inside libghostty's
-    /// config finalization.
+    /// cap tests do) crashes libghostty under `swift test`.
     private let makeHost: (URL, String, @escaping (Bool) -> Void) -> TerminalSurfaceHost
 
     public init() {
@@ -100,7 +93,7 @@ public final class SubagentPaneStore {
     /// Removes every pane for `taskId` at once — used when the task's own
     /// terminal closes (`MainAreaView.closeHost`) or the task itself goes
     /// away (`MainAreaView.purgeHosts`), since a child pane never outlives
-    /// the parent terminal it's split beside.
+    /// the parent terminal it belongs to.
     public func closeAll(taskId: Int64) {
         guard panesByTask.removeValue(forKey: taskId) != nil else { return }
         version += 1

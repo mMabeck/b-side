@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Right sidebar: Source Control. The Subagents tab was removed — subagent
-/// activity now renders as a card strip inside each task's own terminal area
-/// (see `SubagentStripView`), not as a separate sidebar surface.
+/// Right sidebar: Source Control (subagent activity lives in each task's
+/// `SubagentStripView`).
 struct RightSidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared

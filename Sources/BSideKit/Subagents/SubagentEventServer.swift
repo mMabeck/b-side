@@ -13,12 +13,12 @@ import OSLog
 /// - `POST /subagents/{taskId}/{childId}/events` — body one or more `\n`-terminated JSON event lines
 /// - `POST /subagents/{taskId}/{childId}/done` — body the `done.json` payload
 /// - `POST /subagents/{taskId}/{childId}/spawn` — body `{"label","cwd","command"}`;
-///   opens a native split pane running `command` (an absolute path to an
-///   executable launch script, run directly — not wrapped in a login
-///   shell) in `cwd`. `204` once the surface is created; `404` if `taskId`
-///   is unknown; `429` if the task is already at `SubagentPaneStore
-///   .maxPanesPerTask` (the caller should fall back to headless); `400` for
-///   a malformed body.
+///   creates a child surface (hidden until swapped in) running `command`
+///   (an absolute path to an executable launch script, run directly — not
+///   wrapped in a login shell) in `cwd`. `204` once the surface is created;
+///   `404` if `taskId` is unknown; `429` if the task is already at
+///   `SubagentPaneStore.maxPanesPerTask` (the caller should fall back to
+///   headless); `400` for a malformed body.
 /// - `POST /subagents/{taskId}/{childId}/close` — empty body; tears down
 ///   that child's pane. Always `204`, idempotent.
 ///
@@ -27,6 +27,7 @@ import OSLog
 /// `begin`/`events`/`done`, which respond immediately and mutate `store`
 /// asynchronously — the caller needs to know a `spawn` actually produced a
 /// surface (or why not) before it decides whether to fall back to headless.
+
 /// Guards a resume-once flag shared between the listener's state-update
 /// closure and the enclosing continuation, since NWListener may deliver
 /// state updates from an arbitrary queue.
