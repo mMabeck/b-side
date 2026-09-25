@@ -156,6 +156,33 @@ struct BSidePaletteTests {
         #expect(hue >= 120 && hue <= 135)
     }
 
+    // MARK: - Status dot colours
+
+    @Test("statusRunning, statusNeedsAttention, and statusUnread land in distinct hue families for a themed palette")
+    func statusDotColorsAreDistinctHues() throws {
+        let ayuMirage = try #require(GhosttyThemeCatalog.theme(named: "Ayu Mirage"))
+        let palette = BSidePalette.themed(from: ayuMirage)
+
+        let running = rgbColor(from: palette.statusRunning).hsl.hue
+        let question = rgbColor(from: palette.statusNeedsAttention).hsl.hue
+        let unread = rgbColor(from: palette.statusUnread).hsl.hue
+
+        // Running: amber/yellow.
+        #expect(running >= 30 && running <= 70)
+        // Question: orange-red, blended toward yellow but still red-leaning.
+        #expect(question >= 0 && question <= 40)
+        // Unread: blue.
+        #expect(unread >= 190 && unread <= 260)
+    }
+
+    @Test("The fallback palette gives running, question, and unread distinct colours")
+    func fallbackStatusDotColorsAreDistinct() {
+        let palette = BSidePalette.fallback
+        #expect(palette.statusRunning != palette.statusUnread)
+        #expect(palette.statusRunning != palette.statusNeedsAttention)
+        #expect(palette.statusNeedsAttention != palette.statusUnread)
+    }
+
     // MARK: - Contrast-guarantee helper
 
     @Test("ensuringContrast leaves a colour untouched once it already clears the minimum ratio")

@@ -34,6 +34,7 @@ struct SidebarView: View {
                             ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
                                     .listRowInsets(Self.rowInsets)
+                                    .listRowSeparator(.hidden)
                             }
                         } header: {
                             Text("Active")
@@ -73,16 +74,19 @@ struct SidebarView: View {
                                     .padding(.leading, Self.taskLeadingIndent + TaskRowLayout.statusDotColumnWidth + 6)
                                     .padding(.vertical, 6)
                                     .listRowInsets(Self.rowInsets)
+                                    .listRowSeparator(.hidden)
                                     .listRowBackground(theme.palette.surfaceBackground)
                             } else {
                                 ForEach(tasks) { task in
                                     taskRow(task, project: project)
                                         .listRowInsets(Self.rowInsets)
+                                        .listRowSeparator(.hidden)
                                 }
                             }
                         } header: {
                             projectRow(project, taskCount: tasks.count)
                                 .listRowInsets(Self.rowInsets)
+                                .listRowSeparator(.hidden)
                         }
                     }
                 }
@@ -170,10 +174,11 @@ struct SidebarView: View {
         let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
         let syncStatus = task.id.flatMap { store.syncStatusByTask[$0] }
         let status = TaskStatus.derive(
-            merged: syncStatus?.merged ?? false,
             isBlocked: summary.isBlocked,
             isVanished: isVanished,
             activeChildCount: summary.activeCount,
+            isOpen: task.id.map(store.openTerminalTaskIDs.contains) ?? false,
+            isUnread: task.id.map(store.unreadTaskIDs.contains) ?? false,
             needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
             busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
@@ -203,10 +208,8 @@ struct SidebarView: View {
             store.selectTask(task, project: project)
         } label: {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(info.status.color(in: theme.palette))
-                    .frame(width: TaskRowLayout.statusDotDiameter, height: TaskRowLayout.statusDotDiameter)
-                    .frame(width: TaskRowLayout.statusDotColumnWidth, alignment: .center)
+                StatusDot(status: info.status, palette: theme.palette)
+                    .frame(width: TaskRowLayout.statusDotColumnWidth, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(task.name)
@@ -230,7 +233,8 @@ struct SidebarView: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.leading, Self.activeRowLeadingIndent)
+            .padding(.trailing, 8)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
@@ -321,25 +325,30 @@ struct SidebarView: View {
     private static let selectionBleed: CGFloat = 17
 
     /// The leading inset a task row sits at, aligned with where the project
-    /// title's text begins (`projectRow`'s own horizontal padding) so the
-    /// nesting reads visually, not just via `List`'s section indentation.
-    private static let taskLeadingIndent: CGFloat = 8
+    /// title's text begins. Measured against a snapshot capture (see
+    /// `SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`): a collapsible
+    /// `Section(isExpanded:)` header (`projectRow`) gets its own extra
+    /// leading indent from `.sidebar`'s built-in disclosure-chevron space,
+    /// which already covers part of `projectRow`'s own horizontal padding,
+    /// so this needed a smaller inset to land at the same x.
+    private static let taskLeadingIndent: CGFloat = 3
 
-    /// Where the vertical indent-guide line sits within that inset — drawn
-    /// manually per row (not as one tall shape spanning the section) because
-    /// `List` gives each row its own `NSHostingView`; stacking these
-    /// borderless per-row segments with no vertical gap between them is what
-    /// makes the line read as continuous down the whole task group.
-    private static let taskIndentGuideX: CGFloat = 3
+    /// The leading inset an "Active" section row sits at. Measured against a
+    /// snapshot capture (see `SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`):
+    /// `.sidebar`'s plain (non-collapsible) `Section` header applies its own
+    /// built-in leading inset to "ACTIVE" that differs from a `List` row's
+    /// own `listRowInsets` + padding, so this needed its own constant rather
+    /// than sharing `taskLeadingIndent`.
+    private static let activeRowLeadingIndent: CGFloat = -5
 
     /// A task row nested beneath its project. The leading status-dot column
     /// is reserved at a fixed width even when no dot is shown, so every
     /// title starts at the same x (`TaskRowLayout.statusDotColumnWidth`).
     /// The trailing edge carries the subagent child count/blocked indicator
     /// and the branch sync summary, in that order, quiet and compact. Smaller
-    /// and lighter than the project title above it, and indented beneath it
-    /// with a low-opacity guide line, so tasks read as the project's children
-    /// rather than its peers — a project is a container, never a terminal.
+    /// and lighter than the project title above it, and indented beneath it,
+    /// so tasks read as the project's children rather than its peers — a
+    /// project is a container, never a terminal.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let info = taskStatusInfo(for: task)
         let summary = info.summary
@@ -356,10 +365,8 @@ struct SidebarView: View {
             store.selectTask(task, project: project)
         } label: {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(status.color(in: theme.palette))
-                    .frame(width: TaskRowLayout.statusDotDiameter, height: TaskRowLayout.statusDotDiameter)
-                    .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .center)
+                StatusDot(status: status, palette: theme.palette)
+                    .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .leading)
 
                 Text(task.name)
                     .font(.system(size: 13, weight: .regular))
@@ -397,16 +404,6 @@ struct SidebarView: View {
             .padding(.vertical, 9)
             .contentShape(Rectangle())
             .background(selectionFill(isSelected: isSelected, in: theme.palette))
-            .overlay(alignment: .leading) {
-                // The indent guide: a thin low-opacity line at a fixed x within
-                // the leading inset, hidden on the selected row, where it
-                // would otherwise cut a dark line through the selection fill.
-                Rectangle()
-                    .fill(theme.palette.separator.opacity(0.5))
-                    .frame(width: 1)
-                    .padding(.leading, Self.taskIndentGuideX)
-                    .opacity(isSelected ? 0 : 1)
-            }
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)

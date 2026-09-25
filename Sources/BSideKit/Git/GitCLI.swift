@@ -58,11 +58,18 @@ public enum GitCLI {
     /// via readability handlers on a background queue and the continuation resumes
     /// from the termination handler.
     @discardableResult
-    static func run(_ arguments: [String], in directory: URL) async throws -> Data {
+    static func run(
+        _ arguments: [String],
+        in directory: URL,
+        allowedExitStatuses: Set<Int32> = []
+    ) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["git"] + arguments
+            // `--no-optional-locks` keeps read-only commands (status, diff, ...) from
+            // taking git's optional index lock, which otherwise rewrites `index` on
+            // every refresh and retriggers `WorktreeWatcher` in a loop.
+            process.arguments = ["git", "--no-optional-locks"] + arguments
             process.currentDirectoryURL = directory
 
             let stdout = Pipe()
@@ -108,7 +115,7 @@ public enum GitCLI {
             group.notify(queue: .global()) {
                 let outData = stdoutAccumulator.data
                 let errData = stderrAccumulator.data
-                if process.terminationStatus == 0 {
+                if process.terminationStatus == 0 || allowedExitStatuses.contains(process.terminationStatus) {
                     continuation.resume(returning: outData)
                 } else {
                     let errText = String(data: errData, encoding: .utf8) ?? ""

@@ -63,6 +63,7 @@ struct BSideApp: App {
             // window.
             WindowLayoutCommands()
             ProjectCommands(store: store)
+            EditorCommands(store: store)
             NavigationCommands(store: store)
             TerminalCommands(store: store)
             SubagentSwapCommands(store: store)

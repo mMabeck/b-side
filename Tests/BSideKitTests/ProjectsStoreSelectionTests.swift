@@ -300,4 +300,67 @@ struct ProjectsStoreSelectionTests {
         store.handleTerminalDesktopNotification(taskID: id, title: "Pi finished", body: "Ready for your next prompt.")
         #expect(!store.taskIDsNeedingAttention.contains(id))
     }
+
+    // MARK: - Unread tracking
+
+    @Test("Clearing busy for a task that was never busy does not mark it unread")
+    func clearingBusyWithNoTransitionDoesNotMarkUnread() async throws {
+        let (store, _, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+
+        store.clearTaskBusy(id)
+        #expect(!store.unreadTaskIDs.contains(id))
+    }
+
+    @Test("Selecting a task clears its unread flag")
+    func selectingTaskClearsUnread() async throws {
+        let (store, projectA, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+
+        store.setTaskBusy(id)
+        store.clearTaskBusy(id)
+        #expect(store.unreadTaskIDs.contains(id))
+
+        store.selectTask(taskA, project: projectA)
+        #expect(!store.unreadTaskIDs.contains(id))
+    }
+
+    @Test("Closing a task's terminal clears its unread flag")
+    func closingTerminalClearsUnread() async throws {
+        let (store, projectA, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+        store.noteTerminalOpened(taskID: id)
+
+        store.setTaskBusy(id)
+        store.clearTaskBusy(id)
+        #expect(store.unreadTaskIDs.contains(id))
+
+        store.closeTerminal(for: taskA, project: projectA)
+        #expect(!store.unreadTaskIDs.contains(id))
+    }
+
+    @Test("Archiving or deleting a task clears its unread flag")
+    func archivingAndDeletingClearsUnread() async throws {
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        store.playAlertSound = { _ in }
+        store.start()
+        try await waitUntil { true }
+
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        try await store.addProject(at: repoURL)
+        try await waitUntil { !store.projects.isEmpty }
+        let project = try #require(store.projects.first)
+
+        let task = try await store.createTask(project: project, name: "Task", useWorktree: false)
+        let id = try #require(task.id)
+        store.setTaskBusy(id)
+        store.clearTaskBusy(id)
+        #expect(store.unreadTaskIDs.contains(id))
+
+        try await store.archiveTask(task, project: project, removeWorktree: false)
+        #expect(!store.unreadTaskIDs.contains(id))
+    }
 }

@@ -53,6 +53,15 @@ public final class ProjectsStore {
     /// relaunched app has no live agent loop to be busy on behalf of.
     public private(set) var busyTaskIDs: Set<Int64> = []
 
+    /// Task ids open in a tab (`ProjectsStore.openTerminalTaskIDs`) with
+    /// output since they were last viewed — the sidebar's blue "unread" dot.
+    /// In-memory only. Inserted on a busy→idle transition (see
+    /// `clearTaskBusy`) unless the app is frontmost and this task is already
+    /// selected, cleared by `selectTask` and by app activation while
+    /// selected, and dropped once the task's terminal closes. A newly opened
+    /// task is never inserted here, so it starts out reading "read".
+    public private(set) var unreadTaskIDs: Set<Int64> = []
+
     /// Marks `taskId` busy. Idempotent, since `/agent/{taskId}/busy` may be
     /// repeated. Every call is a real "the user sent a message" event, so it
     /// also bumps the task's recency.
@@ -62,25 +71,39 @@ public final class ProjectsStore {
     }
 
     /// Clears `taskId`'s busy flag for a genuine `POST .../idle` report from
-    /// the agent loop. Idempotent. Bumps the task's recency only for a
-    /// genuine busy→idle transition (the id was actually tracked), not a
-    /// redundant clear of a task that was already idle.
+    /// the agent loop. Idempotent. A genuine busy→idle transition (the id was
+    /// actually tracked) bumps the task's recency and, per
+    /// `markIdle(_:)`, may mark it unread; a redundant clear does neither.
     public func clearTaskBusy(_ taskId: Int64) {
-        let wasBusy = busyTaskIDs.remove(taskId) != nil
-        if wasBusy {
+        if markIdle(taskId) {
             bumpTaskActivity(taskId)
         }
     }
 
     /// Clears `taskId`'s busy flag for teardown — the task's Pi process/PTY
-    /// exits, its terminal is closed, its host is purged, or it's archived
-    /// or deleted — so it can never get stuck reading "running" after the
-    /// loop that reported itself busy has gone away. Unlike `clearTaskBusy`,
-    /// never bumps recency: closing/exiting/purging a task isn't a user
-    /// activity signal and must not reorder the project's task list.
-    /// Idempotent.
+    /// exits, its terminal is closed, or its host is purged — so it can never
+    /// get stuck reading "running" after the loop that reported itself busy
+    /// has gone away. Unlike `clearTaskBusy`, never bumps recency: closing or
+    /// exiting a task isn't a user activity signal and must not reorder the
+    /// task lists. Idempotent.
     public func dropTaskBusy(_ taskId: Int64) {
-        busyTaskIDs.remove(taskId)
+        markIdle(taskId)
+    }
+
+    /// Removes `taskId` from `busyTaskIDs`, returning whether it was there. A
+    /// genuine busy→idle transition also marks the task unread, unless B-Side
+    /// is frontmost and already showing this task — the same "already looking
+    /// at it" condition `handleTerminalAlert` uses for its own notification
+    /// suppression.
+    @discardableResult
+    private func markIdle(_ taskId: Int64) -> Bool {
+        let wasBusy = busyTaskIDs.remove(taskId) != nil
+        guard wasBusy else { return false }
+        let isFrontmostAndSelected = NSApp?.isActive == true && selectedTaskID == taskId
+        if !isFrontmostAndSelected {
+            unreadTaskIDs.insert(taskId)
+        }
+        return true
     }
 
     /// Last time a terminal alert was accepted (post-debounce) for a task,
@@ -201,6 +224,7 @@ public final class ProjectsStore {
         guard let id = task.id else { return }
         let nextID = Self.nextActiveTaskID(afterClosing: id, in: openTerminalTaskIDs)
         openTerminalTaskIDs = Self.removingOpenTerminals([id], from: openTerminalTaskIDs)
+        unreadTaskIDs.remove(id)
         closedTerminalTaskID = id
         if let nextID, let match = taskAndProject(forID: nextID) {
             selectTask(match.task, project: match.project)
@@ -334,6 +358,7 @@ public final class ProjectsStore {
         selectedTaskID = task.id
         if let id = task.id {
             taskIDsNeedingAttention.remove(id)
+            unreadTaskIDs.remove(id)
         }
         focusRequestToken += 1
     }
@@ -508,6 +533,7 @@ public final class ProjectsStore {
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?
     private var stripPruneTask: Task<Void, Never>?
+    private var appActivationObserver: NSObjectProtocol?
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "projects-store")
 
     public init(database: AppDatabase) {
@@ -582,6 +608,17 @@ public final class ProjectsStore {
             guard let self, let pair = self.taskAndProject(forID: taskID) else { return }
             self.selectTask(pair.task, project: pair.project)
         }
+
+        appActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let id = self.selectedTaskID else { return }
+                self.unreadTaskIDs.remove(id)
+            }
+        }
     }
 
     private func startSubagentServer() async {
@@ -645,6 +682,10 @@ public final class ProjectsStore {
         subagentServer = nil
         stripPruneTask?.cancel()
         stripPruneTask = nil
+        if let appActivationObserver {
+            NotificationCenter.default.removeObserver(appActivationObserver)
+        }
+        appActivationObserver = nil
         if let fileURL = Self.subagentEndpointFileURL() {
             Self.removeSubagentEndpointFile(at: fileURL)
         }
@@ -807,7 +848,7 @@ public final class ProjectsStore {
             try updated.update(db)
         }
         if let id = task.id {
-            dropTaskBusy(id)
+            discardBusyAndUnread(id)
         }
     }
 
@@ -832,7 +873,16 @@ public final class ProjectsStore {
         try await database.dbQueue.write { db in
             _ = try TaskRecord.deleteOne(db, key: id)
         }
-        dropTaskBusy(id)
+        discardBusyAndUnread(id)
+    }
+
+    /// Drops `taskId`'s busy and unread flags without the "mark unread on a
+    /// genuine busy→idle transition" side effect `clearTaskBusy` has —
+    /// used when a task is archived or deleted, where there is no sidebar row
+    /// left for "unread" to mean anything about.
+    private func discardBusyAndUnread(_ taskId: Int64) {
+        busyTaskIDs.remove(taskId)
+        unreadTaskIDs.remove(taskId)
     }
 
     // MARK: - Pi conversations
