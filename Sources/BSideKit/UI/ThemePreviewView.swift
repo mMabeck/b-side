@@ -45,7 +45,7 @@ public struct ThemePreviewView: View {
                 .foregroundStyle(palette.textSecondary)
                 .lineLimit(1)
             taskRow(color: palette.statusRunning, label: "task/alpha")
-            taskRow(color: palette.statusNeedsAttention, label: "task/beta")
+            taskRow(color: palette.statusUnread, label: "task/beta")
             taskRow(color: palette.statusSuccess, label: "task/gamma")
             Spacer(minLength: 0)
         }
