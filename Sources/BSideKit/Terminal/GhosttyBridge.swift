@@ -763,3 +763,71 @@ public struct TerminalAlertBridge: View {
             }
     }
 }
+
+/// Makes trackpad scrolling in a terminal feel like Ghostty.app.
+///
+/// Ghostty.app's `SurfaceView.scrollWheel` doubles precise (trackpad /
+/// Magic Mouse) deltas before handing them to libghostty — "it feels
+/// better" per its own comment. `libghostty-spm`'s `AppTerminalView`
+/// forwards the raw deltas instead, so the same config scrolled at half
+/// speed here. The view is created inside the package's SwiftUI
+/// `TerminalSurfaceView` and can't be subclassed, so a local monitor
+/// intercepts the event, sends the doubled scroll through the view's public
+/// `sendMouseScroll`, and swallows the original. Wheel-mouse (line-based)
+/// events are left untouched, as Ghostty.app does.
+@MainActor
+public enum TerminalScrollRouter {
+    /// Ghostty.app's precise-scroll multiplier.
+    static let preciseMultiplier: Double = 2
+
+    /// Installs the monitor once for the app's lifetime. Call once, from
+    /// `BSideApp.init()`.
+    public static func install() {
+        NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            route(event) ? nil : event
+        }
+    }
+
+    /// `true` if `event` was delivered to a terminal under the pointer and
+    /// should be swallowed.
+    @discardableResult
+    static func route(_ event: NSEvent) -> Bool {
+        guard event.type == .scrollWheel,
+              event.hasPreciseScrollingDeltas,
+              let terminal = terminalView(under: event)
+        else { return false }
+        terminal.sendMouseScroll(
+            x: event.scrollingDeltaX * preciseMultiplier,
+            y: event.scrollingDeltaY * preciseMultiplier,
+            mods: TerminalScrollModifiers(precision: true, momentum: momentum(for: event.momentumPhase))
+        )
+        return true
+    }
+
+    /// Mirrors the package's internal `TerminalScrollModifiers.momentumFrom`.
+    static func momentum(for phase: NSEvent.Phase) -> TerminalScrollModifiers.Momentum {
+        if phase.contains(.began) { return .began }
+        if phase.contains(.stationary) { return .stationary }
+        if phase.contains(.changed) { return .changed }
+        return .none
+    }
+
+    private static func terminalView(under event: NSEvent) -> TerminalView? {
+        guard let window = event.window else { return nil }
+        return terminalView(in: window, at: event.locationInWindow)
+    }
+
+    /// The terminal view at `locationInWindow`, if any — the view itself or
+    /// an ancestor of whatever subview the point hits.
+    static func terminalView(in window: NSWindow, at locationInWindow: NSPoint) -> TerminalView? {
+        guard let contentView = window.contentView else { return nil }
+        // `hitTest` takes a point in the receiver's superview's coordinates.
+        let point = contentView.superview?.convert(locationInWindow, from: nil) ?? locationInWindow
+        var view = contentView.hitTest(point)
+        while let current = view {
+            if let terminal = current as? TerminalView { return terminal }
+            view = current.superview
+        }
+        return nil
+    }
+}

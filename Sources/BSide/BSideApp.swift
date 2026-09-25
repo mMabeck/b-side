@@ -30,6 +30,8 @@ struct BSideApp: App {
         // running Pi is first responder — see `MainMenuKeyRouter`'s doc comment
         // for why `GhosttyBridge.appOwnedKeybinds` alone isn't enough.
         MainMenuKeyRouter.install()
+        // Trackpad scrolling at Ghostty.app's speed — see `TerminalScrollRouter`.
+        TerminalScrollRouter.install()
 
         do {
             let database = try AppDatabase.openStandard()
