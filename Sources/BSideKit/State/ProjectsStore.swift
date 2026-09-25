@@ -427,8 +427,16 @@ public final class ProjectsStore {
     /// from `start()`, not from view rendering.
     private func pruneAgedOutStripPanes() {
         let now = Date()
+        // Only re-render while a finished card is still inside (or just past)
+        // its linger window, or a pane was just closed; an idle tick is free.
+        var changed = false
         for taskId in subagentFeed.runsByTask.keys {
             let allRuns = subagentFeed.runs(forTask: taskId)
+            if allRuns.contains(where: { run in
+                run.endedAt.map { now.timeIntervalSince($0) <= SubagentStripBatchTracker.lingerInterval + 1 } ?? false
+            }) {
+                changed = true
+            }
             let livePaneIDs = Set(subagentPanes.panes(forTask: taskId).map(\.id))
             guard !livePaneIDs.isEmpty else { continue }
             let swappedIn = subagentSwap.shownChildID(forTask: taskId)
@@ -440,9 +448,10 @@ public final class ProjectsStore {
             )
             for childId in agedOut {
                 subagentPanes.close(taskId: taskId, childId: childId)
+                changed = true
             }
         }
-        stripTickToken &+= 1
+        if changed { stripTickToken &+= 1 }
     }
 
     private let database: AppDatabase
