@@ -78,4 +78,30 @@ struct ProjectsStoreTaskCreationTests {
         #expect(store.selectedTaskID == task.id)
         #expect(store.mainSelection == .task(task, project))
     }
+
+    @Test("New tasks appear at the top of their project's list, both optimistically and after the observation refreshes")
+    func newTasksAppearAtTheTop() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let first = try await store.createTask(project: project, name: "First", useWorktree: false)
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == [first.id])
+
+        let second = try await store.createTask(project: project, name: "Second", useWorktree: false)
+        // Optimistic insert, before the ValueObservation refresh below.
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == [second.id, first.id])
+
+        try await waitUntil {
+            (store.tasksByProject[project.id!]?.count ?? 0) == 2
+        }
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == [second.id, first.id])
+    }
 }

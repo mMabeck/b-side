@@ -405,10 +405,16 @@ public final class ProjectsStore {
             var tasksByProject: [Int64: [TaskRecord]] = [:]
             for project in projects {
                 guard let projectId = project.id else { continue }
+                // Newest first: every task currently has `sortPosition`
+                // 0 (nothing sets it yet), so ordering by it alone reduces
+                // to insertion order, which put new tasks at the bottom of
+                // their project's list. `id.desc` as the tiebreaker is a
+                // stand-in for "most recently created" until sortPosition
+                // is actually used for manual reordering.
                 tasksByProject[projectId] = try TaskRecord
                     .filter(TaskRecord.Columns.projectId == projectId)
                     .filter(TaskRecord.Columns.archived == false)
-                    .order(TaskRecord.Columns.sortPosition)
+                    .order(TaskRecord.Columns.sortPosition, TaskRecord.Columns.id.desc)
                     .fetchAll(db)
             }
             return (projects, tasksByProject)
@@ -612,7 +618,7 @@ public final class ProjectsStore {
         // immediately instead of a stale `.project`/`.none` that only
         // self-corrects once the observation catches up. The later refresh
         // overwrites this with the same (authoritative) row, so it's harmless.
-        tasksByProject[inserted.projectId, default: []].append(inserted)
+        tasksByProject[inserted.projectId, default: []].insert(inserted, at: 0)
         selectTask(inserted, project: project)
         return inserted
     }
