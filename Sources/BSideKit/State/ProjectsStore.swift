@@ -44,6 +44,29 @@ public final class ProjectsStore {
     /// the next time that task is selected. See `handleTerminalAlert`.
     public private(set) var taskIDsNeedingAttention: Set<Int64> = []
 
+    /// Task ids whose parent Pi agent loop has reported itself busy via
+    /// `POST /agent/{taskId}/busy` and not yet reported idle (`.../idle`) or
+    /// had its process/PTY exit. Folded into `TaskStatus.derive`'s `busy`
+    /// input alongside `activeChildCount`, so the sidebar/dashboard read
+    /// "running" even when no subagent child happens to be active. Always
+    /// empty right after launch — in-memory only, not persisted — since a
+    /// relaunched app has no live agent loop to be busy on behalf of.
+    public private(set) var busyTaskIDs: Set<Int64> = []
+
+    /// Marks `taskId` busy. Idempotent, since `/agent/{taskId}/busy` may be
+    /// repeated.
+    public func setTaskBusy(_ taskId: Int64) {
+        busyTaskIDs.insert(taskId)
+    }
+
+    /// Clears `taskId`'s busy flag — called for `POST .../idle`, and also
+    /// whenever the task's Pi process/PTY exits, is archived, or is deleted,
+    /// so a task can never get stuck reading "running" after the loop that
+    /// reported itself busy has gone away. Idempotent.
+    public func clearTaskBusy(_ taskId: Int64) {
+        busyTaskIDs.remove(taskId)
+    }
+
     /// Last time a terminal alert was accepted (post-debounce) for a task,
     /// keyed by task id — feeds `TaskAlertDebouncer.isDebounced`.
     private var lastTerminalAlertAt: [Int64: Date] = [:]
@@ -246,6 +269,13 @@ public final class ProjectsStore {
         focusRequestToken += 1
     }
 
+    /// Asks the main area to hand keyboard focus back to the selected task's
+    /// terminal without changing the selection — e.g. once the bottom drawer
+    /// collapses and its (now hidden) shell must stop receiving keystrokes.
+    public func requestTerminalFocus() {
+        focusRequestToken += 1
+    }
+
     /// Selects `task` and, since a task's terminal is meaningless without
     /// knowing which project owns it, its project too — the two selections
     /// are set together so they can never disagree.
@@ -398,10 +428,16 @@ public final class ProjectsStore {
             var tasksByProject: [Int64: [TaskRecord]] = [:]
             for project in projects {
                 guard let projectId = project.id else { continue }
+                // Newest first: every task currently has `sortPosition`
+                // 0 (nothing sets it yet), so ordering by it alone reduces
+                // to insertion order, which put new tasks at the bottom of
+                // their project's list. `id.desc` as the tiebreaker is a
+                // stand-in for "most recently created" until sortPosition
+                // is actually used for manual reordering.
                 tasksByProject[projectId] = try TaskRecord
                     .filter(TaskRecord.Columns.projectId == projectId)
                     .filter(TaskRecord.Columns.archived == false)
-                    .order(TaskRecord.Columns.sortPosition)
+                    .order(TaskRecord.Columns.sortPosition, TaskRecord.Columns.id.desc)
                     .fetchAll(db)
             }
             return (projects, tasksByProject)
@@ -448,7 +484,12 @@ public final class ProjectsStore {
             let server = try SubagentEventServer(
                 store: subagentFeed,
                 paneStore: subagentPanes,
-                taskExists: { [weak self] taskId in self?.task(withId: taskId) != nil }
+                taskExists: { [weak self] taskId in self?.task(withId: taskId) != nil },
+                onAgentBusy: { [weak self] taskId in self?.setTaskBusy(taskId) },
+                onAgentIdle: { [weak self] taskId in self?.clearTaskBusy(taskId) },
+                onAgentAlert: { [weak self] taskId, kind, title, body in
+                    self?.handleTerminalAlert(taskID: taskId, kind: kind, title: title, body: body)
+                }
             )
             try await server.start()
             subagentServer = server
@@ -600,7 +641,7 @@ public final class ProjectsStore {
             harness: "claude",
             permissionLevel: config.taskDefaults.permissionMode,
             awaitingAutoRename: nameWasBlank,
-            startCommit: setupResult.startCommit
+            baseCommit: setupResult.baseCommit
         )
         let inserted = try await database.dbQueue.write { db in
             var task = task
@@ -621,7 +662,7 @@ public final class ProjectsStore {
         // immediately instead of a stale `.project`/`.none` that only
         // self-corrects once the observation catches up. The later refresh
         // overwrites this with the same (authoritative) row, so it's harmless.
-        tasksByProject[inserted.projectId, default: []].append(inserted)
+        tasksByProject[inserted.projectId, default: []].insert(inserted, at: 0)
         selectTask(inserted, project: project)
         return inserted
     }
@@ -642,6 +683,9 @@ public final class ProjectsStore {
             var updated = task
             updated.archived = true
             try updated.update(db)
+        }
+        if let id = task.id {
+            clearTaskBusy(id)
         }
     }
 
@@ -666,6 +710,7 @@ public final class ProjectsStore {
         try await database.dbQueue.write { db in
             _ = try TaskRecord.deleteOne(db, key: id)
         }
+        clearTaskBusy(id)
     }
 
     // MARK: - Pi conversations
@@ -751,26 +796,26 @@ public final class ProjectsStore {
     }
 
     /// Refreshes ahead/behind/merged status for `task` against its project's base ref.
-    /// A legacy task with no recorded `startCommit` has one backfilled from
+    /// A legacy task with no recorded `baseCommit` has one backfilled from
     /// `syncStatus`'s reflog fallback, so the lookup isn't repeated on every refresh.
     public func refreshSyncStatus(for task: TaskRecord, project: Project) async {
         guard let id = task.id else { return }
         guard let status = try? await TaskWorktreeService.syncStatus(
             project: project,
             branchName: task.branchName,
-            startCommit: task.startCommit
+            baseCommit: task.baseCommit
         ) else {
             return
         }
         syncStatusByTask[id] = status
-        if task.startCommit == nil, let resolvedStartCommit = status.resolvedStartCommit {
+        if task.baseCommit == nil, let resolvedBaseCommit = status.resolvedBaseCommit {
             try? await database.dbQueue.write { db in
                 guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
-                updated.startCommit = resolvedStartCommit
+                updated.baseCommit = resolvedBaseCommit
                 try updated.update(db)
             }
             if let index = tasksByProject[task.projectId]?.firstIndex(where: { $0.id == id }) {
-                tasksByProject[task.projectId]?[index].startCommit = resolvedStartCommit
+                tasksByProject[task.projectId]?[index].baseCommit = resolvedBaseCommit
             }
         }
     }

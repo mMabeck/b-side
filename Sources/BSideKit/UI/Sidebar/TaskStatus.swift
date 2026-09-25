@@ -20,16 +20,23 @@ public enum TaskStatus: Hashable, Sendable {
     /// yet) — it folds a task's terminal having raised a question alert
     /// (see `ProjectsStore.handleTerminalAlert`) into the same tier as
     /// `isBlocked`/`isVanished`.
+    ///
+    /// `busy` defaults to `false` and folds the parent Pi agent loop's own
+    /// `POST /agent/{taskId}/busy`/`idle` reports (`ProjectsStore.busyTaskIDs`,
+    /// via `SubagentEventServer`) into the same "running" tier as a live
+    /// subagent child — the sidebar dot shouldn't read idle just because no
+    /// child subagent happens to be active right now.
     public static func derive(
         merged: Bool,
         isBlocked: Bool,
         isVanished: Bool,
         activeChildCount: Int,
-        needsAttention: Bool = false
+        needsAttention: Bool = false,
+        busy: Bool = false
     ) -> TaskStatus {
         if merged { return .finished }
         if isBlocked || isVanished || needsAttention { return .needsAttention }
-        if activeChildCount > 0 { return .running }
+        if busy || activeChildCount > 0 { return .running }
         return .idle
     }
 

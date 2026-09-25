@@ -57,23 +57,35 @@ enum Migrations {
             }
         }
 
-        // Added to remember a project's last-used task-creation choices (New
-        // Task sheet: worktree toggle, new-branch/existing-branch mode) so
-        // reopening the sheet preselects them instead of always resetting to
-        // the project config defaults.
-        migrator.registerMigration("v4_project_last_task_creation_choices") { db in
-            try db.alter(table: "project") { t in
-                t.add(column: "lastUseWorktree", .boolean)
-                t.add(column: "lastTaskCreationMode", .text)
+        // Added so merged status can tell a fresh (or merely behind) branch
+        // apart from one that actually gained and merged commits of its own
+        // (see `GitCLI.isMerged`): the branch's tip commit right after the
+        // task was created. `nil` for rows from before this column existed;
+        // `TaskWorktreeService.syncStatus` falls back to the branch's reflog
+        // creation entry for those.
+        migrator.registerMigration("v4_task_base_commit") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "baseCommit", .text)
             }
         }
 
-        // Added so `TaskWorktreeService.syncStatus`/`isBranchMerged` can tell
-        // a branch that has gained no commits since the task started from
-        // one genuinely merged into its base.
-        migrator.registerMigration("v5_task_start_commit") { db in
-            try db.alter(table: "task") { t in
-                t.add(column: "startCommit", .text)
+        // Added to remember a project's last-used task-creation choices (New
+        // Task sheet: worktree toggle, new-branch/existing-branch mode) so
+        // reopening the sheet preselects them instead of always resetting to
+        // the project config defaults. Renamed from this branch's original
+        // "v4_project_last_task_creation_choices" to land after main's
+        // "v4_task_base_commit"; column adds are guarded because a dev DB may
+        // already have applied the old v4 (or the since-dropped
+        // "v5_task_start_commit") migration under its previous name.
+        migrator.registerMigration("v5_project_last_task_creation_choices") { db in
+            let existingColumns = Set(try db.columns(in: "project").map(\.name))
+            try db.alter(table: "project") { t in
+                if !existingColumns.contains("lastUseWorktree") {
+                    t.add(column: "lastUseWorktree", .boolean)
+                }
+                if !existingColumns.contains("lastTaskCreationMode") {
+                    t.add(column: "lastTaskCreationMode", .text)
+                }
             }
         }
     }

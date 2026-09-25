@@ -46,7 +46,7 @@ struct TaskTerminalAreaView: View {
                     if isExited, let onResume {
                         PiSessionEndedView(taskID: taskID, focusedTaskID: focusedTaskID, onResume: onResume)
                     } else {
-                        TerminalHostView(host: host, focusedTaskID: focusedTaskID, taskID: taskID)
+                        TerminalHostView(host: host)
                     }
                 }
                 .opacity(shownChildID == nil ? 1 : 0)
@@ -68,9 +68,11 @@ struct TaskTerminalAreaView: View {
         .onChange(of: shownChildID) { _, newValue in
             guard isSelected else { return }
             if let newValue, let pane = panes.first(where: { $0.id == newValue }) {
-                pane.host.state.requestFocus()
+                pane.host.focus()
+                host.resignFocus()
             } else {
-                host.state.requestFocus()
+                host.focus()
+                for pane in panes { pane.host.resignFocus() }
             }
         }
     }
@@ -101,10 +103,13 @@ struct TaskTerminalAreaView: View {
     /// the one that was shown a moment ago.
     private func focusShownSurface() {
         let shownChildID = store.subagentSwap.shownChildID(forTask: taskID)
-        if let shownChildID, let pane = store.subagentPanes.panes(forTask: taskID).first(where: { $0.id == shownChildID }) {
-            pane.host.state.requestFocus()
+        let panes = store.subagentPanes.panes(forTask: taskID)
+        if let shownChildID, let pane = panes.first(where: { $0.id == shownChildID }) {
+            pane.host.focus()
+            host.resignFocus()
         } else {
-            host.state.requestFocus()
+            host.focus()
+            for pane in panes { pane.host.resignFocus() }
         }
     }
 }

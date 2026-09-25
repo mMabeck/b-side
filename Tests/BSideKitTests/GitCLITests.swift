@@ -88,6 +88,7 @@ struct GitCLITests {
 
         let repoURL = try await TestRepo.makeRepo(in: root)
         try await GitCLI.createBranch("feature", from: "main", at: repoURL)
+        let baseCommit = try await GitCLI.revParse("feature", at: repoURL)
         _ = try await GitCLI.run(["checkout", "feature"], in: repoURL)
         try "feature work\n".write(to: repoURL.appendingPathComponent("feature.txt"), atomically: true, encoding: .utf8)
         _ = try await GitCLI.run(["add", "."], in: repoURL)
@@ -102,11 +103,54 @@ struct GitCLITests {
         #expect(ahead == 1)
         #expect(behind == 1)
 
-        #expect(try await GitCLI.isMerged(branch: "feature", into: "main", at: repoURL) == false)
+        #expect(try await GitCLI.isMerged(branch: "feature", into: "main", since: baseCommit, at: repoURL) == false)
     }
 
-    @Test("isMerged is true once base has absorbed the branch")
+    @Test("isMerged is true once base has absorbed the branch's own commits, both fast-forward and merge commit")
     func isMergedAfterMerge() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        try await GitCLI.createBranch("feature", from: "main", at: repoURL)
+        let featureBaseCommit = try await GitCLI.revParse("feature", at: repoURL)
+        _ = try await GitCLI.run(["checkout", "feature"], in: repoURL)
+        try "feature work\n".write(to: repoURL.appendingPathComponent("feature.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: repoURL)
+        _ = try await GitCLI.run(["commit", "-m", "feature commit"], in: repoURL)
+
+        _ = try await GitCLI.run(["checkout", "main"], in: repoURL)
+        _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge feature", "feature"], in: repoURL)
+
+        #expect(try await GitCLI.isMerged(branch: "feature", into: "main", since: featureBaseCommit, at: repoURL) == true)
+
+        try await GitCLI.createBranch("ff-feature", from: "main", at: repoURL)
+        let ffBaseCommit = try await GitCLI.revParse("ff-feature", at: repoURL)
+        _ = try await GitCLI.run(["checkout", "ff-feature"], in: repoURL)
+        try "ff work\n".write(to: repoURL.appendingPathComponent("ff.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: repoURL)
+        _ = try await GitCLI.run(["commit", "-m", "ff commit"], in: repoURL)
+
+        _ = try await GitCLI.run(["checkout", "main"], in: repoURL)
+        _ = try await GitCLI.run(["merge", "--ff-only", "ff-feature"], in: repoURL)
+
+        #expect(try await GitCLI.isMerged(branch: "ff-feature", into: "main", since: ffBaseCommit, at: repoURL) == true)
+    }
+
+    @Test("isMerged is false for a fresh branch with no commits of its own, even though it's trivially an ancestor of base")
+    func isMergedFalseForFreshBranch() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        try await GitCLI.createBranch("feature", from: "main", at: repoURL)
+        let baseCommit = try await GitCLI.revParse("feature", at: repoURL)
+
+        #expect(try await GitCLI.isMerged(branch: "feature", into: "main", since: baseCommit, at: repoURL) == false)
+    }
+
+    @Test("isMerged is false with no known baseline, even for a branch fully absorbed by base")
+    func isMergedFalseWithoutBaseline() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
 
@@ -116,10 +160,9 @@ struct GitCLITests {
         try "feature work\n".write(to: repoURL.appendingPathComponent("feature.txt"), atomically: true, encoding: .utf8)
         _ = try await GitCLI.run(["add", "."], in: repoURL)
         _ = try await GitCLI.run(["commit", "-m", "feature commit"], in: repoURL)
-
         _ = try await GitCLI.run(["checkout", "main"], in: repoURL)
         _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge feature", "feature"], in: repoURL)
 
-        #expect(try await GitCLI.isMerged(branch: "feature", into: "main", at: repoURL) == true)
+        #expect(try await GitCLI.isMerged(branch: "feature", into: "main", since: nil, at: repoURL) == false)
     }
 }

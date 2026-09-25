@@ -43,27 +43,30 @@ public enum TaskWorktreeService {
         public let branchCreatedByApp: Bool
         public let worktreePath: String
         public let copiedIgnoredFiles: [String]
-        /// The branch's tip commit right after creation/attach (or `HEAD` for
-        /// in-place tasks), persisted as `TaskRecord.startCommit`.
-        public let startCommit: String?
+        /// The branch's tip commit right after creation/attachment (or `HEAD`
+        /// for in-place tasks) — the baseline `TaskRecord.baseCommit` is
+        /// persisted from, so `syncStatus` can tell "gained no commits of its
+        /// own yet" apart from "merged". `nil` only if the `rev-parse` that
+        /// resolves it fails outright.
+        public let baseCommit: String?
     }
 
     public struct BranchSyncStatus: Sendable, Equatable {
         public let ahead: Int
         public let behind: Int
         public let merged: Bool
-        /// The start commit `syncStatus` actually used — either the one
+        /// The base commit `syncStatus` actually used — either the one
         /// passed in, or a reflog fallback it found for a legacy task with
-        /// no recorded `startCommit`. Callers should persist this back onto
+        /// no recorded `baseCommit`. Callers should persist this back onto
         /// the task when it differs from what they had, so the fallback
         /// lookup isn't repeated on every refresh.
-        public let resolvedStartCommit: String?
+        public let resolvedBaseCommit: String?
 
-        public init(ahead: Int, behind: Int, merged: Bool, resolvedStartCommit: String? = nil) {
+        public init(ahead: Int, behind: Int, merged: Bool, resolvedBaseCommit: String? = nil) {
             self.ahead = ahead
             self.behind = behind
             self.merged = merged
-            self.resolvedStartCommit = resolvedStartCommit
+            self.resolvedBaseCommit = resolvedBaseCommit
         }
     }
 
@@ -193,13 +196,13 @@ public enum TaskWorktreeService {
 
         guard useWorktree else {
             let branch = await GitCLI.currentBranch(at: projectURL) ?? project.baseRef
-            let startCommit = await GitCLI.resolveCommit("HEAD", at: projectURL)
+            let baseCommit = try? await GitCLI.revParse(branch, at: projectURL)
             return WorktreeSetupResult(
                 branchName: branch,
                 branchCreatedByApp: false,
                 worktreePath: project.path,
                 copiedIgnoredFiles: [],
-                startCommit: startCommit
+                baseCommit: baseCommit
             )
         }
 
@@ -226,9 +229,8 @@ public enum TaskWorktreeService {
             try await GitCLI.addWorktree(at: worktreeURL, newBranch: branchName, from: resolvedBaseRef, in: projectURL)
         }
 
+        let baseCommit = try? await GitCLI.revParse(branchName, at: worktreeURL)
         let copied = try await copyIgnoredFiles(from: projectURL, to: worktreeURL)
-
-        let startCommit = await GitCLI.resolveCommit(branchName, at: projectURL)
 
         if let setupCommand, !setupCommand.trimmingCharacters(in: .whitespaces).isEmpty {
             try await runCommand(setupCommand, in: worktreeURL, onOutput: onOutput)
@@ -239,7 +241,7 @@ public enum TaskWorktreeService {
             branchCreatedByApp: branchCreatedByApp,
             worktreePath: worktreePathString,
             copiedIgnoredFiles: copied,
-            startCommit: startCommit
+            baseCommit: baseCommit
         )
     }
 
@@ -379,46 +381,45 @@ public enum TaskWorktreeService {
     /// `merged` requires more than every commit on `branchName` being an
     /// ancestor of `baseRef` (`GitCLI.isMerged`) — that alone is also true
     /// for a fresh branch that never gained any commits, and for an in-place
-    /// task whose branch *is* `baseRef`. It additionally requires the
-    /// branch's tip to have moved since the task started. `startCommit`
-    /// should be `TaskRecord.startCommit`; when `nil` (a legacy task from
-    /// before that column existed) this falls back to the branch's oldest
-    /// reflog entry, conservatively reporting not-merged if even that isn't
+    /// task whose branch *is* `baseRef`. `baseCommit` should be
+    /// `TaskRecord.baseCommit`; when `nil` (a legacy task from before that
+    /// column existed) this falls back to the branch's reflog creation
+    /// entry, conservatively reporting not-merged if even that isn't
     /// available — a false "merged" is worse than a missed one.
     public static func syncStatus(
         project: Project,
         branchName: String,
         baseRef: String? = nil,
-        startCommit: String? = nil
+        baseCommit: String? = nil
     ) async throws -> BranchSyncStatus {
         let projectURL = URL(fileURLWithPath: project.path)
         let resolvedBaseRef = baseRef ?? project.baseRef
         let (ahead, behind) = try await GitCLI.aheadBehind(branch: branchName, baseRef: resolvedBaseRef, at: projectURL)
 
-        let resolvedStartCommit: String?
-        if let startCommit {
-            resolvedStartCommit = startCommit
+        let resolvedBaseCommit: String?
+        if let baseCommit {
+            resolvedBaseCommit = baseCommit
         } else {
-            resolvedStartCommit = await GitCLI.oldestReflogCommit(forBranch: branchName, at: projectURL)
+            resolvedBaseCommit = await GitCLI.reflogCreationCommit(forBranch: branchName, at: projectURL)
         }
         let merged = try await isBranchMerged(
             branchName: branchName,
             baseRef: resolvedBaseRef,
-            startCommit: resolvedStartCommit,
+            baseCommit: resolvedBaseCommit,
             at: projectURL
         )
-        return BranchSyncStatus(ahead: ahead, behind: behind, merged: merged, resolvedStartCommit: resolvedStartCommit)
+        return BranchSyncStatus(ahead: ahead, behind: behind, merged: merged, resolvedBaseCommit: resolvedBaseCommit)
     }
 
-    /// Pure-ish merge decision (only the ancestor/tip lookups are async):
-    /// never merged for an in-place task whose branch resolves to `baseRef`
-    /// itself, or when there's no known start commit, or when the branch
-    /// hasn't moved off it — otherwise the existing ancestor check decides.
-    static func isBranchMerged(branchName: String, baseRef: String, startCommit: String?, at projectURL: URL) async throws -> Bool {
-        guard branchName != baseRef, let startCommit else { return false }
-        guard let branchTip = await GitCLI.resolveCommit(branchName, at: projectURL), branchTip != startCommit else {
-            return false
-        }
-        return try await GitCLI.isMerged(branch: branchName, into: baseRef, at: projectURL)
+    /// Pure-ish merge decision (only the ancestor/tip lookup is async, inside
+    /// `GitCLI.isMerged`): never merged for an in-place task whose branch
+    /// resolves to `baseRef` itself — `GitCLI.isMerged` alone can't tell that
+    /// case apart from a genuinely merged branch, since every commit on
+    /// `baseRef` is trivially an ancestor of itself. Otherwise defers to
+    /// `GitCLI.isMerged`, which itself treats "branch hasn't moved off
+    /// `baseCommit`" and "no known `baseCommit`" as not merged.
+    static func isBranchMerged(branchName: String, baseRef: String, baseCommit: String?, at projectURL: URL) async throws -> Bool {
+        guard branchName != baseRef else { return false }
+        return try await GitCLI.isMerged(branch: branchName, into: baseRef, since: baseCommit, at: projectURL)
     }
 }

@@ -158,8 +158,8 @@ struct ProjectsStoreTaskCreationTests {
         #expect(store.mainSelection == .task(task, project))
     }
 
-    @Test("createTask records the branch's start commit, and refreshSyncStatus reports not merged for the fresh branch")
-    func createTaskRecordsStartCommit() async throws {
+    @Test("New tasks appear at the top of their project's list, both optimistically and after the observation refreshes")
+    func newTasksAppearAtTheTop() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
         let repoURL = try await TestRepo.makeRepo(in: root)
@@ -171,16 +171,54 @@ struct ProjectsStoreTaskCreationTests {
         try await waitUntil { !store.projects.isEmpty }
 
         let project = try #require(store.projects.first)
-        let task = try await store.createTask(project: project, name: "Start commit", baseRef: "main")
+        let first = try await store.createTask(project: project, name: "First", useWorktree: false)
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == [first.id])
 
-        #expect(task.startCommit != nil)
+        let second = try await store.createTask(project: project, name: "Second", useWorktree: false)
+        // Optimistic insert, before the ValueObservation refresh below.
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == [second.id, first.id])
+
+        try await waitUntil {
+            (store.tasksByProject[project.id!]?.count ?? 0) == 2
+        }
+        #expect(store.tasksByProject[project.id!]?.map(\.id) == [second.id, first.id])
+    }
+
+    @Test("createTask persists baseCommit, and refreshSyncStatus reads a fresh task as not merged until it gains and lands commits of its own")
+    func refreshSyncStatusReflectsBaseCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Sync status task")
+        #expect(task.baseCommit != nil)
 
         await store.refreshSyncStatus(for: task, project: project)
         #expect(store.syncStatusByTask[task.id!]?.merged == false)
+
+        let worktreeURL = URL(fileURLWithPath: task.worktreePath)
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.merged == false)
+
+        _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", task.branchName], in: repoURL)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.merged == true)
     }
 
-    @Test("refreshSyncStatus backfills startCommit for a legacy task via the reflog fallback")
-    func refreshSyncStatusBackfillsLegacyStartCommit() async throws {
+    @Test("refreshSyncStatus backfills baseCommit for a legacy task via the reflog fallback")
+    func refreshSyncStatusBackfillsLegacyBaseCommit() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
         let repoURL = try await TestRepo.makeRepo(in: root)
@@ -195,10 +233,10 @@ struct ProjectsStoreTaskCreationTests {
         let created = try await store.createTask(project: project, name: "Legacy", baseRef: "main")
         let taskId = try #require(created.id)
 
-        // Simulate a task persisted before `startCommit` existed.
+        // Simulate a task persisted before `baseCommit` existed.
         let legacyTask: TaskRecord = {
             var task = created
-            task.startCommit = nil
+            task.baseCommit = nil
             return task
         }()
         try await database.dbQueue.write { db in try legacyTask.update(db) }
@@ -208,6 +246,38 @@ struct ProjectsStoreTaskCreationTests {
         let persisted = try await database.dbQueue.read { db in
             try TaskRecord.fetchOne(db, key: taskId)
         }
-        #expect(persisted?.startCommit != nil)
+        #expect(persisted?.baseCommit != nil)
+    }
+
+    @Test("setTaskBusy/clearTaskBusy are idempotent, and archiving or deleting a task clears its busy flag")
+    func busyTaskIDsClearOnArchiveAndDelete() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+        let project = try #require(store.projects.first)
+
+        let archived = try await store.createTask(project: project, name: "Archived", useWorktree: false)
+        store.setTaskBusy(archived.id!)
+        store.setTaskBusy(archived.id!)
+        #expect(store.busyTaskIDs == [archived.id!])
+
+        try await store.archiveTask(archived, project: project, removeWorktree: false)
+        #expect(!store.busyTaskIDs.contains(archived.id!))
+
+        let deleted = try await store.createTask(project: project, name: "Deleted", useWorktree: false)
+        store.setTaskBusy(deleted.id!)
+        #expect(store.busyTaskIDs.contains(deleted.id!))
+
+        try await store.deleteTask(deleted, project: project, deleteLocalBranch: false, deleteRemoteBranch: false)
+        #expect(!store.busyTaskIDs.contains(deleted.id!))
+
+        store.clearTaskBusy(999)
+        #expect(store.busyTaskIDs.isEmpty)
     }
 }
