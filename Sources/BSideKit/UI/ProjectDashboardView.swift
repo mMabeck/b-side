@@ -111,10 +111,11 @@ struct ProjectDashboardView: View {
         let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
         let syncStatus = task.id.flatMap { store.syncStatusByTask[$0] }
         let status = TaskStatus.derive(
-            merged: syncStatus?.merged ?? false,
             isBlocked: summary.isBlocked,
             isVanished: isVanished,
             activeChildCount: summary.activeCount,
+            isOpen: task.id.map(store.openTerminalTaskIDs.contains) ?? false,
+            isUnread: task.id.map(store.unreadTaskIDs.contains) ?? false,
             needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
             busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
@@ -124,9 +125,7 @@ struct ProjectDashboardView: View {
             store.selectTask(task, project: project)
         } label: {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(status.color(in: theme.palette))
-                    .frame(width: TaskRowLayout.statusDotDiameter, height: TaskRowLayout.statusDotDiameter)
+                StatusDot(status: status, palette: theme.palette)
 
                 Text(task.name)
                     .font(.system(size: 13, weight: .medium))

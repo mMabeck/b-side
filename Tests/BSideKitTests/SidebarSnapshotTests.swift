@@ -245,6 +245,298 @@ struct SidebarSnapshotTests {
             #expect(isCloseToThemedSurface(color), "Sidebar pixel \(report("", color)) is not close to the themed surface colour \(report("", expectedSurface))")
         }
     }
+
+    @Test("Status dots left-align with the project title and the ACTIVE header, and the old indent-guide hairline is gone")
+    func statusDotsLeftAlignWithHeaders() async throws {
+        let suiteName = "bside-sidebar-align-test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+
+        let ayuMirage = try #require(GhosttyThemeCatalog.theme(named: "Ayu Mirage"))
+        let palette = BSidePalette.themed(from: ayuMirage)
+        GhosttyResolvedTheme.resolveEagerly()
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        store.playAlertSound = { _ in }
+
+        let project = Project(path: "/tmp/bside-align-project", displayName: "bside", baseRef: "main")
+
+        let ids: (projectID: Int64, runningID: Int64, unreadID: Int64, readID: Int64, questionID: Int64, inactiveID: Int64) = try await database.dbQueue.write { db in
+            var project = project
+            try project.insert(db)
+            let projectID = project.id!
+
+            func makeTask(_ name: String) throws -> Int64 {
+                var task = TaskRecord(
+                    projectId: projectID, name: name, branchName: "main",
+                    worktreePath: "/tmp/bside-align-project", harness: "claude", permissionLevel: "default"
+                )
+                try task.insert(db)
+                return task.id!
+            }
+
+            let runningID = try makeTask("Running task")
+            let unreadID = try makeTask("Unread task")
+            let readID = try makeTask("Read task")
+            let questionID = try makeTask("Question task")
+            // Created last (highest id, `TaskRecord.Columns.id.desc` ordering)
+            // so it's the topmost task row under the project header, with
+            // nothing else between the header and its dot to confuse the
+            // upward scan for the project title below.
+            let inactiveID = try makeTask("Inactive task")
+
+            return (projectID, runningID, unreadID, readID, questionID, inactiveID)
+        }
+
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        // Open four of the five tasks (all but `inactiveID`), driving each to
+        // a distinct status: running (busy), unread (a busy\u2192idle
+        // transition), read (open with nothing new), question (a bell).
+        store.noteTerminalOpened(taskID: ids.runningID)
+        store.noteTerminalOpened(taskID: ids.unreadID)
+        store.noteTerminalOpened(taskID: ids.readID)
+        store.noteTerminalOpened(taskID: ids.questionID)
+
+        store.setTaskBusy(ids.runningID)
+        store.setTaskBusy(ids.unreadID)
+        store.clearTaskBusy(ids.unreadID)
+        store.handleTerminalBell(taskID: ids.questionID)
+
+        defaults.set(SidebarCollapseState().rawValue, forKey: "sidebarCollapsedProjectIDs")
+
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 190, height: 640),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(
+            rootView: SidebarView(store: store)
+                .environment(\.statusDotReduceMotion, true) // freezes the running dot's blink for a deterministic capture
+                .defaultAppStorage(defaults)
+        )
+        window.setIsVisible(true)
+
+        guard let contentView = window.contentView else {
+            Issue.record("Window has no content view to render")
+            return
+        }
+
+        func captureBitmap() -> NSBitmapImageRep? {
+            contentView.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            let windowID = CGWindowID(window.windowNumber)
+            guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
+                return nil
+            }
+            return NSBitmapImageRep(cgImage: cgImage)
+        }
+
+        func isClose(_ a: NSColor, _ b: NSColor, tolerance: CGFloat = 0.16) -> Bool {
+            let ca = a.usingColorSpace(.deviceRGB) ?? a
+            let cb = b.usingColorSpace(.deviceRGB) ?? b
+            return abs(ca.redComponent - cb.redComponent) < tolerance
+                && abs(ca.greenComponent - cb.greenComponent) < tolerance
+                && abs(ca.blueComponent - cb.blueComponent) < tolerance
+        }
+
+        /// Topmost (at or below `minY`), then leftmost, pixel matching
+        /// `target` — used to locate a status dot (each colour appears
+        /// nowhere else in the sidebar) or a distinctively-coloured text run
+        /// by colour alone rather than by a guessed row geometry.
+        func firstMatch(_ bitmap: NSBitmapImageRep, target: NSColor, tolerance: CGFloat = 0.16, minY: Int = 0, maxX: Int? = nil) -> (x: Int, y: Int)? {
+            let upperX = maxX ?? bitmap.pixelsWide
+            for y in minY..<bitmap.pixelsHigh {
+                for x in 0..<upperX {
+                    guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+                    if isClose(color, target, tolerance: tolerance) {
+                        return (x, y)
+                    }
+                }
+            }
+            return nil
+        }
+
+        /// The leftmost pixel matching `target` within `xRange` at device row
+        /// `y`, scanning a small vertical band around it to tolerate the
+        /// dot/text not landing on the exact sampled scanline.
+        func leftmostMatch(_ bitmap: NSBitmapImageRep, target: NSColor, y: Int, xRange: Range<Int>, tolerance: CGFloat = 0.16, yBand: Int = 3) -> Int? {
+            for dy in -yBand...yBand {
+                let row = y + dy
+                guard row >= 0, row < bitmap.pixelsHigh else { continue }
+                for x in xRange {
+                    guard let color = bitmap.colorAt(x: x, y: row) else { continue }
+                    if isClose(color, target, tolerance: tolerance) {
+                        return x
+                    }
+                }
+            }
+            return nil
+        }
+
+        // A dot's true left edge: `firstMatch`'s topmost-row scan can land
+        // on a row near the top of the circle, where the visible arc is
+        // narrower and further right than the circle's actual left edge -
+        // so this re-scans a band of rows spanning the dot's full diameter
+        // around that anchor and takes the minimum x seen, which is the
+        // left edge regardless of which row the initial scan happened to
+        // hit first.
+        func dotLeftEdge(_ bitmap: NSBitmapImageRep, target: NSColor, tolerance: CGFloat = 0.16, minY: Int = 0, maxX: Int? = nil, rowScale: CGFloat) -> (x: Int, y: Int)? {
+            guard let anchor = firstMatch(bitmap, target: target, tolerance: tolerance, minY: minY, maxX: maxX) else { return nil }
+            let band = Int(TaskRowLayout.statusDotDiameter * rowScale) + 2
+            var best = anchor
+            for y in max(0, anchor.y - band)...min(bitmap.pixelsHigh - 1, anchor.y + band) {
+                guard let x = leftmostMatch(bitmap, target: target, y: y, xRange: 0..<(maxX ?? bitmap.pixelsWide), tolerance: tolerance, yBand: 0) else { continue }
+                if x < best.x { best = (x, y) }
+            }
+            return best
+        }
+
+        var bitmap: NSBitmapImageRep?
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            try await Task.sleep(for: .milliseconds(100))
+            bitmap = captureBitmap()
+        } while bitmap == nil && Date() < deadline
+
+        // Give the two-phase (open terminals, then busy/idle/bell) state a
+        // moment to settle into the sidebar before the final capture, and
+        // re-capture once more so the image reflects it.
+        try await Task.sleep(for: .milliseconds(200))
+        bitmap = captureBitmap()
+
+        window.orderOut(nil)
+
+        guard let bitmap else {
+            Issue.record("Failed to capture window image")
+            return
+        }
+        if let pngData = bitmap.representation(using: .png, properties: [:]) {
+            try? pngData.write(to: URL(fileURLWithPath: "/tmp/bside-sidebar.png"))
+        }
+
+        let scaleX = CGFloat(bitmap.pixelsWide) / window.frame.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / window.frame.height
+
+        // "ACTIVE" is the first line the list content renders. Skips the
+        // title bar / toolbar strip (traffic lights, the sidebar toggle
+        // button) above it, where a light system icon can otherwise read as
+        // a false match for this fairly light grey.
+        let activeHeaderPixel = firstMatch(bitmap, target: NSColor(palette.textSecondary), tolerance: 0.05, minY: Int(40 * scaleY), maxX: Int(120 * scaleX))
+        // The running dot is the first (topmost) of the four Active rows.
+        // Blue/green ("unread"/"read") are used for every other measurement
+        // below because, empirically, this screenshot pipeline's colour
+        // fidelity is loose enough that the warm hues (amber "running" vs
+        // orange-red "question") aren't reliably distinguishable from one
+        // another, while blue and green stay unambiguous.
+        let runningDotPixel = dotLeftEdge(bitmap, target: NSColor(palette.statusRunning), rowScale: scaleY)
+
+        #expect(activeHeaderPixel != nil, "Could not find the ACTIVE header in the capture")
+        #expect(runningDotPixel != nil, "Could not find the running status dot in the capture")
+
+        // "PROJECTS" (textSecondary) is the first thing rendered after the
+        // Active section's four rows, and the project title (textPrimary) is
+        // the first thing rendered after that - locating both top-down from
+        // a known floor (the last Active row) is more robust than guessing
+        // how far above any particular task row the title sits. The
+        // question dot's *topmost* occurrence (the last Active row) is only
+        // used to find that floor, never compared against anything, so its
+        // colour ambiguity doesn't matter here.
+        // A tighter tolerance than dot-lookups elsewhere: at the default
+        // 0.16 this colour and `statusRunning` (both warm, amber/orange-red
+        // hues) are close enough, after this screenshot pipeline's own
+        // colour-management, to collide - `firstMatch` would return the
+        // Active section's *first* (running) row instead of its actual
+        // fourth (question) row. At 0.10 they don't collide, and this real
+        // question dot is still found reliably.
+        let questionDotPixel = firstMatch(bitmap, target: NSColor(palette.statusNeedsAttention), tolerance: 0.10)
+        var projectTitleX: Int?
+        // The task dot to compare against the project title: the *second*
+        // occurrence of the question dot's colour (the first, found above,
+        // is its own Active-section row), on the task row directly under
+        // the project header.
+        var projectSectionTaskDotX: Int?
+        if let questionDotPixel {
+            let projectsHeaderPixel = firstMatch(bitmap, target: NSColor(palette.textSecondary), tolerance: 0.05, minY: questionDotPixel.y + Int(4 * scaleY), maxX: Int(120 * scaleX))
+            if let projectsHeaderPixel {
+                let titlePixel = firstMatch(bitmap, target: NSColor(palette.textPrimary), tolerance: 0.05, minY: projectsHeaderPixel.y + Int(4 * scaleY), maxX: Int(120 * scaleX))
+                projectTitleX = titlePixel?.x
+
+                let secondQuestionDotPixel = dotLeftEdge(bitmap, target: NSColor(palette.statusNeedsAttention), tolerance: 0.10, minY: questionDotPixel.y + Int(30 * scaleY), rowScale: scaleY)
+                projectSectionTaskDotX = secondQuestionDotPixel?.x
+            }
+        }
+        #expect(projectTitleX != nil, "Could not find the project title below the PROJECTS header")
+        #expect(projectSectionTaskDotX != nil, "Could not find a task dot below the project header")
+
+
+        func points(_ px: Int, scale: CGFloat) -> CGFloat { CGFloat(px) / scale }
+
+        if let activeHeaderPixel, let runningDotPixel {
+            let headerX = points(activeHeaderPixel.x, scale: scaleX)
+            let dotX = points(runningDotPixel.x, scale: scaleX)
+            print("Measured alignment: ACTIVE header x=\(headerX)pt, Active-row running dot x=\(dotX)pt, delta=\(abs(headerX - dotX))pt")
+            // A few points of residual delta is the glyph's own left-side
+            // bearing (the "A" glyph's ink starts a little after its type
+            // box's left edge) rather than a layout bug - a plain box-edge
+            // comparison against a circle can't be pixel-exact the way two
+            // box edges could.
+            #expect(abs(headerX - dotX) <= 5, "Active-row dot (x=\(dotX)) should left-align with the ACTIVE header (x=\(headerX))")
+        }
+
+        if let projectSectionTaskDotX, let projectTitleX {
+            let dotX = points(projectSectionTaskDotX, scale: scaleX)
+            let titleX = points(projectTitleX, scale: scaleX)
+            print("Measured alignment: project title x=\(titleX)pt, task dot x=\(dotX)pt, delta=\(abs(titleX - dotX))pt")
+            // Same glyph left-side-bearing allowance as the ACTIVE header
+            // comparison above.
+            #expect(abs(titleX - dotX) <= 5, "Task dot (x=\(dotX)) should left-align with the project title (x=\(titleX))")
+        }
+
+        // No stray 1pt hairline: the old per-row indent guide is gone, and
+        // `.listRowSeparator(.hidden)` suppresses `List`'s own separators.
+        // A themed sidebar has no reason to show the raw system separator
+        // colour as a thin line inside a row's own content region (as
+        // opposed to the deliberate 1pt footer divider above "Add Project",
+        // which sits outside the `List` entirely).
+        if let activeHeaderPixel, let runningDotPixel {
+            // Scoped to the gap between the dot column and the task title
+            // text (well inside the row's own content, clear of both the
+            // window's own edge/chrome and the dot/text glyphs themselves)
+            // and to the vertical span of the Active section's own rows.
+            let separatorNS = NSColor(palette.separator)
+            var strayHairlineColumn: Int?
+            let scanXRange = Int(39 * scaleX)..<Int(41 * scaleX)
+            let scanYRange = activeHeaderPixel.y..<min(bitmap.pixelsHigh, runningDotPixel.y + Int(220 * scaleY))
+            // A genuine hairline (like the removed indent guide) is an
+            // unbroken line down the whole row span; a stray antialiased
+            // text/dot edge pixel that happens to land near the separator
+            // colour is, at most, a few pixels tall. Requiring an almost
+            // complete run across the scanned span tells the two apart.
+            let hairlineRunThreshold = Int(Double(scanYRange.count) * 0.85)
+            for x in scanXRange {
+                var runLength = 0
+                for y in scanYRange {
+                    guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+                    if isClose(color, separatorNS, tolerance: 0.03) {
+                        runLength += 1
+                        if runLength > hairlineRunThreshold {
+                            strayHairlineColumn = x
+                            break
+                        }
+                    } else {
+                        runLength = 0
+                    }
+                }
+                if strayHairlineColumn != nil { break }
+            }
+            #expect(strayHairlineColumn == nil, "Found a stray separator-coloured hairline inside the task rows at device x=\(strayHairlineColumn ?? -1)")
+
+        }
+    }
 }
 
 private func runGit(_ arguments: [String], in directory: URL) async throws {

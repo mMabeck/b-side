@@ -40,43 +40,49 @@ struct SidebarLogicTests {
         #expect(state.isExpanded(1))
     }
 
-    // MARK: - Status-to-colour mapping, all four states
+    // MARK: - Status-to-colour mapping, all five states
 
-    @Test("Each of the four task states maps to a distinct palette colour")
+    @Test("Each of the five task states maps to a distinct palette colour")
     func statusColorMappingCoversAllStates() {
         let palette = BSidePalette.fallback
         let colors: [TaskStatus: Color] = [
+            .question: palette.statusNeedsAttention,
             .running: palette.statusRunning,
-            .needsAttention: palette.statusNeedsAttention,
-            .idle: palette.textDisabled,
-            .finished: palette.statusSuccess,
+            .unread: palette.statusUnread,
+            .read: palette.statusSuccess,
+            .inactive: palette.textDisabled,
         ]
         for (status, expected) in colors {
             #expect(status.color(in: palette) == expected)
         }
     }
 
-    @Test("Status derivation prioritises merged, then attention, then activity, then idle")
+    @Test("Status derivation prioritises attention, then activity, then open/unread/read, then inactive")
     func statusDerivationPriority() {
-        #expect(TaskStatus.derive(merged: true, isBlocked: true, isVanished: true, activeChildCount: 5) == .finished)
-        #expect(TaskStatus.derive(merged: false, isBlocked: true, isVanished: false, activeChildCount: 3) == .needsAttention)
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: true, activeChildCount: 0) == .needsAttention)
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 1) == .running)
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0) == .idle)
+        #expect(TaskStatus.derive(isBlocked: true, isVanished: false, activeChildCount: 3, isOpen: true, isUnread: false) == .question)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: true, activeChildCount: 0, isOpen: true, isUnread: false) == .question)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 1, isOpen: true, isUnread: false) == .running)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: false, isUnread: false) == .inactive)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: true) == .unread)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false) == .read)
     }
 
-    @Test("A pending terminal question marks a task needing attention even with no other signal")
+    @Test("A pending terminal question marks a task needing attention even with no other signal, and outranks running")
     func needsAttentionFromTerminalQuestion() {
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true) == .needsAttention)
-        #expect(TaskStatus.derive(merged: true, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true) == .finished)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false, needsAttention: true) == .question)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false, needsAttention: true, busy: true) == .question)
     }
 
-    @Test("A busy parent agent reads as running even with no active subagent child, but never outranks merged/needsAttention")
+    @Test("A busy parent agent reads as running even with no active subagent child, and outranks open/unread/read/inactive")
     func busyFoldsIntoRunningTier() {
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, busy: true) == .running)
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, busy: false) == .idle)
-        #expect(TaskStatus.derive(merged: true, isBlocked: false, isVanished: false, activeChildCount: 0, busy: true) == .finished)
-        #expect(TaskStatus.derive(merged: false, isBlocked: false, isVanished: false, activeChildCount: 0, needsAttention: true, busy: true) == .needsAttention)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false, busy: true) == .running)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false, busy: false) == .read)
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: false, isUnread: false, busy: true) == .running)
+    }
+
+    @Test("A task not open in any tab reads inactive even if it happens to be unread")
+    func closedTaskReadsInactiveRegardlessOfUnread() {
+        #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: false, isUnread: true) == .inactive)
     }
 
     // MARK: - Branch-sync summary formatting
@@ -110,5 +116,5 @@ struct SidebarLogicTests {
 }
 
 private extension TaskStatus {
-    static var allCasesForTesting: [TaskStatus] { [.running, .needsAttention, .idle, .finished] }
+    static var allCasesForTesting: [TaskStatus] { [.question, .running, .unread, .read, .inactive] }
 }

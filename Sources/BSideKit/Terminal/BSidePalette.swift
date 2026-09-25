@@ -60,10 +60,18 @@ public struct BSidePalette: Equatable, Sendable {
 
     public let accent: Color
 
+    /// A task that's busy (a live subagent child or a busy parent Pi loop).
+    /// Amber/yellow so the sidebar's blinking "running" dot reads distinctly
+    /// from the blue "unread" and green "read" dots either side of it.
     public let statusRunning: Color
+    /// A task whose terminal raised a question, or whose worktree is blocked
+    /// or vanished. An orange-red, the palette's most attention-grabbing
+    /// status colour.
     public let statusNeedsAttention: Color
     public let statusError: Color
     public let statusSuccess: Color
+    /// An open task with output since it was last viewed.
+    public let statusUnread: Color
 
     /// Standard system colours, all of which already adapt to the user's
     /// macOS light/dark appearance on their own. Used whenever no Ghostty
@@ -82,10 +90,11 @@ public struct BSidePalette: Equatable, Sendable {
         selectionBackground: Color(nsColor: .selectedContentBackgroundColor),
         selectionForeground: Color(nsColor: .selectedMenuItemTextColor),
         accent: Color.accentColor,
-        statusRunning: .blue,
-        statusNeedsAttention: .yellow,
+        statusRunning: .orange,
+        statusNeedsAttention: Color(red: 0.85, green: 0.24, blue: 0.1),
         statusError: .red,
-        statusSuccess: .green
+        statusSuccess: .green,
+        statusUnread: .blue
     )
 
     /// Derives the full palette from a resolved Ghostty theme definition.
@@ -132,8 +141,13 @@ public struct BSidePalette: Equatable, Sendable {
             selectionBackground: selectionBg.color,
             selectionForeground: selectionFg.color,
             accent: accentColor.color,
-            statusRunning: status(base: 4, bright: 12).color,
-            statusNeedsAttention: status(base: 3, bright: 11).color,
+            statusRunning: status(base: 3, bright: 11).color,
+            // A blend of the theme's own red toward its own yellow, rather
+            // than pure red, so "question" reads as orange-red and stays
+            // visually distinct from "running"'s pure amber/yellow.
+            statusNeedsAttention: status(base: 1, bright: 9)
+                .blended(toward: status(base: 3, bright: 11), amount: 0.35)
+                .color,
             statusError: status(base: 1, bright: 9).color,
             // The theme's own ANSI green is often a yellowish lime (Ayu
             // Mirage's bright green, d5ff80, reads closer to lime than
@@ -141,7 +155,8 @@ public struct BSidePalette: Equatable, Sendable {
             // colour at a glance. Nudged into a true-green hue band while
             // keeping its own saturation/lightness, so it still varies by
             // theme instead of becoming one hardcoded green.
-            statusSuccess: status(base: 2, bright: 10).huePulled(intoRange: BSidePalette.successHueRange).color
+            statusSuccess: status(base: 2, bright: 10).huePulled(intoRange: BSidePalette.successHueRange).color,
+            statusUnread: status(base: 4, bright: 12).color
         )
     }
 }
