@@ -64,8 +64,21 @@ public final class SubagentFeedStore {
     public func ingest(taskId: Int64, childId: String, event: SubagentEvent) {
         mutate(taskId: taskId, childId: childId) { run in
             switch event {
-            case let .messageEnd(role, stopReason, errorMessage, toolCalls, _):
+            case let .messageEnd(role, stopReason, errorMessage, toolCalls, text, usage):
                 if role == "assistant" {
+                    run.statistics.turns += 1
+                    if let usage {
+                        run.statistics.input += usage.input
+                        run.statistics.output += usage.output
+                        run.statistics.cacheRead += usage.cacheRead
+                        run.statistics.cacheWrite += usage.cacheWrite
+                        run.statistics.cost += usage.cost
+                        run.statistics.contextTokens = usage.totalTokens
+                        if run.statistics.model == nil { run.statistics.model = usage.model }
+                    }
+                    if let text, !text.isEmpty {
+                        run.latestAssistantText = text
+                    }
                     for call in toolCalls {
                         guard let id = call.id, let name = call.name else { continue }
                         let line = ToolCallLineFormatter.format(toolName: name, args: call.arguments)
@@ -74,7 +87,6 @@ public final class SubagentFeedStore {
                             run.toolCallRows[index].line = line
                         } else {
                             run.toolCallRows.append(ToolCallRow(id: id, name: name, line: line))
-                            run.statistics.turns += 1
                         }
                         if isQuestionTool(name) {
                             run.state = .blocked
@@ -115,6 +127,10 @@ public final class SubagentFeedStore {
             let failed = (payload.exitCode ?? 0) != 0 || payload.stopReason == "error"
             run.state = failed ? .failed : .completed
             run.endedAt = endedAt
+            if var statistics = payload.statistics {
+                statistics.model = statistics.model ?? run.statistics.model
+                run.statistics = statistics
+            }
             if failed { run.errorMessage = payload.errorMessage ?? run.errorMessage }
         }
     }

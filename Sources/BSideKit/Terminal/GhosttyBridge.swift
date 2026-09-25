@@ -233,7 +233,11 @@ public enum GhosttyBridge {
     /// with no app menu item of their own here, but are released
     /// defensively for the same reason — both are exactly the shape of
     /// standard AppKit shortcut a terminal emulator's defaults are prone to
-    /// binding out from under an embedding app.
+    /// binding out from under an embedding app. Cmd+Shift+R is unbound on
+    /// the same defensive basis — Ghostty's own default binds plain Cmd+R
+    /// to `reload_config`, and `TerminalCommands`' "Restart Pi Session"
+    /// deliberately uses Cmd+Shift+R instead of Cmd+R to avoid colliding
+    /// with it outright.
     ///
     /// Copy/paste/select-all/find (`cmd+c`/`cmd+v`/`cmd+a`/`cmd+f`) are
     /// deliberately left bound to the terminal: those are exactly the keys a
@@ -250,6 +254,7 @@ public enum GhosttyBridge {
     keybind = cmd+shift+n=unbind
     keybind = cmd+h=unbind
     keybind = cmd+m=unbind
+    keybind = cmd+shift+r=unbind
     \(digitUnbinds)
 
     """
@@ -403,7 +408,23 @@ public final class TerminalSurfaceHost: ObservableObject {
     ///     the place of `shell -l`. The task agent terminal passes a
     ///     `PiSessionService.launchCommand(...)` here; the bottom drawer's
     ///     scratch terminal leaves this `nil` to keep the plain login shell.
-    public init(workingDirectory: URL, shell: String? = nil, command: String? = nil) {
+    ///   - envVars: Extra environment variables the spawned process (and
+    ///     everything it forks) inherits. The task agent terminal passes
+    ///     `PiSessionService.launchEnvironment(...)` here so its `pi`
+    ///     process can find `SubagentEventServer`; the scratch terminal
+    ///     leaves this empty.
+    ///   - onExit: Called when the surface's own process exits on its own
+    ///     (not via an explicit teardown the caller already knows about),
+    ///     with whether the process was still alive at close. `SubagentPaneStore`
+    ///     passes this to remove a child pane when its command exits instead
+    ///     of waiting for an explicit `/close` call.
+    public init(
+        workingDirectory: URL,
+        shell: String? = nil,
+        command: String? = nil,
+        envVars: [String: String] = [:],
+        onExit: ((Bool) -> Void)? = nil
+    ) {
         let resolvedConfig = GhosttyBridge.resolveUserConfig()
         state = TerminalViewState(
             configSource: resolvedConfig.configSource,
@@ -415,11 +436,13 @@ public final class TerminalSurfaceHost: ObservableObject {
         state.configuration = TerminalSurfaceOptions(
             backend: .exec,
             workingDirectory: workingDirectory.path,
+            envVars: envVars,
             command: command ?? "\(resolvedShell) -l"
         )
 
         state.onClose = { processAlive in
             Self.logger.info("surface closed, processAlive=\(processAlive, privacy: .public)")
+            onExit?(processAlive)
         }
 
         if let issue = state.controller.lastConfigurationIssue {
@@ -461,6 +484,19 @@ public final class TerminalSurfaceHost: ObservableObject {
         MainActor.assumeIsolated {
             TerminalSurfaceHostRegistry.shared.unregister(self)
         }
+    }
+
+    /// Backs a surface with an `InMemoryTerminalSession` instead of a real
+    /// pty (`.exec`) — used only by `SubagentStripHost` today. No
+    /// `workingDirectory`/`command`/`onExit`: there is no process, so
+    /// nothing about process lifecycle applies.
+    fileprivate init(inMemorySession: InMemoryTerminalSession) {
+        let resolvedConfig = GhosttyBridge.resolveUserConfig()
+        state = TerminalViewState(
+            configSource: resolvedConfig.configSource,
+            theme: resolvedConfig.theme
+        )
+        state.configuration = TerminalSurfaceOptions(backend: .inMemory(inMemorySession))
     }
 
     /// Whether this surface should keep rendering. Per native-rewrite.md §6,
@@ -519,6 +555,102 @@ public struct TerminalHostView: View {
         } else {
             TerminalSurfaceView(context: host.state)
         }
+    }
+}
+
+/// One in-memory Ghostty surface used purely to render the subagent card
+/// strip (native-rewrite.md §"Subagents, and replacing tmux"): no pty, no
+/// child process — `render(lines:)` writes plain ANSI bytes
+/// (`SubagentStripRenderer`'s output) directly into the terminal's grid, and
+/// mouse clicks over the strip come back out through `onHostInput` as raw
+/// SGR report bytes (`InMemoryTerminalSession`'s `write` handler fires
+/// whenever Ghostty would otherwise have sent bytes to a real pty's stdin —
+/// keystrokes, or here, mouse reports — since there is no pty to send them
+/// to). `SubagentStripMouseParser` turns those bytes into clicks.
+@MainActor
+public final class SubagentStripHost: ObservableObject {
+    public let hostView: TerminalSurfaceHost
+    private let session: InMemoryTerminalSession
+
+    /// Raw bytes Ghostty would have sent to a real process's stdin — in
+    /// practice, for this surface, SGR mouse reports once
+    /// ``enableMouseReporting()`` has run. Set by the caller
+    /// (`SubagentStripView`) before the surface can report anything useful.
+    public var onHostInput: ((Data) -> Void)?
+
+    /// The most recent grid metrics Ghostty has reported for this surface,
+    /// via the in-memory session's resize callback — `nil` until the
+    /// surface first attaches to a real view and reports one.
+    @Published public private(set) var latestViewport: InMemoryTerminalViewport?
+
+    public init() {
+        var capturedSession: InMemoryTerminalSession!
+        let box = HostInputBox()
+        capturedSession = InMemoryTerminalSession(
+            write: { data in
+                Task { @MainActor in box.host?.onHostInput?(data) }
+            },
+            resize: { viewport in
+                Task { @MainActor in box.host?.latestViewport = viewport }
+            }
+        )
+        session = capturedSession
+        hostView = TerminalSurfaceHost(inMemorySession: capturedSession)
+        box.host = self
+    }
+
+    /// Turns on SGR mouse reporting (`\e[?1000h\e[?1006h`) so a click over
+    /// this surface is delivered back through ``onHostInput`` instead of
+    /// being handled as ordinary terminal input. Bytes sent before a real
+    /// view has attached are buffered by the session and flushed on attach,
+    /// so this is safe to call immediately after ``init()``.
+    public func enableMouseReporting() {
+        session.receive("\u{1B}[?1000h\u{1B}[?1006h")
+    }
+
+    /// Clears the grid and redraws it from `lines` — the strip is a
+    /// full-repaint surface, not an incremental one, since
+    /// `SubagentStripRenderer` re-renders the whole thing on every tick
+    /// anyway. Cursor stays hidden: nothing in the strip is ever "typed
+    /// into".
+    public func render(lines: [String]) {
+        let body = (["\u{1B}[H\u{1B}[2J\u{1B}[?25l"] + lines).joined(separator: "\r\n")
+        session.receive(body)
+    }
+
+    /// The point height needed to show `rows` terminal rows, derived from
+    /// the surface's own reported cell metrics once available (device
+    /// pixels, divided by the screen's backing scale), or a reasonable
+    /// fallback for the brief window before the surface has attached and
+    /// reported its first viewport.
+    public func pointHeight(forRows rows: Int) -> CGFloat {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let viewport = latestViewport, viewport.cellHeightPixels > 0 else {
+            return CGFloat(rows) * 18
+        }
+        return CGFloat(viewport.cellHeightPixels) / scale * CGFloat(rows)
+    }
+
+    public var columns: Int {
+        Int(latestViewport?.columns ?? 0)
+    }
+
+    /// `InMemoryTerminalSession`'s closures are captured at `init` time,
+    /// before `self` exists — this indirection lets them reach the fully
+    /// constructed host afterwards instead of requiring a two-phase init.
+    private final class HostInputBox: @unchecked Sendable {
+        weak var host: SubagentStripHost?
+    }
+}
+
+extension TerminalSurfaceHost {
+    /// A `TerminalSurfaceHost` backed by an in-memory session instead of a
+    /// real pty/exec surface — for tests that need to create several panes
+    /// at once (`SubagentPaneStoreTests`, `SubagentEventServerTests`) without
+    /// each one spawning a real Ghostty exec surface: spawning many real
+    /// exec surfaces back-to-back crashes libghostty under `swift test`.
+    static func makeInMemoryForTesting() -> TerminalSurfaceHost {
+        TerminalSurfaceHost(inMemorySession: InMemoryTerminalSession(write: { _ in }, resize: { _ in }))
     }
 }
 

@@ -140,4 +140,22 @@ struct MainAreaLogicTests {
     func visibleTaskIDForNoSelection() {
         #expect(MainAreaView.visibleTaskID(for: .none) == nil)
     }
+
+    // MARK: - Focus target
+
+    @Test("With no child shown, the parent is the focus target")
+    func focusTargetNoChildShown() {
+        #expect(MainAreaView.focusTarget(shownChildID: nil, livePaneIDs: ["c1"]) == .parent)
+    }
+
+    @Test("With a live child shown, the child is the focus target")
+    func focusTargetLiveChildShown() {
+        #expect(MainAreaView.focusTarget(shownChildID: "c1", livePaneIDs: ["c1", "c2"]) == .child("c1"))
+    }
+
+    @Test("A shown child id that no longer has a live pane falls back to the parent")
+    func focusTargetStaleShownChildFallsBackToParent() {
+        #expect(MainAreaView.focusTarget(shownChildID: "gone", livePaneIDs: ["c1"]) == .parent)
+    }
+
 }

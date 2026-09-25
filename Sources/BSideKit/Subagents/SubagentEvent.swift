@@ -8,7 +8,7 @@ import Foundation
 /// but no arguments, and only report liveness/completion for a call already
 /// known from that assistant message.
 public enum SubagentEvent: Sendable, Equatable {
-    case messageEnd(role: String?, stopReason: String?, errorMessage: String?, toolCalls: [SubagentToolCall], text: String?)
+    case messageEnd(role: String?, stopReason: String?, errorMessage: String?, toolCalls: [SubagentToolCall], text: String?, usage: MessageUsage? = nil)
     case toolResult(toolCallId: String?, isError: Bool)
     case toolExecutionUpdate(toolCallId: String?, toolName: String?)
     case toolExecutionEnd(toolCallId: String?, toolName: String?)
@@ -35,7 +35,14 @@ public enum SubagentEvent: Sendable, Equatable {
             let errorMessage = message["errorMessage"]?.stringValue
             let toolCalls = extractToolCalls(from: message)
             let text = extractText(from: message)
-            return .messageEnd(role: role, stopReason: stopReason, errorMessage: errorMessage, toolCalls: toolCalls, text: text)
+            return .messageEnd(
+                role: role,
+                stopReason: stopReason,
+                errorMessage: errorMessage,
+                toolCalls: toolCalls,
+                text: text,
+                usage: MessageUsage.decode(from: message)
+            )
         case "tool_execution_update":
             let toolCallId = object["toolCallId"]?.stringValue
             let toolName = object["toolName"]?.stringValue ?? object["tool"]?.stringValue
@@ -80,11 +87,56 @@ public struct SubagentToolCall: Sendable, Equatable {
     public var arguments: [String: JSONValue]
 }
 
+/// Token usage of one assistant message, as Pi reports it on `message.usage`
+/// (`cost` is `usage.cost.total`), plus the message's `model`.
+public struct MessageUsage: Sendable, Equatable {
+    public var input = 0
+    public var output = 0
+    public var cacheRead = 0
+    public var cacheWrite = 0
+    public var cost: Double = 0
+    public var totalTokens = 0
+    public var model: String?
+
+    public init(input: Int = 0, output: Int = 0, cacheRead: Int = 0, cacheWrite: Int = 0, cost: Double = 0, totalTokens: Int = 0, model: String? = nil) {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.cost = cost
+        self.totalTokens = totalTokens
+        self.model = model
+    }
+
+    static func decode(from message: [String: JSONValue]) -> MessageUsage? {
+        guard let usage = message["usage"]?.objectValue else { return nil }
+        return MessageUsage(
+            input: usage["input"]?.intValue ?? 0,
+            output: usage["output"]?.intValue ?? 0,
+            cacheRead: usage["cacheRead"]?.intValue ?? 0,
+            cacheWrite: usage["cacheWrite"]?.intValue ?? 0,
+            cost: usage["cost"]?.objectValue?["total"]?.doubleValue ?? 0,
+            totalTokens: usage["totalTokens"]?.intValue ?? 0,
+            model: message["model"]?.stringValue
+        )
+    }
+}
+
 /// The `done.json` payload written when a child finishes.
 public struct SubagentDonePayload: Sendable, Equatable {
     public var exitCode: Int?
     public var stopReason: String?
     public var errorMessage: String?
+    /// Cumulative totals for the run, when the sender tracks them. Replaces
+    /// the per-message tally, which misses anything sent before the card opened.
+    public var statistics: RunStatistics?
+
+    public init(exitCode: Int? = nil, stopReason: String? = nil, errorMessage: String? = nil, statistics: RunStatistics? = nil) {
+        self.exitCode = exitCode
+        self.stopReason = stopReason
+        self.errorMessage = errorMessage
+        self.statistics = statistics
+    }
 
     public static func decode(from data: Data) -> SubagentDonePayload? {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: data),
@@ -93,7 +145,19 @@ public struct SubagentDonePayload: Sendable, Equatable {
         return SubagentDonePayload(
             exitCode: object["exitCode"]?.intValue,
             stopReason: object["stopReason"]?.stringValue,
-            errorMessage: object["errorMessage"]?.stringValue
+            errorMessage: object["errorMessage"]?.stringValue,
+            statistics: object["usage"]?.objectValue.map { usage in
+                RunStatistics(
+                    turns: usage["turns"]?.intValue ?? 0,
+                    input: usage["input"]?.intValue ?? 0,
+                    output: usage["output"]?.intValue ?? 0,
+                    cacheRead: usage["cacheRead"]?.intValue ?? 0,
+                    cacheWrite: usage["cacheWrite"]?.intValue ?? 0,
+                    cost: usage["cost"]?.doubleValue ?? 0,
+                    contextTokens: usage["contextTokens"]?.intValue ?? 0,
+                    model: object["model"]?.stringValue
+                )
+            }
         )
     }
 }

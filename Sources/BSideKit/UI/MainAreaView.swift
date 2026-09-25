@@ -32,6 +32,18 @@ struct MainAreaView: View {
 
     @State private var hostsByTaskID: [Int64: TerminalSurfaceHost] = [:]
 
+    /// Task ids whose parent host's Pi process has exited on its own —
+    /// distinct from the task's terminal being closed or purged, which
+    /// drops the id from `hostsByTaskID` entirely instead. While an id is
+    /// in here, its cached host's slot in the view tree renders
+    /// `PiSessionEndedView` (see `TaskTerminalAreaView`) instead of the
+    /// (dead) `TerminalHostView`, whether or not that task is currently the
+    /// visible one — so a hidden task whose Pi exits shows the same state
+    /// once it's selected. Cleared by `relaunchHost(for:project:)`, and by
+    /// `closeHost`/`purgeHosts` when the task's terminal or the task itself
+    /// goes away.
+    @State private var exitedTaskIDs: Set<Int64> = []
+
     /// Serializes `ensureHost` per task id so concurrent calls (e.g. a rapid
     /// A -> B -> A selection change re-triggering `.task(id:)`) can't both
     /// see "no host yet" and each start their own conversation — see
@@ -64,9 +76,17 @@ struct MainAreaView: View {
             ForEach(hostsByTaskID.keys.sorted(), id: \.self) { taskID in
                 if let host = hostsByTaskID[taskID] {
                     let isVisible = taskID == MainAreaView.visibleTaskID(for: store.mainSelection)
-                    TerminalHostView(host: host, focusedTaskID: $focusedTaskID, taskID: taskID)
-                        .opacity(isVisible ? 1 : 0)
-                        .allowsHitTesting(isVisible)
+                    TaskTerminalAreaView(
+                        store: store,
+                        host: host,
+                        taskID: taskID,
+                        focusedTaskID: $focusedTaskID,
+                        isExited: exitedTaskIDs.contains(taskID),
+                        onResume: { requestRelaunch(taskID: taskID) },
+                        isSelected: isVisible
+                    )
+                    .opacity(isVisible ? 1 : 0)
+                    .allowsHitTesting(isVisible)
                     TerminalAlertBridge(host: host, store: store, taskID: taskID)
                 }
             }
@@ -92,10 +112,27 @@ struct MainAreaView: View {
         .onChange(of: liveTaskIDs) { _, ids in
             purgeHosts(keeping: ids)
         }
+        .onChange(of: store.subagentPanes.version) { _, _ in
+            MainAreaView.reconcileSwap(store.subagentSwap, panesByTask: store.subagentPanes.panesByTask)
+            syncVisibility()
+        }
+        .onChange(of: store.subagentSwap.version) { _, _ in
+            syncVisibility()
+            syncFocus()
+        }
         .onChange(of: store.closedTerminalTaskID) { _, closedID in
             guard let closedID else { return }
             closeHost(taskID: closedID)
             store.acknowledgeTerminalClosed(closedID)
+        }
+        .onChange(of: store.restartRequestedTaskID) { _, requestedID in
+            guard let requestedID else { return }
+            Task {
+                if let task = store.task(withId: requestedID), let project = store.project(forTask: task) {
+                    await relaunchHost(for: task, project: project)
+                }
+                store.acknowledgeRestartRequested(requestedID)
+            }
         }
         // A task's surface only holds first responder while its window is
         // key; switching away to another app or window and back leaves the
@@ -184,9 +221,20 @@ struct MainAreaView: View {
             taskName: task.name
         )
         guard hostsByTaskID[id] == nil else { return }
+        let exitedBinding = $exitedTaskIDs
         hostsByTaskID[id] = TerminalSurfaceHost(
             workingDirectory: workingDirectory,
-            command: command
+            command: command,
+            envVars: PiSessionService.launchEnvironment(taskId: id, subagentEndpoint: store.subagentServer?.address),
+            // Fires when this task's `pi` process exits on its own — the
+            // user quit it, or it crashed — regardless of `processAlive`
+            // (an explicit teardown the app itself initiated goes through
+            // `closeHost`/`relaunchHost` instead, which remove the id from
+            // `hostsByTaskID` outright rather than leaving a dead surface
+            // behind for this to mark exited).
+            onExit: { [exitedBinding] _ in
+                exitedBinding.wrappedValue = MainAreaView.exitedTaskIDs(afterExit: id, current: exitedBinding.wrappedValue)
+            }
         )
         store.noteTerminalOpened(taskID: id)
 
@@ -309,17 +357,30 @@ struct MainAreaView: View {
     /// task doesn't poll forever.
     private static let autoRenameWatchDuration: TimeInterval = 30 * 60
 
-    /// Marks the active task's host visible and every other cached host not
-    /// visible, so hidden surfaces stop drawing frames nobody sees (per
-    /// `TerminalSurfaceHost.isVisible`'s own doc comment) without losing
-    /// their grid, scrollback, or running shell. Derived from `mainSelection`,
-    /// not the raw `selectedTaskID`, so this never disagrees with which
-    /// branch of the `switch` above is actually on screen — see
-    /// `visibleTaskID(for:)`.
+    /// Marks the active task's *shown* host visible and every other cached
+    /// host not visible, so hidden surfaces stop drawing frames nobody sees
+    /// (per `TerminalSurfaceHost.isVisible`'s own doc comment) without
+    /// losing their grid, scrollback, or running shell. Derived from
+    /// `mainSelection`, not the raw `selectedTaskID`, so this never
+    /// disagrees with which branch of the `switch` above is actually on
+    /// screen — see `visibleTaskID(for:)`.
+    ///
+    /// "The active task" alone isn't enough for panes: swapping (per
+    /// `ProjectsStore.subagentSwap`) only ever shows *one* surface for a
+    /// task at a time, so a pane that isn't the currently shown child must
+    /// stay not-visible even while its task is the visible one — same for
+    /// the parent host when a child is shown instead.
     private func syncVisibility() {
         let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         for (id, host) in hostsByTaskID {
-            host.isVisible = (id == visibleID)
+            let shownChildID = store.subagentSwap.shownChildID(forTask: id)
+            host.isVisible = (id == visibleID) && shownChildID == nil
+        }
+        for (id, panes) in store.subagentPanes.panesByTask {
+            let shownChildID = store.subagentSwap.shownChildID(forTask: id)
+            for pane in panes {
+                pane.host.isVisible = (id == visibleID) && pane.id == shownChildID
+            }
         }
     }
 
@@ -346,9 +407,40 @@ struct MainAreaView: View {
     private func syncFocus() {
         let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         focusedTaskID = visibleID
-        if let visibleID, let host = hostsByTaskID[visibleID] {
-            host.state.requestFocus()
+        // An exited task has no live surface to hand focus to —
+        // `PiSessionEndedView`'s Resume button reads `focusedTaskID` itself
+        // (see its doc comment) via the same `.focused` binding a running
+        // task's `TerminalHostView` uses, so setting `focusedTaskID` above
+        // is already enough for it.
+        guard let visibleID, !exitedTaskIDs.contains(visibleID) else { return }
+        // A child's surface can be swapped into the main area in place of
+        // the parent (`ProjectsStore.subagentSwap`) — focus must follow
+        // whichever one is actually shown, or the parent keeps first
+        // responder while a child's terminal is what's on screen.
+        let panes = store.subagentPanes.panes(forTask: visibleID)
+        let shownChildID = store.subagentSwap.shownChildID(forTask: visibleID)
+        switch MainAreaView.focusTarget(shownChildID: shownChildID, livePaneIDs: Set(panes.map(\.id))) {
+        case .child(let childID):
+            panes.first(where: { $0.id == childID })?.host.state.requestFocus()
+        case .parent:
+            hostsByTaskID[visibleID]?.state.requestFocus()
         }
+    }
+
+    enum FocusTarget: Equatable {
+        case parent
+        case child(String)
+    }
+
+    /// Which surface `syncFocus()` should hand keyboard focus to: the shown
+    /// child, if `shownChildID` names one that's actually still live, or the
+    /// parent otherwise (no child shown, or a stale id left over from one
+    /// that already closed). Pure so it's directly testable.
+    static func focusTarget(shownChildID: String?, livePaneIDs: Set<String>) -> FocusTarget {
+        if let shownChildID, livePaneIDs.contains(shownChildID) {
+            return .child(shownChildID)
+        }
+        return .parent
     }
 
     /// Ends one task's terminal without waiting for its task to be deleted
@@ -367,6 +459,10 @@ struct MainAreaView: View {
         autoRenameWatchers.removeValue(forKey: taskID)?.cancel()
         store.pruneOpenTerminals(removing: [taskID])
         conversationGate.releaseClaim(for: taskID)
+        store.subagentPanes.closeAll(taskId: taskID)
+        store.subagentSwap.closeAll(taskId: taskID)
+        store.subagentStripBatches.reset(taskId: taskID)
+        exitedTaskIDs.remove(taskID)
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
@@ -374,15 +470,78 @@ struct MainAreaView: View {
         for id in purged {
             hostsByTaskID.removeValue(forKey: id)
             autoRenameWatchers.removeValue(forKey: id)?.cancel()
+            store.subagentPanes.closeAll(taskId: id)
+            store.subagentSwap.closeAll(taskId: id)
+            store.subagentStripBatches.reset(taskId: id)
+            exitedTaskIDs.remove(id)
         }
         store.pruneOpenTerminals(removing: purged)
         conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)
+    }
+
+    /// Fired by `PiSessionEndedView`'s Resume button: looks `taskID` up as a
+    /// live task (it may have been deleted or archived while its dead
+    /// surface sat on screen) and, if still live, relaunches it.
+    private func requestRelaunch(taskID: Int64) {
+        guard let task = store.task(withId: taskID), let project = store.project(forTask: task) else { return }
+        Task { await relaunchHost(for: task, project: project) }
+    }
+
+    /// Tears down `task`'s dead (or still-running) `TerminalSurfaceHost` and
+    /// relaunches it via `ensureHost` — the exact same
+    /// `PiSessionService.launchCommand` path a normal reopen uses — so the
+    /// relaunch resumes the same pi session/transcript rather than starting
+    /// fresh. Shared by `PiSessionEndedView`'s Resume button and
+    /// `TerminalCommands`' "Restart Pi Session" command, via
+    /// `ProjectsStore.restartRequestedTaskID`.
+    ///
+    /// Releases the `conversationGate` claim the same way `closeHost` does:
+    /// without it, `ensureHost` would find the id still claimed and
+    /// silently do nothing.
+    @MainActor
+    private func relaunchHost(for task: TaskRecord, project: Project) async {
+        guard let id = task.id else { return }
+        hostsByTaskID.removeValue(forKey: id)
+        exitedTaskIDs = MainAreaView.exitedTaskIDs(afterRelaunch: id, current: exitedTaskIDs)
+        conversationGate.releaseClaim(for: id)
+        await ensureHost(for: task, project: project)
+        syncVisibility()
+        syncFocus()
+    }
+
+    /// Pure so it's directly testable: marks `taskID` exited, leaving every
+    /// other id untouched.
+    static func exitedTaskIDs(afterExit taskID: Int64, current: Set<Int64>) -> Set<Int64> {
+        current.union([taskID])
+    }
+
+    /// Pure so it's directly testable: clears `taskID`'s exited flag ahead
+    /// of relaunching it, leaving every other id untouched.
+    static func exitedTaskIDs(afterRelaunch taskID: Int64, current: Set<Int64>) -> Set<Int64> {
+        current.subtracting([taskID])
     }
 
     /// Pure so it's directly testable: cached host ids no longer present
     /// among live (non-archived, non-deleted) tasks should be evicted.
     static func idsToPurge(cachedIDs: Set<Int64>, liveTaskIDs: Set<Int64>) -> Set<Int64> {
         cachedIDs.subtracting(liveTaskIDs)
+    }
+
+    /// A pane can close without the whole task terminal closing
+    /// (`SubagentPaneStore.close`), which would otherwise leave
+    /// `SubagentSwapStore` pointing at a surface that no longer exists —
+    /// reconciles it back to "show the parent" for every task whose shown
+    /// or highlighted child is no longer among its live panes. Pure in
+    /// effect (only touches `swap`, not any `MainAreaView` state), so it's
+    /// directly testable against real `SubagentSwapStore`/`SubagentPaneStore`
+    /// instances.
+    static func reconcileSwap(_ swap: SubagentSwapStore, panesByTask: [Int64: [SubagentPaneStore.ChildPane]]) {
+        for (taskID, childID) in swap.shownChildIDByTask where !(panesByTask[taskID] ?? []).contains(where: { $0.id == childID }) {
+            swap.handleClosed(childId: childID, taskId: taskID)
+        }
+        for (taskID, childID) in swap.highlightedChildIDByTask where !(panesByTask[taskID] ?? []).contains(where: { $0.id == childID }) {
+            swap.handleClosed(childId: childID, taskId: taskID)
+        }
     }
 
     /// The task id that should read as visible/focused for a given

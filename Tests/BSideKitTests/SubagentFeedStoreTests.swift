@@ -44,6 +44,29 @@ struct SubagentFeedStoreTests {
         #expect(store.runs(forTask: 1).first?.state == .active)
     }
 
+    @Test("Assistant messages count turns and accumulate usage; done's totals win")
+    func accumulatesUsage() throws {
+        let store = SubagentFeedStore()
+        store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
+        var parser = SubagentEventLineParser()
+        let line = #"{"type":"message_end","message":{"role":"assistant","model":"claude-opus-5","usage":{"input":2,"output":90,"cacheWrite":15000,"totalTokens":15092,"cost":{"total":0.01}},"content":[{"type":"toolCall","id":"a","name":"bash","arguments":{}},{"type":"toolCall","id":"b","name":"read","arguments":{}}]}}"# + "\n"
+        for event in parser.consume(Data((line + line).utf8)) {
+            store.ingest(taskId: 1, childId: "c1", event: event)
+        }
+        let live = try #require(store.runs(forTask: 1).first?.statistics)
+        #expect(live.turns == 2)
+        #expect(live.output == 180)
+        #expect(live.contextTokens == 15092)
+        #expect(live.model == "claude-opus-5")
+
+        let done = try #require(SubagentDonePayload.decode(from: Data(#"{"exitCode":0,"usage":{"turns":3,"input":5,"output":300,"contextTokens":16000}}"#.utf8)))
+        store.markDone(taskId: 1, childId: "c1", payload: done)
+        let final = try #require(store.runs(forTask: 1).first?.statistics)
+        #expect(final.turns == 3)
+        #expect(final.output == 300)
+        #expect(final.model == "claude-opus-5")
+    }
+
     @Test("done with exitCode 0 marks the run completed")
     func doneCompletesSuccessfully() {
         let store = SubagentFeedStore()
@@ -85,6 +108,17 @@ struct SubagentFeedStoreTests {
         store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
         store.ingest(taskId: 1, childId: "c1", event: toolCallMessageEnd(id: "1", name: "bash", arguments: ["command": .string("ls")]))
         #expect(store.runs(forTask: 1).first?.toolLines == ["$ ls"])
+    }
+
+    @Test("An assistant message_end text part is kept as the run's latest assistant text")
+    func messageEndTextUpdatesLatestAssistantText() {
+        let store = SubagentFeedStore()
+        store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
+        store.ingest(taskId: 1, childId: "c1", event: .messageEnd(role: "assistant", stopReason: nil, errorMessage: nil, toolCalls: [], text: "Found the caller."))
+        #expect(store.runs(forTask: 1).first?.latestAssistantText == "Found the caller.")
+
+        store.ingest(taskId: 1, childId: "c1", event: .messageEnd(role: "assistant", stopReason: nil, errorMessage: nil, toolCalls: [], text: "Checked a second file too."))
+        #expect(store.runs(forTask: 1).first?.latestAssistantText == "Checked a second file too.")
     }
 
     @Test("A tool_execution_end for a toolCallId with no prior message_end does not fabricate a row")

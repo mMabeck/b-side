@@ -175,6 +175,42 @@ public final class ProjectsStore {
         closedTerminalTaskID = nil
     }
 
+    /// Task id whose terminal `MainAreaView` should tear down and relaunch
+    /// next — set by `requestRestartTerminal(for:)`, observed and cleared
+    /// (via `acknowledgeRestartRequested`) by `MainAreaView` once it has
+    /// actually relaunched that task's `TerminalSurfaceHost`. A one-shot
+    /// request rather than a queue, mirroring `closedTerminalTaskID`.
+    public private(set) var restartRequestedTaskID: Int64?
+
+    /// Requests that `MainAreaView` restart `task`'s agent terminal: tear
+    /// down its current `TerminalSurfaceHost` — killing the pi process if
+    /// it's still alive — and relaunch it along the same
+    /// `PiSessionService.launchCommand` path `ensureHost` normally uses, so
+    /// the relaunch resumes the same pi session/transcript instead of
+    /// starting fresh. Used by both `TerminalCommands`' "Restart Pi
+    /// Session" command (the process may still be running) and the "Pi
+    /// session ended" state's Resume button (the process has already
+    /// exited).
+    public func requestRestartTerminal(for task: TaskRecord) {
+        guard let id = task.id else { return }
+        restartRequestedTaskID = id
+    }
+
+    /// Clears `restartRequestedTaskID` once `MainAreaView` has relaunched
+    /// the host for `id` — scoped the same way `acknowledgeTerminalClosed`
+    /// is, so a stale acknowledgement can't clear a newer request.
+    public func acknowledgeRestartRequested(_ id: Int64) {
+        guard restartRequestedTaskID == id else { return }
+        restartRequestedTaskID = nil
+    }
+
+    /// The project `task` belongs to, resolved the same way `mainSelection`
+    /// resolves its own task/project pair — `nil` only if `task`'s project
+    /// has since been removed out from under it.
+    public func project(forTask task: TaskRecord) -> Project? {
+        projects.first { $0.id == task.projectId }
+    }
+
     /// Pure so it's directly testable: appends `id` only if it isn't
     /// already present, preserving the existing order of everything else.
     static func addingOpenTerminal(_ id: Int64, to ids: [Int64]) -> [Int64] {
@@ -318,9 +354,34 @@ public final class ProjectsStore {
     /// same data.
     public let subagentFeed = SubagentFeedStore()
 
+    /// Live child surfaces for subagent children, keyed by task — the
+    /// live-surface counterpart to `subagentFeed`'s presentation-free event
+    /// feed. `TaskTerminalAreaView` swaps these into the main area.
+    public let subagentPanes = SubagentPaneStore()
+
+    /// Which surface (parent or one child) each task's main area currently
+    /// shows — see `SubagentSwapStore`.
+    public let subagentSwap = SubagentSwapStore()
+
+    /// Tracks each task's current "batch" of runs for the subagent strip —
+    /// see `SubagentStripBatchTracker`.
+    public let subagentStripBatches = SubagentStripBatchTracker()
+
     /// The local HTTP endpoint agent processes report status and subagent
     /// events to (native-rewrite.md §5, §6). `nil` until `start()` has bound it.
     public private(set) var subagentServer: SubagentEventServer?
+
+    /// Child ids currently shown in `taskId`'s subagent strip, in strip
+    /// order, filtered to ones with a live surface to swap to — what
+    /// `SubagentSwapNavigation`'s keyboard shortcuts step through. A
+    /// headless, card-only child never appears here: there is nothing for
+    /// the shortcut to swap the main area to.
+    public func stripChildIDsWithLiveSurface(forTask taskId: Int64) -> [String] {
+        let allRuns = subagentFeed.runs(forTask: taskId)
+        let visible = subagentStripBatches.visibleRuns(forTask: taskId, allRuns: allRuns)
+        let liveIDs = Set(subagentPanes.panes(forTask: taskId).map(\.id))
+        return visible.map(\.id).filter { liveIDs.contains($0) }
+    }
 
     private let database: AppDatabase
     private var observationTask: Task<Void, Never>?
@@ -384,18 +445,60 @@ public final class ProjectsStore {
     private func startSubagentServer() async {
         guard subagentServer == nil else { return }
         do {
-            let server = try SubagentEventServer(store: subagentFeed)
+            let server = try SubagentEventServer(
+                store: subagentFeed,
+                paneStore: subagentPanes,
+                taskExists: { [weak self] taskId in self?.task(withId: taskId) != nil }
+            )
             try await server.start()
             subagentServer = server
             Self.logger.info("Subagent event server listening on \(server.address ?? "?", privacy: .public)")
+            if let address = server.address, let fileURL = Self.subagentEndpointFileURL() {
+                Self.writeSubagentEndpointFile(address: address, to: fileURL)
+            }
         } catch {
             Self.logger.error("Failed to start subagent event server: \(error, privacy: .public)")
         }
     }
 
+    /// The port `subagentServer` binds to changes on every app launch, so
+    /// the Pi-side spawner reads this file (once, per child spawn, after
+    /// checking `BSIDE_SUBAGENT_ENDPOINT`) to find it whenever a task agent
+    /// terminal was already running before the server finished starting.
+    /// `~/Library/Application Support/B-Side/subagent-endpoint`, created
+    /// alongside the app's database directory.
+    static func subagentEndpointFileURL() -> URL? {
+        guard let appSupport = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else { return nil }
+        return appSupport.appendingPathComponent("B-Side", isDirectory: true)
+            .appendingPathComponent("subagent-endpoint", isDirectory: false)
+    }
+
+    static func writeSubagentEndpointFile(address: String, to fileURL: URL) {
+        do {
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try address.write(to: fileURL, atomically: true, encoding: .utf8)
+        } catch {
+            logger.error("Failed to write subagent endpoint file: \(error, privacy: .public)")
+        }
+    }
+
+    static func removeSubagentEndpointFile(at fileURL: URL) {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
     public func stop() {
         observationTask?.cancel()
         observationTask = nil
+        subagentServer?.stop()
+        subagentServer = nil
+        if let fileURL = Self.subagentEndpointFileURL() {
+            Self.removeSubagentEndpointFile(at: fileURL)
+        }
     }
 
     /// Adds `path` as a project. If it is not already a git repository, `git init`s it.
