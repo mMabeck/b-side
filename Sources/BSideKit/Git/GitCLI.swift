@@ -58,7 +58,11 @@ public enum GitCLI {
     /// via readability handlers on a background queue and the continuation resumes
     /// from the termination handler.
     @discardableResult
-    static func run(_ arguments: [String], in directory: URL) async throws -> Data {
+    static func run(
+        _ arguments: [String],
+        in directory: URL,
+        allowedExitStatuses: Set<Int32> = []
+    ) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -108,7 +112,7 @@ public enum GitCLI {
             group.notify(queue: .global()) {
                 let outData = stdoutAccumulator.data
                 let errData = stderrAccumulator.data
-                if process.terminationStatus == 0 {
+                if process.terminationStatus == 0 || allowedExitStatuses.contains(process.terminationStatus) {
                     continuation.resume(returning: outData)
                 } else {
                     let errText = String(data: errData, encoding: .utf8) ?? ""

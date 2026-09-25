@@ -79,7 +79,10 @@ enum StreamingProcessRunner {
 /// Accumulates raw bytes and emits complete lines as they appear, buffering a
 /// trailing partial line across reads. Not thread-safe on its own — callers must
 /// serialize access, which `readabilityHandler`'s single dispatch source already does.
-private final class LineBuffer: @unchecked Sendable {
+///
+/// Shared with `GitCLI+Commit.swift`'s streaming runner, which follows the same
+/// EOF-plus-termination pattern as this file.
+final class LineBuffer: @unchecked Sendable {
     private var pending = Data()
     private let onLine: @Sendable (String) -> Void
     private let lock = NSLock()
