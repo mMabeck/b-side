@@ -51,7 +51,7 @@ struct RightSidebarView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(theme.palette.surfaceBackground)
-        .task(id: store.selectedTask?.id) {
+        .task(id: store.selectedTask) {
             scStore.setTask(store.selectedTask)
         }
         .sheet(item: $diffSheetData) { data in
@@ -61,6 +61,7 @@ struct RightSidebarView: View {
                 diffText: data.diffText,
                 isBinary: data.isBinary,
                 isTruncated: data.isTruncated,
+                errorMessage: data.errorMessage,
                 onOpenInEditor: data.row.map { row in { openInEditor(row) } }
             )
         }
@@ -204,9 +205,12 @@ struct RightSidebarView: View {
         onStage: (() -> Void)? = nil,
         onUnstage: (() -> Void)? = nil
     ) -> some View {
-        let onDiscard: (() -> Void)? = row.origin == .branch ? nil : {
+        // Discard is worktree-only (see `SourceControlStore.discard`), so it's
+        // only offered on unstaged rows — there's no destructive "discard" of
+        // a staged row's index entry, just Unstage.
+        let onDiscard: (() -> Void)? = row.origin == .unstaged ? {
             requestDiscard(for: selectedRowsOrThis(row))
-        }
+        } : nil
 
         return SourceControlRowView(row: row, palette: theme.palette, onStage: onStage, onUnstage: onUnstage, onDiscard: onDiscard)
             .tag(row.id)
@@ -246,7 +250,7 @@ struct RightSidebarView: View {
         if row.origin == .staged {
             Button("Unstage") { Task { await scStore.unstage(rows) } }
         }
-        if row.origin != .branch {
+        if row.origin == .unstaged {
             Button("Discard…", role: .destructive) { requestDiscard(for: rows) }
             if row.kind == .untracked {
                 Button("Add to .gitignore") { Task { await scStore.addToGitignore(row) } }
@@ -279,35 +283,81 @@ struct RightSidebarView: View {
     }
 
     private func openCommitDiff(_ commit: GitCLI.CommitSummary) {
+        let requestedTaskId = scStore.task?.id
         Task {
-            let diff = try? await scStore.diffText(forCommit: commit.sha)
-            diffSheetData = DiffSheetData(
-                id: "commit:\(commit.sha)",
-                title: commit.subject,
-                subtitle: "\(commit.shortSha) \u{2022} \(commit.author)",
-                diffText: diff?.text ?? "",
-                isBinary: diff?.isBinary ?? false,
-                isTruncated: diff?.isTruncated ?? false,
-                row: nil
-            )
+            do {
+                let diff = try await scStore.diffText(forCommit: commit.sha)
+                guard scStore.task?.id == requestedTaskId else { return }
+                diffSheetData = DiffSheetData(
+                    id: "commit:\(commit.sha)",
+                    title: commit.subject,
+                    subtitle: "\(commit.shortSha) \u{2022} \(commit.author)",
+                    diffText: diff.text,
+                    isBinary: diff.isBinary,
+                    isTruncated: diff.isTruncated,
+                    errorMessage: nil,
+                    row: nil
+                )
+            } catch {
+                guard scStore.task?.id == requestedTaskId else { return }
+                diffSheetData = DiffSheetData(
+                    id: "commit:\(commit.sha)",
+                    title: commit.subject,
+                    subtitle: "\(commit.shortSha) \u{2022} \(commit.author)",
+                    diffText: "",
+                    isBinary: false,
+                    isTruncated: false,
+                    errorMessage: Self.describe(error),
+                    row: nil
+                )
+            }
         }
     }
 
     // MARK: - Diff sheet
 
+    /// Loads and shows `row`'s diff. `requestedTaskId` is captured before the
+    /// `await` so that if the selected task changes while the diff is in
+    /// flight, the stale result is dropped instead of overwriting the
+    /// newly-selected task's sheet — and a genuine load failure surfaces as
+    /// an error rather than the empty-diff "No changes" state.
     private func openDiff(for row: SourceControlStore.Row) {
+        let requestedTaskId = scStore.task?.id
         Task {
-            let diff = try? await scStore.diffText(for: row)
-            diffSheetData = DiffSheetData(
-                id: row.id,
-                title: row.displayName,
-                subtitle: subtitle(for: row),
-                diffText: diff?.text ?? "",
-                isBinary: diff?.isBinary ?? false,
-                isTruncated: diff?.isTruncated ?? false,
-                row: row
-            )
+            do {
+                let diff = try await scStore.diffText(for: row)
+                guard scStore.task?.id == requestedTaskId else { return }
+                diffSheetData = DiffSheetData(
+                    id: row.id,
+                    title: row.displayName,
+                    subtitle: subtitle(for: row),
+                    diffText: diff.text,
+                    isBinary: diff.isBinary,
+                    isTruncated: diff.isTruncated,
+                    errorMessage: nil,
+                    row: row
+                )
+            } catch {
+                guard scStore.task?.id == requestedTaskId else { return }
+                diffSheetData = DiffSheetData(
+                    id: row.id,
+                    title: row.displayName,
+                    subtitle: subtitle(for: row),
+                    diffText: "",
+                    isBinary: false,
+                    isTruncated: false,
+                    errorMessage: Self.describe(error),
+                    row: row
+                )
+            }
         }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let error = error as? GitCLI.CommandError {
+            return error.description
+        }
+        return String(describing: error)
     }
 
     private func subtitle(for row: SourceControlStore.Row) -> String {
@@ -341,6 +391,9 @@ private struct DiffSheetData: Identifiable {
     let diffText: String
     let isBinary: Bool
     let isTruncated: Bool
+    /// Set when the diff failed to load; shown instead of the diff text or
+    /// the misleading "No changes" empty state.
+    let errorMessage: String?
     /// `nil` for a commit shown from History — hides the DiffSheet's "Open
     /// in Editor" button, which only makes sense for a specific file.
     let row: SourceControlStore.Row?

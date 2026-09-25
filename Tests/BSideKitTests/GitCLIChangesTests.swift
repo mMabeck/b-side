@@ -140,6 +140,68 @@ private final class LineCollector: @unchecked Sendable {
         #expect(content == "hello\n")
     }
 
+    @Test func discardWorktreeLeavesTheIndexAlone() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let fileURL = repoURL.appendingPathComponent("README.md")
+
+        try "staged\n".write(to: fileURL, atomically: true, encoding: .utf8)
+        try await GitCLI.stage(["README.md"], at: repoURL)
+        try "staged\nunstaged too\n".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        try await GitCLI.discardWorktree(["README.md"], at: repoURL)
+
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(content == "staged\n")
+        let changes = try await GitCLI.changedFiles(at: repoURL)
+        #expect(changes.contains { $0.path == "README.md" && $0.area == .staged && $0.kind == .modified })
+        #expect(!changes.contains { $0.path == "README.md" && $0.area == .unstaged })
+    }
+
+    // A staged-new file has no `HEAD` entry. `restore --source=HEAD` on such a
+    // path deletes it outright rather than reverting it; regression for the
+    // bug this guards against, at the level `discardTracked` itself can be
+    // tested (`SourceControlStoreTests` covers the store-level fallback that
+    // avoids ever calling it this way).
+    @Test func discardTrackedDeletesAPathWithNoHeadEntry() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        try "brand new\n".write(to: repoURL.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        try await GitCLI.stage(["new.txt"], at: repoURL)
+
+        try await GitCLI.discardTracked(["new.txt"], at: repoURL)
+
+        #expect(!FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("new.txt").path))
+        let changes = try await GitCLI.changedFiles(at: repoURL)
+        #expect(!changes.contains { $0.path == "new.txt" })
+    }
+
+    // Discarding only a rename's new name via `restore --source=HEAD` (or
+    // `restore --staged`) leaves the old name's deletion staged (`D old`);
+    // both the new and the old path must be passed together.
+    @Test func discardTrackedOnBothRenamePathsFullyRevertsTheRename() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        try "content\n".write(to: repoURL.appendingPathComponent("orig.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "orig.txt"], in: repoURL)
+        _ = try await GitCLI.run(["commit", "-m", "add orig"], in: repoURL)
+        _ = try await GitCLI.run(["mv", "orig.txt", "new.txt"], in: repoURL)
+
+        try await GitCLI.discardTracked(["orig.txt"], at: repoURL)
+        try await GitCLI.unstage(["new.txt"], at: repoURL)
+
+        let changes = try await GitCLI.changedFiles(at: repoURL)
+        #expect(!changes.contains { $0.path == "orig.txt" })
+        #expect(changes.contains { $0.path == "new.txt" && $0.kind == .untracked })
+        #expect(FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("orig.txt").path))
+        #expect(FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("new.txt").path))
+    }
+
     @Test func unstageFallsBackWithoutCommits() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
@@ -164,12 +226,39 @@ private final class LineCollector: @unchecked Sendable {
 
         try GitCLI.addToGitignore("build/", at: repoURL)
         try GitCLI.addToGitignore("build/", at: repoURL)
-        try GitCLI.addToGitignore("*.log", at: repoURL)
+        try GitCLI.addToGitignore("file.log", at: repoURL)
 
         let content = try String(contentsOf: repoURL.appendingPathComponent(".gitignore"), encoding: .utf8)
         let lines = content.split(separator: "\n").map(String.init)
-        #expect(lines.filter { $0 == "build/" }.count == 1)
-        #expect(lines.contains("*.log"))
+        #expect(lines.filter { $0 == "/build/" }.count == 1)
+        #expect(lines.contains("/file.log"))
+    }
+
+    @Test func addToGitignoreAnchorsAndEscapesSpecialPaths() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        try "unrelated\n".write(to: repoURL.appendingPathComponent("unrelated.txt"), atomically: true, encoding: .utf8)
+        try "star\n".write(to: repoURL.appendingPathComponent("star*name.txt"), atomically: true, encoding: .utf8)
+        try "bang\n".write(to: repoURL.appendingPathComponent("!important.txt"), atomically: true, encoding: .utf8)
+        try "trailing\n".write(to: repoURL.appendingPathComponent("trailing "), atomically: true, encoding: .utf8)
+
+        try GitCLI.addToGitignore("star*name.txt", at: repoURL)
+        try GitCLI.addToGitignore("!important.txt", at: repoURL)
+        try GitCLI.addToGitignore("trailing ", at: repoURL)
+
+        let content = try String(contentsOf: repoURL.appendingPathComponent(".gitignore"), encoding: .utf8)
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        #expect(lines.contains(#"/star\*name.txt"#))
+        #expect(lines.contains(#"/\!important.txt"#))
+        #expect(lines.contains(#"/trailing\ "#))
+
+        let changes = try await GitCLI.changedFiles(at: repoURL)
+        #expect(changes.contains { $0.path == "unrelated.txt" })
+        #expect(!changes.contains { $0.path == "star*name.txt" })
+        #expect(!changes.contains { $0.path == "!important.txt" })
+        #expect(!changes.contains { $0.path == "trailing " })
     }
 
     @Test func commitStreamsPreCommitHookOutput() async throws {
@@ -229,6 +318,41 @@ private final class LineCollector: @unchecked Sendable {
         }
         #expect(threw)
         #expect(Date().timeIntervalSince(start) < 5)
+    }
+
+    @Test func binaryDetectionMatchesOnlyTheWholeMarkerLine() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        // The literal phrase appears inside tracked *text* content, not as
+        // git's own binary-file marker line — must not be misread as binary.
+        try "Binary files can differ from text files.\nsecond line\n".write(
+            to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8
+        )
+
+        let diff = try await GitCLI.diff(for: "README.md", staged: false, at: repoURL)
+        #expect(!diff.isBinary)
+        #expect(diff.text.contains("Binary files can differ from text files."))
+    }
+
+    @Test func showCommitNeverMarksAMixedCommitWhollyBinary() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        try Data([0x00, 0x01, 0x02, 0xff]).write(to: repoURL.appendingPathComponent("image.bin"))
+        try "text change\n".write(to: repoURL.appendingPathComponent("text.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "-A"], in: repoURL)
+        _ = try await GitCLI.run(["commit", "-m", "mixed binary and text"], in: repoURL)
+
+        let sha = try await GitCLI.revParse("HEAD", at: repoURL)
+        let diff = try await GitCLI.showCommit(sha, at: repoURL)
+
+        #expect(!diff.isBinary)
+        #expect(diff.text.contains("text.txt"))
+        #expect(diff.text.contains("+text change"))
+        #expect(diff.text.contains("Binary files"))
     }
 
     @Test func branchChangesIgnoresWorkingTreeDirt() async throws {

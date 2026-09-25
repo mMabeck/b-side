@@ -18,6 +18,10 @@ struct DiffSheet: View {
     /// Whether `diffText` was capped before reaching this view (e.g. a very
     /// large file); shows a banner rather than implying the diff is complete.
     let isTruncated: Bool
+    /// Set when the diff failed to load; shown instead of `diffText` or the
+    /// "No changes" empty state, which would otherwise misrepresent a load
+    /// failure as a clean working tree.
+    var errorMessage: String?
     /// Shows an "Open in Editor" button when non-nil.
     var onOpenInEditor: (() -> Void)?
 
@@ -84,7 +88,9 @@ struct DiffSheet: View {
 
     @ViewBuilder
     private var content: some View {
-        if isBinary {
+        if let errorMessage {
+            centeredMessage("Couldn’t load diff: \(errorMessage)")
+        } else if isBinary {
             centeredMessage("Binary file — no text diff")
         } else if diffText.isEmpty {
             centeredMessage("No changes")

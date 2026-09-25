@@ -112,6 +112,13 @@ public final class SourceControlStore {
 
     @ObservationIgnored private var watcher: WorktreeWatcher?
     @ObservationIgnored private var refreshGeneration = 0
+    /// Bumped only when `setTask` actually retargets the store at a
+    /// different task (not on every refresh, unlike `refreshGeneration`).
+    /// `commit()`/`push()` capture it at the start and check it before every
+    /// write to `commitLog`/`pushLog`/`commitMessage`/`isCommitting`/
+    /// `isPushing`, so a commit or push left running past a task switch can't
+    /// write its trailing output into the newly-selected task's state.
+    @ObservationIgnored private var taskGeneration = 0
     @ObservationIgnored private var commitTask: Task<Void, Never>?
     @ObservationIgnored private var pushTask: Task<Void, Never>?
     @ObservationIgnored nonisolated(unsafe) private var activationObserver: NSObjectProtocol?
@@ -152,10 +159,13 @@ public final class SourceControlStore {
 
         cancelCommit()
         cancelPush()
+        taskGeneration += 1
         task = newTask
         commitMessage = ""
         commitLog = []
         pushLog = []
+        isCommitting = false
+        isPushing = false
         staged = []
         unstaged = []
         branchChanges = []
@@ -282,20 +292,35 @@ public final class SourceControlStore {
         }
     }
 
+    /// Above this many untracked files, a `diff --no-index` per file (even
+    /// bounded to `maxConcurrentUntrackedDiffs` at a time) is too much process
+    /// spawning for one refresh; those rows just show no +/- counts.
+    private static let untrackedLineCountThreshold = 200
+    /// Caps how many `diff --no-index` processes run at once — refreshing a
+    /// worktree with hundreds of untracked files used to spawn one per file
+    /// concurrently on every refresh.
+    private static let maxConcurrentUntrackedDiffs = 8
+
     private static func untrackedLineCounts(_ paths: [String], at url: URL) async -> [String: GitCLI.LineCount] {
-        guard !paths.isEmpty else { return [:] }
+        guard !paths.isEmpty, paths.count <= untrackedLineCountThreshold else { return [:] }
         var result: [String: GitCLI.LineCount] = [:]
+        var remaining = paths[...]
         await withTaskGroup(of: (String, GitCLI.LineCount?).self) { group in
-            for path in paths {
+            func addNext() {
+                guard let path = remaining.popFirst() else { return }
                 group.addTask {
                     let count = try? await GitCLI.lineCount(forUntracked: path, at: url)
                     return (path, count)
                 }
             }
-            for await (path, count) in group {
+            for _ in 0..<min(maxConcurrentUntrackedDiffs, paths.count) {
+                addNext()
+            }
+            while let (path, count) = await group.next() {
                 if let count {
                     result[path] = count
                 }
+                addNext()
             }
         }
         return result
@@ -339,7 +364,7 @@ public final class SourceControlStore {
 
     public func unstage(_ rows: [Row]) async {
         guard let worktreeURL else { return }
-        let paths = rows.map(\.path)
+        let paths = Self.expandedPaths(for: rows)
         guard !paths.isEmpty else { return }
         do {
             try await GitCLI.unstage(paths, at: worktreeURL)
@@ -361,25 +386,71 @@ public final class SourceControlStore {
         await refresh()
     }
 
-    /// Discards `rows`. Tracked files are reverted to `HEAD` in both the
-    /// index and the working tree; untracked files go to the Trash via
-    /// `recycle` rather than `rm`, so a discard is always recoverable.
+    /// Discards `rows`. An unstaged row's edits are reverted in the working
+    /// tree only, from the index — whatever's staged for the same path is
+    /// left alone (VS Code semantics: the sidebar doesn't offer Discard on a
+    /// staged row at all — see `RightSidebarView` — so committing the two
+    /// halves of a file's changes independently is the norm, not an edge
+    /// case). Untracked rows go to the Trash via `recycle` rather than `rm`,
+    /// so a discard is always recoverable.
+    ///
+    /// A staged row can still arrive here through a mixed bulk selection.
+    /// Reverting it to `HEAD` is safe when `HEAD` actually has the path; a
+    /// file staged as newly added (or a rename's new name) has no `HEAD`
+    /// entry, so it's unstaged and sent to the Trash instead — see
+    /// `GitCLI.discardTracked`.
     public func discard(_ rows: [Row]) async {
         guard let worktreeURL else { return }
-        let trackedPaths = rows.filter { $0.kind != .untracked }.map(\.path)
+
         let untrackedRows = rows.filter { $0.kind == .untracked }
+
+        let unstagedRows = rows.filter { $0.origin == .unstaged && $0.kind != .untracked }
+        let unstagedPaths = Self.expandedPaths(for: unstagedRows)
+
+        let stagedRows = rows.filter { $0.origin == .staged }
+        let stagedHeadBacked = stagedRows.filter { $0.kind != .added && $0.kind != .renamed }
+        let stagedHeadless = stagedRows.filter { $0.kind == .added || $0.kind == .renamed }
+
         do {
-            if !trackedPaths.isEmpty {
-                try await GitCLI.discardTracked(trackedPaths, at: worktreeURL)
+            if !unstagedPaths.isEmpty {
+                try await GitCLI.discardWorktree(unstagedPaths, at: worktreeURL)
+            }
+            if !stagedHeadBacked.isEmpty {
+                try await GitCLI.discardTracked(Self.expandedPaths(for: stagedHeadBacked), at: worktreeURL)
+            }
+            for row in stagedHeadless where row.kind == .renamed {
+                if let origPath = row.origPath {
+                    try await GitCLI.discardTracked([origPath], at: worktreeURL)
+                }
+            }
+            let headlessPaths = stagedHeadless.map(\.path)
+            if !headlessPaths.isEmpty {
+                try await GitCLI.unstage(headlessPaths, at: worktreeURL)
             }
         } catch {
             loadState = .error(Self.describe(error))
             return
         }
-        if !untrackedRows.isEmpty {
-            await recycle(untrackedRows.map { worktreeURL.appendingPathComponent($0.path) })
+
+        let toRecycle = untrackedRows + stagedHeadless
+        if !toRecycle.isEmpty {
+            await recycle(toRecycle.map { worktreeURL.appendingPathComponent($0.path) })
         }
         await refresh()
+    }
+
+    /// `rows`' paths, plus `origPath` for any renamed row — discarding or
+    /// unstaging only a rename's new name leaves the old name's deletion
+    /// staged (`D old`); git needs both pathspecs to undo the rename.
+    private static func expandedPaths(for rows: [Row]) -> [String] {
+        var paths: [String] = []
+        for row in rows {
+            paths.append(row.path)
+            if row.kind == .renamed, let origPath = row.origPath {
+                paths.append(origPath)
+            }
+        }
+        return paths
     }
 
     public func addToGitignore(_ row: Row) async {
@@ -423,11 +494,12 @@ public final class SourceControlStore {
     /// `cancelCommit`) leaves the message and log both visible for the user
     /// to read and retry.
     public func commit() {
-        guard let worktreeURL, !isCommitting, !staged.isEmpty else { return }
+        guard let worktreeURL, !isCommitting, !isPushing, !staged.isEmpty else { return }
         let trimmed = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         let message = commitMessage
+        let generation = taskGeneration
         isCommitting = true
         commitLog = []
 
@@ -436,6 +508,7 @@ public final class SourceControlStore {
             let (stream, continuation) = AsyncStream<String>.makeStream()
             let consumer = Task { @MainActor in
                 for await line in stream {
+                    guard generation == self.taskGeneration else { continue }
                     self.commitLog.append(line)
                 }
             }
@@ -445,13 +518,15 @@ public final class SourceControlStore {
                 }
                 continuation.finish()
                 _ = await consumer.value
-                await MainActor.run { self.commitMessage = "" }
+                guard generation == self.taskGeneration else { return }
+                self.commitMessage = ""
                 await self.refresh()
             } catch {
                 continuation.finish()
                 _ = await consumer.value
             }
-            await MainActor.run { self.isCommitting = false }
+            guard generation == self.taskGeneration else { return }
+            self.isCommitting = false
         }
     }
 
@@ -468,6 +543,7 @@ public final class SourceControlStore {
     public func push() {
         guard let worktreeURL, !isPushing, !isCommitting else { return }
 
+        let generation = taskGeneration
         isPushing = true
         pushLog = []
 
@@ -476,6 +552,7 @@ public final class SourceControlStore {
             let (stream, continuation) = AsyncStream<String>.makeStream()
             let consumer = Task { @MainActor in
                 for await line in stream {
+                    guard generation == self.taskGeneration else { continue }
                     self.pushLog.append(line)
                 }
             }
@@ -485,12 +562,15 @@ public final class SourceControlStore {
                 }
                 continuation.finish()
                 _ = await consumer.value
-                await self.refresh()
+                if generation == self.taskGeneration {
+                    await self.refresh()
+                }
             } catch {
                 continuation.finish()
                 _ = await consumer.value
             }
-            await MainActor.run { self.isPushing = false }
+            guard generation == self.taskGeneration else { return }
+            self.isPushing = false
         }
     }
 

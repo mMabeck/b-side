@@ -66,7 +66,10 @@ public enum GitCLI {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["git"] + arguments
+            // `--no-optional-locks` keeps read-only commands (status, diff, ...) from
+            // taking git's optional index lock, which otherwise rewrites `index` on
+            // every refresh and retriggers `WorktreeWatcher` in a loop.
+            process.arguments = ["git", "--no-optional-locks"] + arguments
             process.currentDirectoryURL = directory
 
             let stdout = Pipe()

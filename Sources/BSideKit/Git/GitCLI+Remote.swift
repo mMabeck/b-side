@@ -3,9 +3,13 @@ import Foundation
 /// Push and commit history for the Source Control sidebar.
 extension GitCLI {
     /// Pushes `HEAD` to `origin`, setting the upstream if none is configured yet,
-    /// streaming combined stdout+stderr to `onOutput`. `GIT_TERMINAL_PROMPT=0`
-    /// keeps a missing or misconfigured credential from blocking on a prompt the
-    /// UI has no way to answer; the push just fails instead.
+    /// streaming combined stdout+stderr to `onOutput`. Every credential path that
+    /// could otherwise block on a prompt the UI has no way to answer is disabled,
+    /// so a missing or misconfigured credential just fails the push instead:
+    /// `GIT_TERMINAL_PROMPT=0` (git's own prompt), `GIT_SSH_COMMAND` in batch mode
+    /// (an SSH password/host-key prompt) unless the caller's environment already
+    /// sets one, `GCM_INTERACTIVE=never` (Git Credential Manager), and an empty
+    /// `SSH_ASKPASS` (an askpass helper GUI).
     ///
     /// Cancelling the enclosing `Task` interrupts the underlying process; see
     /// `runStreaming`.
@@ -13,10 +17,18 @@ extension GitCLI {
         at path: URL,
         onOutput: @escaping @Sendable (String) -> Void
     ) async throws {
+        var env: [String: String] = [
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "never",
+            "SSH_ASKPASS": "",
+        ]
+        if ProcessInfo.processInfo.environment["GIT_SSH_COMMAND"] == nil {
+            env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+        }
         try await runStreaming(
             args: ["push", "-u", "origin", "HEAD"],
             at: path,
-            env: ["GIT_TERMINAL_PROMPT": "0"],
+            env: env,
             onOutput: onOutput
         )
     }
@@ -90,6 +102,6 @@ extension GitCLI {
             ["show", "--format=%H%n%an <%ae>%n%aI%n%n%s%n%n%b", "--patch", sha],
             in: path
         )
-        return makeDiffText(from: data)
+        return makeDiffText(from: data, detectBinary: false)
     }
 }

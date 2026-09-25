@@ -279,31 +279,69 @@ extension GitCLI {
     }
 
     /// Reverts `paths` to their `HEAD` content, in both the index and the working
-    /// tree. For a tracked file that's staged as newly added (no `HEAD` entry to
-    /// restore the worktree from), this fully removes it from the index and the
-    /// working tree, i.e. as if it had never been added.
+    /// tree, in one atomic `restore` so neither side lands out of sync with the
+    /// other if the process is interrupted.
+    ///
+    /// Every path must already exist in `HEAD` — for a path with no `HEAD` entry
+    /// (a file staged as newly added, or a rename's new name), `restore
+    /// --source=HEAD` doesn't revert it, it deletes it outright, since there's
+    /// nothing at that path in `HEAD` to restore. Callers must route those
+    /// through `unstage` + Trash instead; see `SourceControlStore.discard`.
     ///
     /// Untracked files aren't handled here — the UI discards those via Trash.
     public static func discardTracked(_ paths: [String], at path: URL) async throws {
         guard !paths.isEmpty else { return }
-        _ = try await run(["restore", "--worktree", "--source=HEAD", "--"] + paths, in: path)
-        _ = try await run(["restore", "--staged", "--source=HEAD", "--"] + paths, in: path)
+        _ = try await run(["restore", "--staged", "--worktree", "--source=HEAD", "--"] + paths, in: path)
+    }
+
+    /// Reverts `paths` in the working tree only, from the index (`restore`'s
+    /// default source when `--source` is omitted) — the index/staged state is
+    /// left untouched. This is "Discard Changes" for an unstaged row: undo the
+    /// edits on disk without touching whatever's staged for the same path.
+    public static func discardWorktree(_ paths: [String], at path: URL) async throws {
+        guard !paths.isEmpty else { return }
+        _ = try await run(["restore", "--worktree", "--"] + paths, in: path)
     }
 
     /// Appends `filePath` to the worktree-root `.gitignore`, creating it if
-    /// needed and skipping the append if the path is already listed.
+    /// needed and skipping the append if the path is already listed. The
+    /// pattern is anchored to the worktree root with a leading `/` and has its
+    /// glob metacharacters, a leading `#`/`!`, and trailing spaces escaped, so
+    /// an arbitrary tracked path can't be misread as a glob, a comment, a
+    /// negation, or have trailing whitespace silently stripped.
     public static func addToGitignore(_ filePath: String, at path: URL) throws {
         let gitignoreURL = path.appendingPathComponent(".gitignore")
         let existing = (try? String(contentsOf: gitignoreURL, encoding: .utf8)) ?? ""
         let existingLines = existing.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        guard !existingLines.contains(filePath) else { return }
+        let pattern = gitignorePattern(for: filePath)
+        guard !existingLines.contains(pattern) else { return }
 
         var updated = existing
         if !updated.isEmpty && !updated.hasSuffix("\n") {
             updated += "\n"
         }
-        updated += filePath + "\n"
+        updated += pattern + "\n"
         try updated.write(to: gitignoreURL, atomically: true, encoding: .utf8)
+    }
+
+    static func gitignorePattern(for filePath: String) -> String {
+        var escaped = ""
+        for char in filePath {
+            switch char {
+            case "*", "?", "[", "\\":
+                escaped.append("\\")
+                escaped.append(char)
+            default:
+                escaped.append(char)
+            }
+        }
+        while escaped.hasSuffix(" ") && !escaped.hasSuffix("\\ ") {
+            escaped = String(escaped.dropLast()) + "\\ "
+        }
+        if escaped.hasPrefix("#") || escaped.hasPrefix("!") {
+            escaped = "\\" + escaped
+        }
+        return "/" + escaped
     }
 
     // MARK: - Diffs
@@ -395,10 +433,12 @@ extension GitCLI {
         return changes
     }
 
-    static func makeDiffText(from data: Data) -> DiffText {
-        // `git diff` marks binary files with a "Binary files ... differ" line
-        // instead of hunks; detect it in the raw bytes before decoding.
-        if data.range(of: Data("Binary files ".utf8)) != nil {
+    /// `detectBinary` is `false` for `showCommit`: a multi-file commit's patch
+    /// can mix binary and text files, and flagging the whole thing binary (and
+    /// discarding its text) because one file in it is would hide every other
+    /// file's diff.
+    static func makeDiffText(from data: Data, detectBinary: Bool = true) -> DiffText {
+        if detectBinary, containsBinaryMarker(data) {
             return .binary
         }
         if data.count > diffSizeLimit {
@@ -406,5 +446,17 @@ extension GitCLI {
             return DiffText(text: String(decoding: truncated, as: UTF8.self), isBinary: false, isTruncated: true)
         }
         return DiffText(text: String(decoding: data, as: UTF8.self), isBinary: false, isTruncated: false)
+    }
+
+    private static let binaryMarkerRegex = try! NSRegularExpression(pattern: #"(?m)^Binary files .* differ$"#)
+
+    // `git diff` marks binary files with a "Binary files ... differ" line
+    // instead of hunks. Matched as a whole line, not a substring anywhere in
+    // the output, so a text diff that merely contains that phrase in its
+    // content isn't misread as a binary file.
+    private static func containsBinaryMarker(_ data: Data) -> Bool {
+        guard let text = String(data: data, encoding: .utf8) else { return false }
+        let range = NSRange(text.startIndex..., in: text)
+        return binaryMarkerRegex.firstMatch(in: text, range: range) != nil
     }
 }
