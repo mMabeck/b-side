@@ -33,6 +33,11 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     /// branch that has picked up no commits of its own (or is merely behind
     /// base) never reads as "merged".
     public var baseCommit: String?
+    /// Last time this task had qualifying activity (a sent prompt, a
+    /// genuine busy→idle transition, or an accepted question alert — see
+    /// `ProjectsStore.bumpTaskActivity`). `nil` until the first such event.
+    /// Drives the task list's most-recent-first ordering in `ProjectsStore`.
+    public var lastActivityAt: Date?
 
     public init(
         id: Int64? = nil,
@@ -49,7 +54,8 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         archived: Bool = false,
         sortPosition: Int = 0,
         awaitingAutoRename: Bool = false,
-        baseCommit: String? = nil
+        baseCommit: String? = nil,
+        lastActivityAt: Date? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -66,6 +72,7 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         self.sortPosition = sortPosition
         self.awaitingAutoRename = awaitingAutoRename
         self.baseCommit = baseCommit
+        self.lastActivityAt = lastActivityAt
     }
 }
 
@@ -88,6 +95,7 @@ extension TaskRecord: FetchableRecord, MutablePersistableRecord {
         public static let sortPosition = Column(CodingKeys.sortPosition)
         public static let awaitingAutoRename = Column(CodingKeys.awaitingAutoRename)
         public static let baseCommit = Column(CodingKeys.baseCommit)
+        public static let lastActivityAt = Column(CodingKeys.lastActivityAt)
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {

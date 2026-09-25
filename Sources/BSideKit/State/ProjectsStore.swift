@@ -54,17 +54,24 @@ public final class ProjectsStore {
     public private(set) var busyTaskIDs: Set<Int64> = []
 
     /// Marks `taskId` busy. Idempotent, since `/agent/{taskId}/busy` may be
-    /// repeated.
+    /// repeated. Every call is a real "the user sent a message" event, so it
+    /// also bumps the task's recency.
     public func setTaskBusy(_ taskId: Int64) {
         busyTaskIDs.insert(taskId)
+        bumpTaskActivity(taskId)
     }
 
     /// Clears `taskId`'s busy flag — called for `POST .../idle`, and also
     /// whenever the task's Pi process/PTY exits, is archived, or is deleted,
     /// so a task can never get stuck reading "running" after the loop that
-    /// reported itself busy has gone away. Idempotent.
+    /// reported itself busy has gone away. Idempotent. Bumps the task's
+    /// recency only for a genuine busy→idle transition (the id was actually
+    /// tracked), not a redundant clear of a task that was already idle.
     public func clearTaskBusy(_ taskId: Int64) {
-        busyTaskIDs.remove(taskId)
+        let wasBusy = busyTaskIDs.remove(taskId) != nil
+        if wasBusy {
+            bumpTaskActivity(taskId)
+        }
     }
 
     /// Last time a terminal alert was accepted (post-debounce) for a task,
@@ -123,12 +130,16 @@ public final class ProjectsStore {
     }
 
     /// Task ids with a live `TerminalSurfaceHost` in `MainAreaView`, ordered
-    /// by when each terminal was first opened — not by project/task list
-    /// order, so "Cmd+1" always means "the task I opened first", not
-    /// whichever task happens to sort first. Owned here rather than as
-    /// private `MainAreaView` state so the sidebar's "Active" section and
-    /// `NavigationShortcuts` can both read it; `MainAreaView` is still the
-    /// only writer, via `noteTerminalOpened(taskID:)`/`pruneOpenTerminals(keeping:)`,
+    /// by recent activity: opening a terminal appends to the end, and
+    /// `bumpTaskActivity` moves an already-open task to the front on a real
+    /// agent event (a sent prompt, a genuine busy→idle transition, or an
+    /// accepted question alert). So "Cmd+1" means "the task with the most
+    /// recent activity", and the user should expect shortcut numbers to
+    /// shift as tasks become active — not a fixed "task I opened first"
+    /// slot. Owned here rather than as private `MainAreaView` state so the
+    /// sidebar's "Active" section and `NavigationShortcuts` can both read
+    /// it; `MainAreaView` is still the only writer of open/close, via
+    /// `noteTerminalOpened(taskID:)`/`pruneOpenTerminals(keeping:)`,
     /// mirroring its own `hostsByTaskID` one-for-one.
     public private(set) var openTerminalTaskIDs: [Int64] = []
 
@@ -246,6 +257,36 @@ public final class ProjectsStore {
         ids.filter { !removed.contains($0) }
     }
 
+    /// Pure so it's directly testable: moves `id` to the front of `ids`,
+    /// preserving the relative order of everything else. A no-op if `id`
+    /// isn't present, so bumping a task with no open terminal never adds it
+    /// to `openTerminalTaskIDs`.
+    static func movingToFront(_ id: Int64, in ids: [Int64]) -> [Int64] {
+        guard let index = ids.firstIndex(of: id) else { return ids }
+        var result = ids
+        result.remove(at: index)
+        result.insert(id, at: 0)
+        return result
+    }
+
+    /// Marks `id` as the most recently active task: persists `lastActivityAt`
+    /// as now (asynchronously, so this never stalls the caller) and, if `id`
+    /// currently has an open terminal, moves it to the front of
+    /// `openTerminalTaskIDs` so the sidebar's "Active" section — and the
+    /// Cmd+1…9 shortcuts that follow it — reflect the same recency. Called
+    /// only for real agent events (`setTaskBusy`, a genuine `clearTaskBusy`
+    /// transition, an accepted question alert), never for mere selection or
+    /// opening/closing a terminal.
+    public func bumpTaskActivity(_ id: Int64) {
+        openTerminalTaskIDs = Self.movingToFront(id, in: openTerminalTaskIDs)
+        Task { [database] in
+            try? await database.dbQueue.write { db in
+                guard var task = try TaskRecord.fetchOne(db, key: id) else { return }
+                try task.updateChanges(db) { $0.lastActivityAt = Date() }
+            }
+        }
+    }
+
     /// Looks up the (task, owning project) pair for an arbitrary task id —
     /// unlike `selectedTask`, not tied to the current selection. Used by the
     /// sidebar's "Active" section and `NavigationShortcuts` to resolve an
@@ -320,6 +361,7 @@ public final class ProjectsStore {
 
         if kind == .question {
             taskIDsNeedingAttention.insert(taskID)
+            bumpTaskActivity(taskID)
         }
 
         guard UserDefaults.standard.object(forKey: TaskAlertSettingsKeys.enabled) as? Bool ?? true else { return }
@@ -470,16 +512,21 @@ public final class ProjectsStore {
             var tasksByProject: [Int64: [TaskRecord]] = [:]
             for project in projects {
                 guard let projectId = project.id else { continue }
-                // Newest first: every task currently has `sortPosition`
-                // 0 (nothing sets it yet), so ordering by it alone reduces
-                // to insertion order, which put new tasks at the bottom of
-                // their project's list. `id.desc` as the tiebreaker is a
-                // stand-in for "most recently created" until sortPosition
-                // is actually used for manual reordering.
+                // Most recently active first: `lastActivityAt` is set at
+                // task creation and bumped by `bumpTaskActivity` (a sent
+                // prompt, a genuine busy→idle transition, or an accepted
+                // question alert), so a task's position tracks real agent
+                // activity rather than manual reordering. SQLite sorts
+                // `NULL` last in a `DESC` ordering, so rows from before this
+                // column existed fall to the bottom; `id.desc` is the
+                // tiebreaker for equal (or absent) timestamps. `sortPosition`
+                // is reserved for future manual reordering and currently
+                // unused (every task has 0), so it's dropped from this
+                // ordering rather than kept as a no-op leading key.
                 tasksByProject[projectId] = try TaskRecord
                     .filter(TaskRecord.Columns.projectId == projectId)
                     .filter(TaskRecord.Columns.archived == false)
-                    .order(TaskRecord.Columns.sortPosition, TaskRecord.Columns.id.desc)
+                    .order(TaskRecord.Columns.lastActivityAt.desc, TaskRecord.Columns.id.desc)
                     .fetchAll(db)
             }
             return (projects, tasksByProject)
@@ -693,7 +740,8 @@ public final class ProjectsStore {
             harness: "claude",
             permissionLevel: config.taskDefaults.permissionMode,
             awaitingAutoRename: nameWasBlank,
-            baseCommit: setupResult.baseCommit
+            baseCommit: setupResult.baseCommit,
+            lastActivityAt: Date()
         )
         let inserted = try await database.dbQueue.write { db in
             var task = task

@@ -88,5 +88,18 @@ enum Migrations {
                 }
             }
         }
+
+        // Added so tasks with recent activity (a sent prompt, a genuine
+        // busy→idle transition, or an accepted question alert — see
+        // `ProjectsStore.bumpTaskActivity`) sort to the top of their
+        // project's task list instead of staying pinned by creation order.
+        // `nil` for a task that has never had qualifying activity; SQLite
+        // sorts `NULL` last in a `DESC` ordering, so such tasks fall below
+        // any that have.
+        migrator.registerMigration("v6_task_last_activity_at") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "lastActivityAt", .datetime)
+            }
+        }
     }
 }
