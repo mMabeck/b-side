@@ -115,4 +115,57 @@ struct ProjectsStoreTaskCreationTests {
         #expect(store.selectedTaskID == task.id)
         #expect(store.mainSelection == .task(task, project))
     }
+
+    @Test("createTask records the branch's start commit, and refreshSyncStatus reports not merged for the fresh branch")
+    func createTaskRecordsStartCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Start commit", baseRef: "main")
+
+        #expect(task.startCommit != nil)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.merged == false)
+    }
+
+    @Test("refreshSyncStatus backfills startCommit for a legacy task via the reflog fallback")
+    func refreshSyncStatusBackfillsLegacyStartCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let created = try await store.createTask(project: project, name: "Legacy", baseRef: "main")
+        let taskId = try #require(created.id)
+
+        // Simulate a task persisted before `startCommit` existed.
+        let legacyTask: TaskRecord = {
+            var task = created
+            task.startCommit = nil
+            return task
+        }()
+        try await database.dbQueue.write { db in try legacyTask.update(db) }
+
+        await store.refreshSyncStatus(for: legacyTask, project: project)
+
+        let persisted = try await database.dbQueue.read { db in
+            try TaskRecord.fetchOne(db, key: taskId)
+        }
+        #expect(persisted?.startCommit != nil)
+    }
 }

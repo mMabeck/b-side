@@ -26,6 +26,13 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     /// definitively skipped (no usable prompt text). Never set for a task
     /// the user named explicitly.
     public var awaitingAutoRename: Bool
+    /// The branch's tip commit when the task started — right after worktree
+    /// creation/attach, or the current `HEAD` for in-place tasks. Used by
+    /// `TaskWorktreeService.syncStatus` to tell a branch that gained and
+    /// merged commits apart from one that simply never moved off its base.
+    /// `nil` for tasks created before this column existed; `syncStatus`
+    /// falls back to the branch's oldest reflog entry in that case.
+    public var startCommit: String?
 
     public init(
         id: Int64? = nil,
@@ -41,7 +48,8 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         teardownCommand: String? = nil,
         archived: Bool = false,
         sortPosition: Int = 0,
-        awaitingAutoRename: Bool = false
+        awaitingAutoRename: Bool = false,
+        startCommit: String? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -57,6 +65,7 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         self.archived = archived
         self.sortPosition = sortPosition
         self.awaitingAutoRename = awaitingAutoRename
+        self.startCommit = startCommit
     }
 }
 
@@ -78,6 +87,7 @@ extension TaskRecord: FetchableRecord, MutablePersistableRecord {
         public static let archived = Column(CodingKeys.archived)
         public static let sortPosition = Column(CodingKeys.sortPosition)
         public static let awaitingAutoRename = Column(CodingKeys.awaitingAutoRename)
+        public static let startCommit = Column(CodingKeys.startCommit)
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {

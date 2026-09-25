@@ -598,7 +598,8 @@ public final class ProjectsStore {
             worktreePath: setupResult.worktreePath,
             harness: "claude",
             permissionLevel: config.taskDefaults.permissionMode,
-            awaitingAutoRename: nameWasBlank
+            awaitingAutoRename: nameWasBlank,
+            startCommit: setupResult.startCommit
         )
         let inserted = try await database.dbQueue.write { db in
             var task = task
@@ -749,12 +750,28 @@ public final class ProjectsStore {
     }
 
     /// Refreshes ahead/behind/merged status for `task` against its project's base ref.
+    /// A legacy task with no recorded `startCommit` has one backfilled from
+    /// `syncStatus`'s reflog fallback, so the lookup isn't repeated on every refresh.
     public func refreshSyncStatus(for task: TaskRecord, project: Project) async {
         guard let id = task.id else { return }
-        guard let status = try? await TaskWorktreeService.syncStatus(project: project, branchName: task.branchName) else {
+        guard let status = try? await TaskWorktreeService.syncStatus(
+            project: project,
+            branchName: task.branchName,
+            startCommit: task.startCommit
+        ) else {
             return
         }
         syncStatusByTask[id] = status
+        if task.startCommit == nil, let resolvedStartCommit = status.resolvedStartCommit {
+            try? await database.dbQueue.write { db in
+                guard var updated = try TaskRecord.fetchOne(db, key: id) else { return }
+                updated.startCommit = resolvedStartCommit
+                try updated.update(db)
+            }
+            if let index = tasksByProject[task.projectId]?.firstIndex(where: { $0.id == id }) {
+                tasksByProject[task.projectId]?[index].startCommit = resolvedStartCommit
+            }
+        }
     }
 
     /// Prunes worktree metadata and detects worktrees whose directories vanished
