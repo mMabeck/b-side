@@ -32,9 +32,9 @@ struct TaskTerminalAreaView: View {
 
     var body: some View {
         let allRuns = store.subagentFeed.runs(forTask: taskID)
-        let runs = store.subagentStripBatches.visibleRuns(forTask: taskID, allRuns: allRuns)
-        let panes = store.subagentPanes.panes(forTask: taskID)
         let shownChildID = store.subagentSwap.shownChildID(forTask: taskID)
+        let runs = store.subagentStripBatches.visibleRuns(forTask: taskID, allRuns: allRuns, swappedInChildID: shownChildID)
+        let panes = store.subagentPanes.panes(forTask: taskID)
 
         VStack(spacing: 0) {
             if !runs.isEmpty {
@@ -59,6 +59,11 @@ struct TaskTerminalAreaView: View {
                 }
             }
         }
+        // Forces a re-render purely on the passage of time: a finished
+        // card's linger expiring changes no other observed state
+        // (`ProjectsStore.pruneAgedOutStripPanes` bumps this token once a
+        // second instead), so without this the strip would never notice.
+        .onChange(of: store.stripTickToken) { _, _ in }
         // Auto-return on close: a shown child's surface closing swaps
         // `shownChildID` back to `nil` (or to whatever's newly shown) out
         // from under this view. Only follow that with real keyboard focus

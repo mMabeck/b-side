@@ -1,32 +1,17 @@
 import Foundation
-import Observation
 import Testing
 
 @testable import BSideKit
 
-private final class LockedFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var flag = false
-
-    func set() {
-        lock.lock()
-        flag = true
-        lock.unlock()
-    }
-
-    var value: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return flag
-    }
-}
-
 @MainActor
 @Suite("SubagentStripBatchTracker")
 struct SubagentStripBatchTrackerTests {
-    private func makeRun(id: String, state: ChildRunState) -> ChildRun {
+    private let epoch = Date(timeIntervalSince1970: 1_000_000)
+
+    private func makeRun(id: String, state: ChildRunState, endedAt: Date? = nil) -> ChildRun {
         var run = ChildRun(id: id, taskId: 1, agent: "explorer", taskLabel: "T")
         run.state = state
+        run.endedAt = endedAt
         return run
     }
 
@@ -36,87 +21,138 @@ struct SubagentStripBatchTrackerTests {
         #expect(tracker.visibleRuns(forTask: 1, allRuns: []).isEmpty)
     }
 
-    @Test("The first run to appear is shown")
-    func firstRunIsShown() {
+    @Test("Active and blocked runs are always visible")
+    func activeAndBlockedAlwaysVisible() {
+        let active = makeRun(id: "a", state: .active)
+        let blocked = makeRun(id: "b", state: .blocked)
+        let ids = SubagentStripBatchTracker.nextBatch(allRuns: [active, blocked], now: epoch, swappedInChildID: nil)
+        #expect(ids == ["a", "b"])
+    }
+
+    @Test("A finished run stays visible within the linger window")
+    func finishedRunStaysVisibleWithinLinger() {
+        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let ids = SubagentStripBatchTracker.nextBatch(
+            allRuns: [run],
+            now: epoch.addingTimeInterval(1),
+            swappedInChildID: nil
+        )
+        #expect(ids == ["a"])
+    }
+
+    @Test("A finished run disappears once the linger window has elapsed")
+    func finishedRunDisappearsAfterLinger() {
+        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let ids = SubagentStripBatchTracker.nextBatch(
+            allRuns: [run],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 0.1),
+            swappedInChildID: nil
+        )
+        #expect(ids.isEmpty)
+    }
+
+    @Test("A failed run also disappears once the linger window has elapsed")
+    func failedRunDisappearsAfterLinger() {
+        let run = makeRun(id: "a", state: .failed, endedAt: epoch)
+        let ids = SubagentStripBatchTracker.nextBatch(
+            allRuns: [run],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 0.1),
+            swappedInChildID: nil
+        )
+        #expect(ids.isEmpty)
+    }
+
+    @Test("A finished run swapped into view stays visible past the linger window")
+    func finishedRunSwappedInStaysVisible() {
+        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let ids = SubagentStripBatchTracker.nextBatch(
+            allRuns: [run],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 100),
+            swappedInChildID: "a"
+        )
+        #expect(ids == ["a"])
+    }
+
+    @Test("A swapped-in run disappears once the user swaps back and the linger has elapsed")
+    func swappedInRunDisappearsAfterSwapBack() {
+        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let stillSwappedIn = SubagentStripBatchTracker.nextBatch(
+            allRuns: [run],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 100),
+            swappedInChildID: "a"
+        )
+        #expect(stillSwappedIn == ["a"])
+
+        let afterSwapBack = SubagentStripBatchTracker.nextBatch(
+            allRuns: [run],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 100),
+            swappedInChildID: nil
+        )
+        #expect(afterSwapBack.isEmpty)
+    }
+
+    @Test("A concurrent sibling stays visible alongside a lingering finished run")
+    func concurrentSiblingStaysVisible() {
+        let finished = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let active = makeRun(id: "b", state: .active)
+        let ids = SubagentStripBatchTracker.nextBatch(
+            allRuns: [finished, active],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 100),
+            swappedInChildID: nil
+        )
+        #expect(ids == ["b"])
+    }
+
+    @Test("visibleRuns preserves the feed's oldest-first order")
+    func visibleRunsPreservesOrder() {
         let tracker = SubagentStripBatchTracker()
+        let a = makeRun(id: "a", state: .active)
+        let b = makeRun(id: "b", state: .active)
+        let visible = tracker.visibleRuns(forTask: 1, allRuns: [a, b], now: epoch)
+        #expect(visible.map(\.id) == ["a", "b"])
+    }
+
+    @Test("agedOutPaneIDs tears down a live pane once its card has left the strip")
+    func agedOutPaneIDsClosesExpiredCard() {
+        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
+            allRuns: [run],
+            livePaneIDs: ["a"],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 0.1),
+            swappedInChildID: nil
+        )
+        #expect(agedOut == ["a"])
+    }
+
+    @Test("agedOutPaneIDs leaves a swapped-in pane alone even past the linger window")
+    func agedOutPaneIDsKeepsSwappedInPane() {
+        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+        let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
+            allRuns: [run],
+            livePaneIDs: ["a"],
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 100),
+            swappedInChildID: "a"
+        )
+        #expect(agedOut.isEmpty)
+    }
+
+    @Test("agedOutPaneIDs leaves an active run's pane alone")
+    func agedOutPaneIDsKeepsActivePane() {
         let run = makeRun(id: "a", state: .active)
-        #expect(tracker.visibleRuns(forTask: 1, allRuns: [run]).map(\.id) == ["a"])
+        let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
+            allRuns: [run],
+            livePaneIDs: ["a"],
+            now: epoch,
+            swappedInChildID: nil
+        )
+        #expect(agedOut.isEmpty)
     }
 
-    @Test("A concurrent sibling joins the still-active batch")
-    func concurrentSiblingJoinsBatch() {
+    @Test("reset is a harmless no-op now that visibility carries no tracked state")
+    func resetIsANoOp() {
         let tracker = SubagentStripBatchTracker()
         let a = makeRun(id: "a", state: .active)
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-
-        let b = makeRun(id: "b", state: .active)
-        let visible = tracker.visibleRuns(forTask: 1, allRuns: [a, b])
-        #expect(Set(visible.map(\.id)) == ["a", "b"])
-    }
-
-    @Test("Finished runs stay visible (dimmed) rather than disappearing immediately")
-    func finishedRunsStayVisible() {
-        let tracker = SubagentStripBatchTracker()
-        var a = makeRun(id: "a", state: .active)
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-
-        a.state = .completed
-        let visible = tracker.visibleRuns(forTask: 1, allRuns: [a])
-        #expect(visible.map(\.id) == ["a"])
-    }
-
-    @Test("A new run started after every earlier run finished clears the old batch")
-    func newRunAfterAllFinishedClearsOldBatch() {
-        let tracker = SubagentStripBatchTracker()
-        var a = makeRun(id: "a", state: .active)
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-        a.state = .completed
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-
-        let b = makeRun(id: "b", state: .active)
-        let visible = tracker.visibleRuns(forTask: 1, allRuns: [a, b])
-        #expect(visible.map(\.id) == ["b"])
-    }
-
-    @Test("A new run started while another is still active joins the batch instead of replacing it")
-    func newRunWhileOthersActiveJoinsBatch() {
-        let tracker = SubagentStripBatchTracker()
-        let a = makeRun(id: "a", state: .active)
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-
-        let b = makeRun(id: "b", state: .active)
-        let visible = tracker.visibleRuns(forTask: 1, allRuns: [a, b])
-        #expect(Set(visible.map(\.id)) == ["a", "b"])
-    }
-
-    @Test("Reading an unchanged batch does not mutate observed state")
-    func readingUnchangedBatchDoesNotMutate() {
-        let tracker = SubagentStripBatchTracker()
-        let a = makeRun(id: "a", state: .active)
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-
-        let changed = LockedFlag()
-        withObservationTracking {
-            _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-        } onChange: {
-            changed.set()
-        }
-
-        #expect(!changed.value)
-    }
-
-    @Test("reset clears the tracked batch for a task, independent of other tasks")
-    func resetClearsOnlyThatTask() {
-        let tracker = SubagentStripBatchTracker()
-        let a = makeRun(id: "a", state: .active)
-        _ = tracker.visibleRuns(forTask: 1, allRuns: [a])
-        let c = makeRun(id: "c", state: .active)
-        _ = tracker.visibleRuns(forTask: 2, allRuns: [c])
-
         tracker.reset(taskId: 1)
-        // After reset, task 1 starts a fresh batch from whatever the feed has now.
-        let visible = tracker.visibleRuns(forTask: 1, allRuns: [a])
-        #expect(visible.map(\.id) == ["a"])
-        #expect(tracker.visibleRuns(forTask: 2, allRuns: [c]).map(\.id) == ["c"])
+        #expect(tracker.visibleRuns(forTask: 1, allRuns: [a], now: epoch).map(\.id) == ["a"])
     }
 }
