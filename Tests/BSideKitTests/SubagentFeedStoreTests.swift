@@ -93,6 +93,16 @@ struct SubagentFeedStoreTests {
         #expect(store.runs(forTask: 1).first?.state == .failed)
     }
 
+    @Test("done with exitCode 0 marks the run completed even after earlier tool errors")
+    func doneWithZeroExitCodeCompletesAfterEarlierToolErrors() {
+        let store = SubagentFeedStore()
+        store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
+        store.ingest(taskId: 1, childId: "c1", event: toolCallMessageEnd(id: "1", name: "bash", arguments: ["command": .string("find / -path foo")]))
+        store.ingest(taskId: 1, childId: "c1", event: .toolResult(toolCallId: "1", isError: true))
+        store.markDone(taskId: 1, childId: "c1", payload: SubagentDonePayload(exitCode: 0, stopReason: "stop", errorMessage: nil))
+        #expect(store.runs(forTask: 1).first?.state == .completed)
+    }
+
     @Test("A completed run persists in the store for later reading")
     func completedRunPersists() {
         let store = SubagentFeedStore()
@@ -140,15 +150,25 @@ struct SubagentFeedStoreTests {
         #expect(run?.toolCallRows.first?.state == .completed)
     }
 
-    @Test("A toolResult with isError marks the matching row and the run failed")
-    func toolResultErrorMarksRowAndRunFailed() {
+    @Test("A toolResult with isError marks the matching row failed but keeps the run active")
+    func toolResultErrorMarksRowButKeepsRunActive() {
         let store = SubagentFeedStore()
         store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
         store.ingest(taskId: 1, childId: "c1", event: toolCallMessageEnd(id: "1", name: "bash", arguments: ["command": .string("ls")]))
         store.ingest(taskId: 1, childId: "c1", event: .toolResult(toolCallId: "1", isError: true))
         let run = store.runs(forTask: 1).first
         #expect(run?.toolCallRows.first?.state == .failed)
-        #expect(run?.state == .failed)
+        #expect(run?.state == .active)
+    }
+
+    @Test("A mid-run error stopReason records the error message but keeps the run active")
+    func midRunErrorStopReasonKeepsRunActive() {
+        let store = SubagentFeedStore()
+        store.beginRun(taskId: 1, childId: "c1", agent: "explorer", taskLabel: "Map cache callers")
+        store.ingest(taskId: 1, childId: "c1", event: .messageEnd(role: "assistant", stopReason: "error", errorMessage: "rate limited", toolCalls: [], text: nil))
+        let run = store.runs(forTask: 1).first
+        #expect(run?.state == .active)
+        #expect(run?.errorMessage == "rate limited")
     }
 
     @Test("clear removes all runs for a task")

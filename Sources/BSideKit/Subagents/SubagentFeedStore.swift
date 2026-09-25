@@ -96,15 +96,16 @@ public final class SubagentFeedStore {
                     }
                 }
                 if let stopReason, stopReason == "error" {
-                    run.state = .failed
+                    // Mid-run error stopReason (e.g. a transient rate limit) is not
+                    // a terminal state — Pi retries and the run carries on. Only
+                    // `markDone`, sourced from done.json, ends a run.
                     run.errorMessage = errorMessage
                 }
             case let .toolResult(toolCallId, isError):
                 guard let toolCallId, let index = run.toolCallRows.firstIndex(where: { $0.id == toolCallId }) else { return }
+                // A failing tool call is routine (e.g. `find` exiting non-zero) and
+                // marks only that row; the run keeps going until `markDone`.
                 run.toolCallRows[index].state = isError ? .failed : .completed
-                if isError {
-                    run.state = .failed
-                }
             case let .toolExecutionUpdate(toolCallId, toolName), let .toolExecutionEnd(toolCallId, toolName):
                 guard let toolCallId, let index = run.toolCallRows.firstIndex(where: { $0.id == toolCallId }) else { return }
                 if case .toolExecutionEnd = event {
