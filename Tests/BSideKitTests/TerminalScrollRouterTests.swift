@@ -44,7 +44,15 @@ struct TerminalScrollRouterTests {
         #expect(TerminalScrollRouter.momentum(for: .began) == .began)
         #expect(TerminalScrollRouter.momentum(for: .changed) == .changed)
         #expect(TerminalScrollRouter.momentum(for: .stationary) == .stationary)
-        #expect(TerminalScrollRouter.momentum(for: .ended) == .none)
         #expect(TerminalScrollRouter.momentum(for: []) == .none)
+    }
+
+    /// `TerminalScrollModifiers.Momentum` has no cases for these phases
+    /// (see the doc comment on `momentum(for:)`), so they collapse to
+    /// `.none` just like the package's own `momentumFrom` does.
+    @Test func collapsesUnrepresentablePhasesToNone() {
+        #expect(TerminalScrollRouter.momentum(for: .ended) == .none)
+        #expect(TerminalScrollRouter.momentum(for: .cancelled) == .none)
+        #expect(TerminalScrollRouter.momentum(for: .mayBegin) == .none)
     }
 }
