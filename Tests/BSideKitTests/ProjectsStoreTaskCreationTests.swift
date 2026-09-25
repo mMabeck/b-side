@@ -8,8 +8,8 @@ import Testing
 @MainActor
 @Suite("ProjectsStore task creation")
 struct ProjectsStoreTaskCreationTests {
-    @Test("updateProjectBaseRef persists the new default and updates the in-memory project")
-    func updateProjectBaseRefPersists() async throws {
+    @Test("rememberTaskCreationChoices persists the new default and updates the in-memory project")
+    func rememberTaskCreationChoicesPersists() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
         let repoURL = try await TestRepo.makeRepo(in: root)
@@ -22,15 +22,52 @@ struct ProjectsStoreTaskCreationTests {
 
         let project = try #require(store.projects.first)
         #expect(project.baseRef == "main")
+        #expect(project.lastUseWorktree == nil)
+        #expect(project.lastTaskCreationMode == nil)
 
-        try await store.updateProjectBaseRef(project, baseRef: "develop")
+        try await store.rememberTaskCreationChoices(
+            project: project,
+            baseRef: "develop",
+            useWorktree: false,
+            mode: .existingBranch
+        )
 
         #expect(store.projects.first?.baseRef == "develop")
+        #expect(store.projects.first?.lastUseWorktree == false)
+        #expect(store.projects.first?.lastTaskCreationMode == TaskCreationMode.existingBranch.rawValue)
 
         let persisted = try await database.dbQueue.read { db in
             try Project.fetchOne(db, key: project.id)
         }
         #expect(persisted?.baseRef == "develop")
+        #expect(persisted?.lastUseWorktree == false)
+        #expect(persisted?.lastTaskCreationMode == TaskCreationMode.existingBranch.rawValue)
+    }
+
+    @Test("rememberTaskCreationChoices keeps the existing base ref when no new base was used")
+    func rememberTaskCreationChoicesKeepsBaseRefWhenNil() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+
+        try await store.rememberTaskCreationChoices(
+            project: project,
+            baseRef: nil,
+            useWorktree: true,
+            mode: .newBranch
+        )
+
+        #expect(store.projects.first?.baseRef == "main")
+        #expect(store.projects.first?.lastUseWorktree == true)
+        #expect(store.projects.first?.lastTaskCreationMode == TaskCreationMode.newBranch.rawValue)
     }
 
     @Test("createTask(useWorktree: false) runs the task in the project directory with no worktree created")

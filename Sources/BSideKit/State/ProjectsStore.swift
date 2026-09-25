@@ -528,20 +528,34 @@ public final class ProjectsStore {
         }
     }
 
-    /// Persists a new default base ref for `project`, e.g. when a task is
-    /// created from a base other than the project's saved default. Updates
+    /// Persists the New Task sheet's choices for `project` after a
+    /// successful creation: the worktree toggle and mode always, the base
+    /// ref only when a non-blank new-branch base was actually used. Updates
     /// `projects` in place too, so a task-creation sheet opened right after
-    /// preselects the new default without waiting for the next
+    /// preselects the new defaults without waiting for the next
     /// `ValueObservation` tick.
-    public func updateProjectBaseRef(_ project: Project, baseRef: String) async throws {
+    public func rememberTaskCreationChoices(
+        project: Project,
+        baseRef: String?,
+        useWorktree: Bool,
+        mode: TaskCreationMode
+    ) async throws {
         guard let id = project.id else { return }
         try await database.dbQueue.write { db in
             var updated = project
-            updated.baseRef = baseRef
+            if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {
+                updated.baseRef = baseRef
+            }
+            updated.lastUseWorktree = useWorktree
+            updated.lastTaskCreationMode = mode.rawValue
             try updated.update(db)
         }
         if let index = projects.firstIndex(where: { $0.id == id }) {
-            projects[index].baseRef = baseRef
+            if let baseRef, !baseRef.trimmingCharacters(in: .whitespaces).isEmpty {
+                projects[index].baseRef = baseRef
+            }
+            projects[index].lastUseWorktree = useWorktree
+            projects[index].lastTaskCreationMode = mode.rawValue
         }
     }
 

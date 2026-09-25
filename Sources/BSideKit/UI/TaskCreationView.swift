@@ -2,10 +2,10 @@ import SwiftUI
 
 /// Which branch a new task's worktree attaches to: a fresh branch cut from a
 /// base ref, or an existing local branch.
-enum TaskCreationMode: String, CaseIterable, Identifiable, Sendable {
+public enum TaskCreationMode: String, CaseIterable, Identifiable, Sendable {
     case newBranch = "New Branch"
     case existingBranch = "Existing Branch"
-    var id: String { rawValue }
+    public var id: String { rawValue }
 }
 
 /// Pure validation and formatting rules for ``TaskCreationView``, kept free
@@ -77,7 +77,11 @@ struct TaskCreationView: View {
         self.onFinished = onFinished
         _baseRef = State(initialValue: project.baseRef)
         _useWorktree = State(
-            initialValue: ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path)).taskDefaults.useWorktree
+            initialValue: project.lastUseWorktree
+                ?? ProjectConfig.load(forProjectAt: URL(fileURLWithPath: project.path)).taskDefaults.useWorktree
+        )
+        _mode = State(
+            initialValue: project.lastTaskCreationMode.flatMap(Mode.init(rawValue:)) ?? .newBranch
         )
     }
 
@@ -454,9 +458,12 @@ struct TaskCreationView: View {
                         Task { @MainActor in logLines.append(line) }
                     }
                 )
-                if let newBaseRef, !newBaseRef.trimmingCharacters(in: .whitespaces).isEmpty, newBaseRef != project.baseRef {
-                    try? await store.updateProjectBaseRef(project, baseRef: newBaseRef)
-                }
+                try? await store.rememberTaskCreationChoices(
+                    project: project,
+                    baseRef: newBaseRef,
+                    useWorktree: useWorktree,
+                    mode: mode
+                )
                 isCreating = false
                 isFinished = true
                 onFinished()
