@@ -88,6 +88,7 @@ struct SidebarView: View {
             addProjectFooter
         }
         .background(theme.palette.surfaceBackground)
+        .background(SidebarFocusGuard(store: store))
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
