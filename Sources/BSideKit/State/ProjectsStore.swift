@@ -354,9 +354,9 @@ public final class ProjectsStore {
     /// same data.
     public let subagentFeed = SubagentFeedStore()
 
-    /// Native split-pane state for subagent children, keyed by task — the
+    /// Live child surfaces for subagent children, keyed by task — the
     /// live-surface counterpart to `subagentFeed`'s presentation-free event
-    /// feed. `MainAreaView` reads this to lay out each task's terminal area.
+    /// feed. `TaskTerminalAreaView` swaps these into the main area.
     public let subagentPanes = SubagentPaneStore()
 
     /// Which surface (parent or one child) each task's main area currently

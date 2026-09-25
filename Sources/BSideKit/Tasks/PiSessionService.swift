@@ -111,7 +111,7 @@ public enum PiSessionService {
     /// The environment the task agent terminal's `pi` process needs to find
     /// this app's `SubagentEventServer` (native-rewrite.md §"Subagents, and
     /// replacing tmux"): `BSIDE_TASK_ID`, the same `Int64` id
-    /// `SubagentFeedStore`/`SubagentsTabView` key runs by, always set; and
+    /// `SubagentFeedStore` keys runs by, always set; and
     /// `BSIDE_SUBAGENT_ENDPOINT`, set only when the server is already
     /// listening at launch (the Pi-side spawner falls back to reading the
     /// address file `ProjectsStore` maintains when this is absent — see its

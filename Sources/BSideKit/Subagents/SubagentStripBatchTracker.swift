@@ -29,9 +29,9 @@ public final class SubagentStripBatchTracker {
         // view bodies (`TaskTerminalAreaView`), and `@Observable` fires a
         // change notification on every assignment regardless of whether the
         // value moved — with two or more mounted task areas, an
-        // unconditional write here re-invalidated every reader of
+        // unconditional write here would re-invalidate every reader of
         // `batchByTask` (including the very body doing the writing) on
-        // every render, driving continuous re-render/CPU use.
+        // every render.
         if next != current {
             batchByTask[taskId] = next
         }

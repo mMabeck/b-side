@@ -36,7 +36,7 @@ public enum SubagentStripMouseParser {
         while let range = remainder.range(of: "\u{1B}[<") {
             let afterPrefix = remainder[range.upperBound...]
             guard let terminatorIndex = afterPrefix.firstIndex(where: { $0 == "M" || $0 == "m" }) else { break }
-            let body = afterPrefix[afterPrefix.startIndex..<terminatorIndex]
+            let body = afterPrefix[..<terminatorIndex]
             let isPress = afterPrefix[terminatorIndex] == "M"
             let components = body.split(separator: ";", omittingEmptySubsequences: false)
             if components.count == 3,
@@ -49,15 +49,15 @@ public enum SubagentStripMouseParser {
         return events
     }
 
-    /// Resolves a 1-based `(column, row)` click against a rendered strip:
-    /// a card's child id if the click lands within `cardRowCount` rows and
-    /// inside one of `slots`' column ranges, `.mainHint` if it lands on the
-    /// label row's "main" hint, else `nil`.
     public enum HitTestResult: Equatable {
         case card(childId: String)
         case mainHint
     }
 
+    /// Resolves a 1-based `(column, row)` click against a rendered strip:
+    /// a card's child id if the click lands within `cardRowCount` rows and
+    /// inside one of `slots`' column ranges, `.mainHint` if it lands on the
+    /// label row's "main" hint, else `nil`.
     public static func hitTest(column: Int, row: Int, result: SubagentStripRenderer.Result) -> HitTestResult? {
         let zeroBasedColumn = column - 1
         let zeroBasedRow = row - 1

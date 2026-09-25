@@ -53,7 +53,7 @@ public final class SubagentSwapStore {
         highlightedChildIDByTask[taskId] = childId
     }
 
-    /// Clicking the already-shown card, or the "main" hint, swaps back.
+    /// Clicking the already-shown card swaps back.
     public func toggle(childId: String, forTask taskId: Int64) {
         if shownChildIDByTask[taskId] == childId {
             showMain(forTask: taskId)

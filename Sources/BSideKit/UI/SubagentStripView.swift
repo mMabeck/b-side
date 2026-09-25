@@ -95,14 +95,11 @@ struct SubagentStripView: View {
     }
 
     private func renderNow() {
-        // Not `max(host.columns, minCardWidth)`: forcing the width up to
-        // the minimum card width when the surface is narrower than that
-        // produced lines wider than the surface's real column count, which
-        // Ghostty then wrapped across an extra row. `minCardWidth` here is
-        // only a bootstrap default for the brief window before the surface
-        // has reported any metrics at all (`host.columns == 0`); once it
-        // has, `SubagentStripRenderer.render` clamps card rendering itself
-        // when the real width is still under the minimum.
+        // `minCardWidth` here is only a bootstrap width for the brief window
+        // before the surface has reported any metrics at all
+        // (`host.columns == 0`); once it has, `SubagentStripRenderer.render`
+        // clamps card rendering itself when the real width is still under
+        // the minimum.
         let columns = host.columns > 0 ? host.columns : SubagentStripRenderer.minCardWidth
         let result = SubagentStripRenderer.render(runs: runs, viewedChildId: viewedChildId, columns: columns, now: Date())
         live.lastResult = result
