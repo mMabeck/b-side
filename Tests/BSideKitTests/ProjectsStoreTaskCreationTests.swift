@@ -104,4 +104,37 @@ struct ProjectsStoreTaskCreationTests {
         }
         #expect(store.tasksByProject[project.id!]?.map(\.id) == [second.id, first.id])
     }
+
+    @Test("createTask persists baseCommit, and refreshSyncStatus reads a fresh task as not merged until it gains and lands commits of its own")
+    func refreshSyncStatusReflectsBaseCommit() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Sync status task")
+        #expect(task.baseCommit != nil)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.merged == false)
+
+        let worktreeURL = URL(fileURLWithPath: task.worktreePath)
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.merged == false)
+
+        _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", task.branchName], in: repoURL)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.merged == true)
+    }
 }

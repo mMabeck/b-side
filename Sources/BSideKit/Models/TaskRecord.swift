@@ -26,6 +26,13 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     /// definitively skipped (no usable prompt text). Never set for a task
     /// the user named explicitly.
     public var awaitingAutoRename: Bool
+    /// The branch's tip commit when this task was created (or attached to an
+    /// existing branch) — `TaskWorktreeService.WorktreeSetupResult.baseCommit`.
+    /// `nil` for rows created before this column existed; `syncStatus` falls
+    /// back to the branch's reflog creation entry in that case. Used so a
+    /// branch that has picked up no commits of its own (or is merely behind
+    /// base) never reads as "merged".
+    public var baseCommit: String?
 
     public init(
         id: Int64? = nil,
@@ -41,7 +48,8 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         teardownCommand: String? = nil,
         archived: Bool = false,
         sortPosition: Int = 0,
-        awaitingAutoRename: Bool = false
+        awaitingAutoRename: Bool = false,
+        baseCommit: String? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -57,6 +65,7 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
         self.archived = archived
         self.sortPosition = sortPosition
         self.awaitingAutoRename = awaitingAutoRename
+        self.baseCommit = baseCommit
     }
 }
 
@@ -78,6 +87,7 @@ extension TaskRecord: FetchableRecord, MutablePersistableRecord {
         public static let archived = Column(CodingKeys.archived)
         public static let sortPosition = Column(CodingKeys.sortPosition)
         public static let awaitingAutoRename = Column(CodingKeys.awaitingAutoRename)
+        public static let baseCommit = Column(CodingKeys.baseCommit)
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {

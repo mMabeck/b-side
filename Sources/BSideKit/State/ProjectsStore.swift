@@ -597,7 +597,8 @@ public final class ProjectsStore {
             worktreePath: setupResult.worktreePath,
             harness: "claude",
             permissionLevel: config.taskDefaults.permissionMode,
-            awaitingAutoRename: nameWasBlank
+            awaitingAutoRename: nameWasBlank,
+            baseCommit: setupResult.baseCommit
         )
         let inserted = try await database.dbQueue.write { db in
             var task = task
@@ -750,7 +751,7 @@ public final class ProjectsStore {
     /// Refreshes ahead/behind/merged status for `task` against its project's base ref.
     public func refreshSyncStatus(for task: TaskRecord, project: Project) async {
         guard let id = task.id else { return }
-        guard let status = try? await TaskWorktreeService.syncStatus(project: project, branchName: task.branchName) else {
+        guard let status = try? await TaskWorktreeService.syncStatus(project: project, branchName: task.branchName, baseCommit: task.baseCommit) else {
             return
         }
         syncStatusByTask[id] = status
