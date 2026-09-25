@@ -251,14 +251,14 @@ struct TaskWorktreeServiceTests {
         _ = try await GitCLI.run(["add", "."], in: worktreeURL)
         _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
 
-        let beforeMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
+        let beforeMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: result.baseCommit)
         #expect(beforeMerge.ahead == 1)
         #expect(beforeMerge.behind == 0)
         #expect(beforeMerge.merged == false)
 
         _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", result.branchName], in: repoURL)
 
-        let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
+        let afterMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName, baseCommit: result.baseCommit)
         #expect(afterMerge.merged == true)
     }
 
@@ -275,12 +275,12 @@ struct TaskWorktreeServiceTests {
             taskName: "Fresh branch",
             baseRef: "main"
         )
-        #expect(result.startCommit != nil)
+        #expect(result.baseCommit != nil)
 
         let status = try await TaskWorktreeService.syncStatus(
             project: project,
             branchName: result.branchName,
-            startCommit: result.startCommit
+            baseCommit: result.baseCommit
         )
         #expect(status.merged == false)
     }
@@ -308,7 +308,7 @@ struct TaskWorktreeServiceTests {
         let status = try await TaskWorktreeService.syncStatus(
             project: project,
             branchName: result.branchName,
-            startCommit: result.startCommit
+            baseCommit: result.baseCommit
         )
         #expect(status.merged == true)
     }
@@ -334,7 +334,7 @@ struct TaskWorktreeServiceTests {
         let status = try await TaskWorktreeService.syncStatus(
             project: project,
             branchName: result.branchName,
-            startCommit: result.startCommit
+            baseCommit: result.baseCommit
         )
         #expect(status.merged == false)
     }
@@ -357,13 +357,13 @@ struct TaskWorktreeServiceTests {
         let status = try await TaskWorktreeService.syncStatus(
             project: project,
             branchName: result.branchName,
-            startCommit: result.startCommit
+            baseCommit: result.baseCommit
         )
         #expect(status.merged == false)
     }
 
-    @Test("syncStatus: a legacy task with no recorded startCommit falls back to the branch's reflog")
-    func syncStatusLegacyNilStartCommitUsesReflogFallback() async throws {
+    @Test("syncStatus: a legacy task with no recorded baseCommit falls back to the branch's reflog, then merges")
+    func syncStatusLegacyNilBaseCommitUsesReflogFallback() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
 
@@ -380,10 +380,10 @@ struct TaskWorktreeServiceTests {
         _ = try await GitCLI.run(["add", "."], in: worktreeURL)
         _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
 
-        // No startCommit passed — simulates a task persisted before that column existed.
+        // No baseCommit passed — simulates a task persisted before that column existed.
         let beforeMerge = try await TaskWorktreeService.syncStatus(project: project, branchName: result.branchName)
         #expect(beforeMerge.merged == false)
-        #expect(beforeMerge.resolvedStartCommit == result.startCommit)
+        #expect(beforeMerge.resolvedBaseCommit == result.baseCommit)
 
         _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", result.branchName], in: repoURL)
 

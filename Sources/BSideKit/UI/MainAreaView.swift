@@ -32,6 +32,14 @@ struct MainAreaView: View {
 
     @State private var hostsByTaskID: [Int64: TerminalSurfaceHost] = [:]
 
+    /// Which task's `PiSessionEndedView` Resume button, if any, should hold
+    /// keyboard focus. Terminal surfaces no longer bridge through
+    /// `@FocusState` (see `TerminalHostView`'s doc comment), but an exited
+    /// task has no terminal to focus imperatively — its Resume button is a
+    /// real SwiftUI control, so it still uses the standard `.focused`
+    /// binding, driven by `syncFocus()`.
+    @FocusState private var focusedTaskID: Int64?
+
     /// Task ids whose parent host's Pi process has exited on its own —
     /// distinct from the task's terminal being closed or purged, which
     /// drops the id from `hostsByTaskID` entirely instead. While an id is
@@ -54,13 +62,6 @@ struct MainAreaView: View {
     /// cancelled once its task's host is purged — an unstructured `Task`
     /// nothing holds a reference to can never be cancelled, only abandoned.
     @State private var autoRenameWatchers: [Int64: Task<Void, Never>] = [:]
-
-    /// Which cached host, if any, should hold keyboard focus — driven
-    /// explicitly by `syncFocus()` rather than left to click-to-focus, since
-    /// every cached host stays mounted underneath the visible one and AppKit
-    /// has no reason to move first responder on its own when the *SwiftUI*
-    /// selection changes. See `syncFocus()` for what goes wrong without this.
-    @FocusState private var focusedTaskID: Int64?
 
     private var liveTaskIDs: Set<Int64> {
         Set(store.tasksByProject.values.flatMap { $0.compactMap(\.id) })
@@ -139,8 +140,13 @@ struct MainAreaView: View {
         // outgoing responder wherever AppKit put it (often nowhere, or the
         // window itself) rather than the visible task's terminal — refocus
         // it deterministically the same way `syncFocus()` does for an
-        // explicit selection change.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+        // explicit selection change. Left alone when some terminal already
+        // holds focus (e.g. the bottom drawer's shell), so returning to the
+        // app doesn't yank the user out of the shell they were typing in.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if let window = note.object as? NSWindow, TerminalSurfaceHost.isTerminalView(window.firstResponder) {
+                return
+            }
             syncFocus()
         }
     }
@@ -232,8 +238,9 @@ struct MainAreaView: View {
             // `closeHost`/`relaunchHost` instead, which remove the id from
             // `hostsByTaskID` outright rather than leaving a dead surface
             // behind for this to mark exited).
-            onExit: { [exitedBinding] _ in
+            onExit: { [exitedBinding, store] _ in
                 exitedBinding.wrappedValue = MainAreaView.exitedTaskIDs(afterExit: id, current: exitedBinding.wrappedValue)
+                store.clearTaskBusy(id)
             }
         )
         store.noteTerminalOpened(taskID: id)
@@ -393,26 +400,29 @@ struct MainAreaView: View {
     /// (invisible, but very much still running) until the user clicked into
     /// B, which can mean running a command against the wrong worktree.
     ///
-    /// Sets both the `@FocusState` binding *and* calls
-    /// `TerminalViewState.requestFocus()` on the newly visible host, because
-    /// neither alone is reliable here. `@FocusState`/`.terminalFocused(_:equals:)`
-    /// is what resigns the *outgoing* surface as first responder on AppKit,
-    /// but per `TerminalViewState.requestFocus()`'s own doc comment it is
-    /// only best-effort for *acquiring* focus: with several hosts competing
-    /// for one `@FocusState`, SwiftUI's focus engine can reset the state to
-    /// nil before the bridge acts on it, leaving the previous host's surface
-    /// holding first responder. `requestFocus()` is the deterministic path a
-    /// host-driven switch needs, and it self-replays if the newly created
-    /// host's view isn't attached to a window yet.
+    /// Entirely imperative for terminal surfaces — no `@FocusState` bridge
+    /// (see `TerminalHostView` for why that bridge randomly dropped focus
+    /// on re-render). `focusedTaskID` still gets set for `PiSessionEndedView`,
+    /// whose Resume button is a real SwiftUI control, not a terminal.
     private func syncFocus() {
         let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         focusedTaskID = visibleID
+
+        for (id, host) in hostsByTaskID where id != visibleID {
+            host.resignFocus()
+        }
+        for panes in store.subagentPanes.panesByTask.values {
+            for pane in panes {
+                pane.host.resignFocus()
+            }
+        }
+
         // An exited task has no live surface to hand focus to —
         // `PiSessionEndedView`'s Resume button reads `focusedTaskID` itself
-        // (see its doc comment) via the same `.focused` binding a running
-        // task's `TerminalHostView` uses, so setting `focusedTaskID` above
-        // is already enough for it.
+        // (see its doc comment), so setting `focusedTaskID` above is already
+        // enough for it.
         guard let visibleID, !exitedTaskIDs.contains(visibleID) else { return }
+
         // A child's surface can be swapped into the main area in place of
         // the parent (`ProjectsStore.subagentSwap`) — focus must follow
         // whichever one is actually shown, or the parent keeps first
@@ -421,9 +431,9 @@ struct MainAreaView: View {
         let shownChildID = store.subagentSwap.shownChildID(forTask: visibleID)
         switch MainAreaView.focusTarget(shownChildID: shownChildID, livePaneIDs: Set(panes.map(\.id))) {
         case .child(let childID):
-            panes.first(where: { $0.id == childID })?.host.state.requestFocus()
+            panes.first(where: { $0.id == childID })?.host.focus()
         case .parent:
-            hostsByTaskID[visibleID]?.state.requestFocus()
+            hostsByTaskID[visibleID]?.focus()
         }
     }
 
@@ -463,6 +473,7 @@ struct MainAreaView: View {
         store.subagentSwap.closeAll(taskId: taskID)
         store.subagentStripBatches.reset(taskId: taskID)
         exitedTaskIDs.remove(taskID)
+        store.clearTaskBusy(taskID)
     }
 
     private func purgeHosts(keeping liveTaskIDs: Set<Int64>) {
@@ -474,6 +485,7 @@ struct MainAreaView: View {
             store.subagentSwap.closeAll(taskId: id)
             store.subagentStripBatches.reset(taskId: id)
             exitedTaskIDs.remove(id)
+            store.clearTaskBusy(id)
         }
         store.pruneOpenTerminals(removing: purged)
         conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)

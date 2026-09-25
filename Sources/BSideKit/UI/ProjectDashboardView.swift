@@ -115,7 +115,8 @@ struct ProjectDashboardView: View {
             isBlocked: summary.isBlocked,
             isVanished: isVanished,
             activeChildCount: summary.activeCount,
-            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false
+            needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
+            busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
         let syncText = syncStatus.flatMap(BranchSyncSummary.text(for:))
 
