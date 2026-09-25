@@ -8,6 +8,7 @@ public struct ContentView: View {
     @ObservedObject private var theme = GhosttyResolvedTheme.shared
 
     private var store: ProjectsStore
+    private let editorLauncher = EditorLauncher()
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -80,6 +81,18 @@ public struct ContentView: View {
             // `ToolbarItem`s keeps the toolbar from overflowing into the
             // » chevron at normal window widths.
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        if let folder = EditorCommands.targetFolder(selection: store.mainSelection) {
+                            editorLauncher.openFolder(folder)
+                        }
+                    } label: {
+                        Label("Open in VS Code", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    .help("Open in VS Code (⇧⌘O)")
+                    .accessibilityLabel("Open in VS Code")
+                    .disabled(EditorCommands.targetFolder(selection: store.mainSelection) == nil)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         layout.toggleRightSidebar()
