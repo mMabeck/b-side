@@ -122,7 +122,8 @@ public struct StatusDot: View {
     let status: TaskStatus
     let palette: BSidePalette
 
-    @Environment(\.statusDotReduceMotion) private var reduceMotion
+    @Environment(\.statusDotReduceMotion) private var statusDotReduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var isDimmed = false
 
     public init(status: TaskStatus, palette: BSidePalette) {
@@ -135,16 +136,23 @@ public struct StatusDot: View {
             .fill(status.color(in: palette))
             .frame(width: TaskRowLayout.statusDotDiameter, height: TaskRowLayout.statusDotDiameter)
             .opacity(shouldBlink && isDimmed ? 0.3 : 1)
-            .onAppear {
-                guard shouldBlink else { return }
-                withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
-                    isDimmed = true
+            .onChange(of: shouldBlink, initial: true) { _, isBlinking in
+                if isBlinking {
+                    withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
+                        isDimmed = true
+                    }
+                } else {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isDimmed = false
+                    }
                 }
             }
             .accessibilityLabel(status.accessibilityLabel)
     }
 
     private var shouldBlink: Bool {
-        status == .running && !reduceMotion
+        status == .running && !statusDotReduceMotion && !systemReduceMotion
     }
 }
