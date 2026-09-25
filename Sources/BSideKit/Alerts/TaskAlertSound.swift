@@ -37,8 +37,38 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
         NormalizedSoundPlayer.play(self, volume: Float(max(0, min(100, volume)) / 100))
     }
 
-    var fileURL: URL {
-        URL(fileURLWithPath: "/System/Library/Sounds/\(rawValue).aiff")
+    /// Directories searched for a named sound, in the order `NSSound(named:)`
+    /// searches them: the user's own sounds first, then machine-wide ones,
+    /// then the system set the `.aiff` cases in this enum ship in.
+    static func searchDirectories(fileManager: FileManager = .default) -> [URL] {
+        [
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Sounds"),
+            URL(fileURLWithPath: "/Library/Sounds"),
+            URL(fileURLWithPath: "/System/Library/Sounds"),
+        ]
+    }
+
+    /// Extensions `NSSound(named:)` recognises, tried in this order within
+    /// each directory.
+    static let soundExtensions = ["aiff", "aif", "wav", "caf", "m4a", "mp3"]
+
+    /// Pure so it's directly testable against a temp directory: the first
+    /// existing `<name>.<ext>` found by walking `directories` in order, then
+    /// `soundExtensions` in order within each.
+    static func locate(name: String, in directories: [URL], fileManager: FileManager = .default) -> URL? {
+        for directory in directories {
+            for ext in soundExtensions {
+                let url = directory.appendingPathComponent(name).appendingPathExtension(ext)
+                if fileManager.fileExists(atPath: url.path) {
+                    return url
+                }
+            }
+        }
+        return nil
+    }
+
+    var fileURL: URL? {
+        Self.locate(name: rawValue, in: Self.searchDirectories())
     }
 }
 
@@ -71,7 +101,8 @@ enum NormalizedSoundPlayer {
 
     static func normalizedWAV(for sound: TaskAlertSound) -> Data? {
         if let cached = cache[sound] { return cached }
-        guard let file = try? AVAudioFile(forReading: sound.fileURL),
+        guard let url = sound.fileURL,
+              let file = try? AVAudioFile(forReading: url),
               let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
               (try? file.read(into: buffer)) != nil,
               let channels = buffer.floatChannelData
