@@ -132,7 +132,7 @@ struct TaskCreationView: View {
             if !baseRefs.isEmpty, !baseRefs.contains(project.baseRef) {
                 baseRefs.insert(project.baseRef, at: 0)
             }
-            guard selectedProject.id == project.id else { return }
+            guard selectedProject.id == project.id, !Task.isCancelled else { return }
             branches = loadedBranches
             baseRefOptions = baseRefs
         }

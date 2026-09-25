@@ -51,7 +51,7 @@ enum FuzzyMatcher {
             }
         }
 
-        for i in 1..<matchedIndices.count where matchedIndices.count > 1 {
+        for i in matchedIndices.indices.dropFirst() {
             score -= (matchedIndices[i] - matchedIndices[i - 1] - 1)
         }
 
