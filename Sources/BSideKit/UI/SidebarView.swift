@@ -492,14 +492,14 @@ struct SidebarView: View {
     /// so it stays legible in both the selected and unselected row states.
     private func mergedBadge(isSelected: Bool) -> some View {
         let tint = theme.palette.statusSuccess
-        return HStack(spacing: 2) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 8, weight: .bold))
+        return HStack(spacing: 3) {
+            Image(systemName: "arrow.triangle.merge")
+                .font(.system(size: 11, weight: .bold))
             Text("Merged")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 5)
+        .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(
             Capsule(style: .continuous)
