@@ -205,6 +205,38 @@ struct TaskWorktreeServiceTests {
         #expect(try await GitCLI.branchExists(result.branchName, at: repoURL) == false)
     }
 
+    @Test("deleteTask and archiveWorktree succeed when the worktree and branch were already removed")
+    func removalToleratesVanishedWorktreeAndBranch() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
+
+        let result = try await TaskWorktreeService.createWorktree(
+            for: project,
+            taskName: "Removed elsewhere",
+            baseRef: "main"
+        )
+        try await GitCLI.removeWorktree(at: URL(fileURLWithPath: result.worktreePath), in: repoURL, force: true)
+        try await GitCLI.deleteLocalBranch(result.branchName, at: repoURL, force: true)
+
+        try await TaskWorktreeService.archiveWorktree(
+            project: project,
+            worktreePath: result.worktreePath,
+            removeWorktree: true,
+            teardownCommand: nil
+        )
+        try await TaskWorktreeService.deleteTask(
+            project: project,
+            worktreePath: result.worktreePath,
+            branchName: result.branchName,
+            deleteLocalBranch: true,
+            deleteRemoteBranch: false,
+            teardownCommand: nil
+        )
+    }
+
     @Test("pruneAndDetectVanished reports worktrees whose directories disappeared and cleans git metadata")
     func detectsVanishedWorktrees() async throws {
         let root = try TestRepo.makeTempDirectory()

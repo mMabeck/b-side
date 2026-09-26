@@ -356,7 +356,9 @@ public enum TaskWorktreeService {
         if deleteRemoteBranch {
             try await GitCLI.deleteRemoteBranch(branchName, at: projectURL)
         }
-        if deleteLocalBranch {
+        // The branch may already be gone (deleted outside the app); that must
+        // not block removing the task.
+        if deleteLocalBranch, try await GitCLI.branchExists(branchName, at: projectURL) {
             try await GitCLI.deleteLocalBranch(branchName, at: projectURL, force: true)
         }
     }
@@ -376,7 +378,12 @@ public enum TaskWorktreeService {
             try await runCommand(teardownCommand, in: worktreeURL, onOutput: onOutput)
         }
 
-        try await GitCLI.removeWorktree(at: worktreeURL, in: projectURL, force: true)
+        // A worktree removed outside the app makes `git worktree remove` fail
+        // ("is not a working tree"), which would leave the task impossible to
+        // archive or delete; pruning alone clears its stale metadata.
+        if FileManager.default.fileExists(atPath: worktreePath) {
+            try await GitCLI.removeWorktree(at: worktreeURL, in: projectURL, force: true)
+        }
         try await GitCLI.pruneWorktrees(in: projectURL)
     }
 
