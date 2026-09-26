@@ -131,11 +131,12 @@ public struct StatusDot: View {
     }
 
     public var body: some View {
+        let color = status.color(in: palette)
         Circle()
-            .fill(status.color(in: palette))
+            .fill(color)
             .frame(width: TaskRowLayout.statusDotDiameter, height: TaskRowLayout.statusDotDiameter)
-            .shadow(color: status.color(in: palette).opacity(0.8), radius: 3)
-            .shadow(color: status.color(in: palette).opacity(0.5), radius: 5)
+            .shadow(color: color.opacity(0.8), radius: 3)
+            .shadow(color: color.opacity(0.5), radius: 5)
             .opacity(shouldBlink && isDimmed ? 0.3 : 1)
             .onChange(of: shouldBlink, initial: true) { _, isBlinking in
                 if isBlinking {
