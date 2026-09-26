@@ -183,10 +183,18 @@ struct SidebarView: View {
         let status: TaskStatus
         let summary: TaskChildSummary
         let isVanished: Bool
+        /// True only when the branch is merged into its base ref *and* has
+        /// no uncommitted changes sitting on top of it
+        /// (`BranchSyncSummary.isEffectivelyMerged`).
         let isMerged: Bool
+        /// Whether the task has commits or uncommitted edits the base ref
+        /// doesn't have yet — mutually exclusive with `isMerged`.
+        let hasPendingWork: Bool
+        let pendingAhead: Int
+        let hasUncommittedChanges: Bool
         /// `nil` when `isMerged` — the merged pill already covers that case,
-        /// and this is reserved for ahead/behind counts so the two never say
-        /// the same thing twice.
+        /// and this is reserved for the quiet behind-only caption so the two
+        /// never say the same thing twice.
         let syncText: String?
     }
 
@@ -203,9 +211,19 @@ struct SidebarView: View {
             needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
             busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
-        let isMerged = syncStatus?.merged ?? false
-        let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.text(for:))
-        return TaskStatusInfo(status: status, summary: summary, isVanished: isVanished, isMerged: isMerged, syncText: syncText)
+        let isMerged = syncStatus.map(BranchSyncSummary.isEffectivelyMerged) ?? false
+        let hasPendingWork = syncStatus.map(BranchSyncSummary.hasPendingWork(for:)) ?? false
+        let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.behindCaption(for:))
+        return TaskStatusInfo(
+            status: status,
+            summary: summary,
+            isVanished: isVanished,
+            isMerged: isMerged,
+            hasPendingWork: hasPendingWork,
+            pendingAhead: syncStatus?.ahead ?? 0,
+            hasUncommittedChanges: syncStatus?.hasUncommittedChanges ?? false,
+            syncText: syncText
+        )
     }
 
     /// A row in the "Active" section: the same status dot `taskRow` shows,
@@ -247,7 +265,15 @@ struct SidebarView: View {
 
                 if info.isMerged {
                     mergedBadge(isSelected: isSelected)
-                } else if let syncText = info.syncText {
+                } else if info.hasPendingWork {
+                    pendingPill(
+                        ahead: info.pendingAhead,
+                        hasUncommittedChanges: info.hasUncommittedChanges,
+                        isSelected: isSelected
+                    )
+                }
+
+                if let syncText = info.syncText {
                     Text(syncText)
                         .font(.caption2)
                         .foregroundStyle(tertiary)
@@ -454,6 +480,12 @@ struct SidebarView: View {
 
                 if isMerged {
                     mergedBadge(isSelected: isSelected)
+                } else if info.hasPendingWork {
+                    pendingPill(
+                        ahead: info.pendingAhead,
+                        hasUncommittedChanges: info.hasUncommittedChanges,
+                        isSelected: isSelected
+                    )
                 }
 
                 if let syncText {
@@ -505,6 +537,35 @@ struct SidebarView: View {
             Capsule(style: .continuous)
                 .fill(tint.opacity(isSelected ? 0.22 : 0.15))
         )
+    }
+
+    /// A pill for a task with work the base ref doesn't have yet: commits of
+    /// its own (`↑N`) and/or a pencil marker for uncommitted worktree edits.
+    /// Styled to match `mergedBadge` (same pill shape, 11pt) but tinted with
+    /// `statusRunning` (the palette's amber "in progress" colour) rather than
+    /// `statusSuccess`, since this is explicitly the opposite state: work
+    /// still outstanding, not landed.
+    private func pendingPill(ahead: Int, hasUncommittedChanges: Bool, isSelected: Bool) -> some View {
+        let tint = theme.palette.statusRunning
+        return HStack(spacing: 3) {
+            if ahead > 0 {
+                Text("↑\(ahead)")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            if hasUncommittedChanges {
+                Image(systemName: "pencil")
+                    .font(.system(size: 10, weight: .bold))
+            }
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tint.opacity(isSelected ? 0.22 : 0.15))
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BranchSyncSummary.accessibilityLabel(ahead: ahead, hasUncommittedChanges: hasUncommittedChanges) ?? "")
     }
 
     /// The selected row's fill, painted directly on the row's own content

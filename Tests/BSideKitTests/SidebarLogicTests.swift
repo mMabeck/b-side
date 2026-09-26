@@ -101,6 +101,46 @@ struct SidebarLogicTests {
         #expect(BranchSyncSummary.text(for: status) == "↑2")
     }
 
+    // MARK: - Merged badge vs pending-work pill decision
+
+    @Test("A merged, clean branch reads as merged with no pending work")
+    func mergedCleanBranchReadsMerged() {
+        let status = TaskWorktreeService.BranchSyncStatus(ahead: 0, behind: 0, merged: true, hasUncommittedChanges: false)
+        #expect(BranchSyncSummary.isEffectivelyMerged(status))
+        #expect(!BranchSyncSummary.hasPendingWork(for: status))
+    }
+
+    @Test("A merged branch with uncommitted changes must not read as merged, and must read as pending")
+    func mergedButDirtyBranchIsNotEffectivelyMerged() {
+        let status = TaskWorktreeService.BranchSyncStatus(ahead: 0, behind: 0, merged: true, hasUncommittedChanges: true)
+        #expect(!BranchSyncSummary.isEffectivelyMerged(status))
+        #expect(BranchSyncSummary.hasPendingWork(for: status))
+    }
+
+    @Test("An unmerged branch with new commits ahead of base reads as pending, not merged")
+    func aheadUnmergedBranchIsPending() {
+        let status = TaskWorktreeService.BranchSyncStatus(ahead: 3, behind: 0, merged: false, hasUncommittedChanges: false)
+        #expect(!BranchSyncSummary.isEffectivelyMerged(status))
+        #expect(BranchSyncSummary.hasPendingWork(for: status))
+    }
+
+    @Test("A clean, unmerged, behind-only branch has no pending work of its own")
+    func behindOnlyBranchHasNoPendingWork() {
+        let status = TaskWorktreeService.BranchSyncStatus(ahead: 0, behind: 4, merged: false, hasUncommittedChanges: false)
+        #expect(!BranchSyncSummary.isEffectivelyMerged(status))
+        #expect(!BranchSyncSummary.hasPendingWork(for: status))
+        #expect(BranchSyncSummary.behindCaption(for: status) == "↓4")
+    }
+
+    @Test("Pending-work accessibility label covers commits-ahead, uncommitted changes, and both together")
+    func pendingWorkAccessibilityLabel() {
+        #expect(BranchSyncSummary.accessibilityLabel(ahead: 0, hasUncommittedChanges: false) == nil)
+        #expect(BranchSyncSummary.accessibilityLabel(ahead: 1, hasUncommittedChanges: false) == "1 commit not merged")
+        #expect(BranchSyncSummary.accessibilityLabel(ahead: 3, hasUncommittedChanges: false) == "3 commits not merged")
+        #expect(BranchSyncSummary.accessibilityLabel(ahead: 0, hasUncommittedChanges: true) == "uncommitted changes")
+        #expect(BranchSyncSummary.accessibilityLabel(ahead: 3, hasUncommittedChanges: true) == "3 commits not merged, uncommitted changes")
+    }
+
     // MARK: - Reserved dot-column alignment invariant
 
     @Test("The status dot column reserves the same width regardless of status")

@@ -280,4 +280,73 @@ struct ProjectsStoreTaskCreationTests {
         store.clearTaskBusy(999)
         #expect(store.busyTaskIDs.isEmpty)
     }
+
+    @Test("refreshSyncStatus detects uncommitted changes in the task's worktree, and clears once committed")
+    func refreshSyncStatusDetectsUncommittedChanges() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Dirty worktree task", useWorktree: true)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.hasUncommittedChanges == false)
+
+        let worktreeURL = URL(fileURLWithPath: task.worktreePath)
+        try "scratch\n".write(to: worktreeURL.appendingPathComponent("scratch.txt"), atomically: true, encoding: .utf8)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.hasUncommittedChanges == true)
+
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "scratch"], in: worktreeURL)
+
+        await store.refreshSyncStatus(for: task, project: project)
+        #expect(store.syncStatusByTask[task.id!]?.hasUncommittedChanges == false)
+    }
+
+    @Test("Sync status updates live after a new commit lands on a task's branch following an earlier merged state, without an explicit refresh")
+    func syncStatusUpdatesLiveAfterNewCommitOnMergedBranch() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+        let repoURL = try await TestRepo.makeRepo(in: root)
+
+        let database = try AppDatabase.openInMemory()
+        let store = ProjectsStore(database: database)
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Land then reopen", useWorktree: true)
+
+        let worktreeURL = URL(fileURLWithPath: task.worktreePath)
+        try "work\n".write(to: worktreeURL.appendingPathComponent("work.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "work"], in: worktreeURL)
+        _ = try await GitCLI.run(["merge", "--no-ff", "-m", "merge", task.branchName], in: repoURL)
+
+        // The refs watcher fires from the merge above landing in `repoURL`'s
+        // common git dir; poll for it rather than calling `refreshSyncStatus`
+        // directly, since this test exercises the live path end to end.
+        try await waitUntil(.seconds(3)) { store.syncStatusByTask[task.id!]?.merged == true }
+        #expect(store.syncStatusByTask[task.id!]?.merged == true)
+
+        // A further commit on the branch, made entirely outside the app (as a
+        // terminal or another tool would), must flip `merged` back to false
+        // live — the regression the sidebar's "Merged" badge used to miss.
+        try "more work\n".write(to: worktreeURL.appendingPathComponent("more.txt"), atomically: true, encoding: .utf8)
+        _ = try await GitCLI.run(["add", "."], in: worktreeURL)
+        _ = try await GitCLI.run(["commit", "-m", "more work"], in: worktreeURL)
+
+        try await waitUntil(.seconds(3)) { store.syncStatusByTask[task.id!]?.merged == false }
+        #expect(store.syncStatusByTask[task.id!]?.merged == false)
+    }
 }

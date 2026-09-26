@@ -542,6 +542,15 @@ public final class ProjectsStore {
     private var observationTask: Task<Void, Never>?
     private var stripPruneTask: Task<Void, Never>?
     private var appActivationObserver: NSObjectProtocol?
+    /// One ref watcher per project, keyed by project id, kept in sync with
+    /// `projects` by `syncRefsWatchers()`. Detects branch commits and base-ref
+    /// moves live so `syncStatusByTask` doesn't go stale between a row's own
+    /// `.task(id:)`-triggered refreshes (see `refreshSyncStatus`).
+    private var refsWatchers: [Int64: ProjectRefsWatcher] = [:]
+    /// Task ids with a `refreshSyncStatus` currently in flight, so a ref
+    /// change that fires again before the previous refresh finished doesn't
+    /// pile up a second concurrent git call for the same task.
+    private var syncRefreshInFlight: Set<Int64> = []
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "projects-store")
 
     public init(database: AppDatabase) {
@@ -581,6 +590,7 @@ public final class ProjectsStore {
                 for try await (projects, tasksByProject) in observation.values(in: database.dbQueue) {
                     self.projects = projects
                     self.tasksByProject = tasksByProject
+                    self.syncRefsWatchers()
                     let reconciled = Self.reconcileSelection(
                         selectedProjectID: self.selectedProjectID,
                         selectedTaskID: self.selectedTaskID,
@@ -623,9 +633,61 @@ public final class ProjectsStore {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let id = self.selectedTaskID else { return }
-                self.unreadTaskIDs.remove(id)
+                guard let self else { return }
+                if let id = self.selectedTaskID {
+                    self.unreadTaskIDs.remove(id)
+                }
+                // Cheap backstop for the FSEvents-based `refsWatchers`: covers
+                // a commit/merge made while the app itself was suspended and
+                // FSEvents coalescing may have missed, without polling git
+                // continuously.
+                await self.refreshAllSyncStatuses()
             }
+        }
+    }
+
+    /// Keeps `refsWatchers` matching `projects` one-to-one: starts a watcher
+    /// for each newly-seen project, stops and drops one for each project no
+    /// longer present. Called from the project `ValueObservation` loop, so it
+    /// runs exactly when the set of projects can have changed.
+    private func syncRefsWatchers() {
+        let currentIDs = Set(projects.compactMap(\.id))
+        for id in refsWatchers.keys where !currentIDs.contains(id) {
+            refsWatchers[id]?.stop()
+            refsWatchers[id] = nil
+        }
+        for project in projects {
+            guard let id = project.id, refsWatchers[id] == nil else { continue }
+            let watcher = ProjectRefsWatcher(projectURL: URL(fileURLWithPath: project.path)) { [weak self] in
+                Task { @MainActor [weak self] in
+                    await self?.refreshSyncStatuses(forProjectID: id)
+                }
+            }
+            watcher.start()
+            refsWatchers[id] = watcher
+        }
+    }
+
+    /// Refreshes `syncStatusByTask` for every task of `projectID`, skipping
+    /// any task whose refresh is already in flight rather than queuing a
+    /// second overlapping one — the next ref-change or app-activation trigger
+    /// will catch up regardless.
+    private func refreshSyncStatuses(forProjectID projectID: Int64) async {
+        guard let project = projects.first(where: { $0.id == projectID }) else { return }
+        let tasks = tasksByProject[projectID] ?? []
+        for task in tasks {
+            guard let taskID = task.id, !syncRefreshInFlight.contains(taskID) else { continue }
+            syncRefreshInFlight.insert(taskID)
+            await refreshSyncStatus(for: task, project: project)
+            syncRefreshInFlight.remove(taskID)
+        }
+    }
+
+    /// The app-activation backstop: refreshes every known project's tasks.
+    private func refreshAllSyncStatuses() async {
+        for project in projects {
+            guard let id = project.id else { continue }
+            await refreshSyncStatuses(forProjectID: id)
         }
     }
 
@@ -694,6 +756,8 @@ public final class ProjectsStore {
             NotificationCenter.default.removeObserver(appActivationObserver)
         }
         appActivationObserver = nil
+        for watcher in refsWatchers.values { watcher.stop() }
+        refsWatchers.removeAll()
         if let fileURL = Self.subagentEndpointFileURL() {
             Self.removeSubagentEndpointFile(at: fileURL)
         }
@@ -1016,7 +1080,8 @@ public final class ProjectsStore {
         guard let status = try? await TaskWorktreeService.syncStatus(
             project: project,
             branchName: task.branchName,
-            baseCommit: task.baseCommit
+            baseCommit: task.baseCommit,
+            worktreePath: task.worktreePath
         ) else {
             return
         }

@@ -136,7 +136,7 @@ final class WorktreeWatcher {
     /// remote-tracking refs matter to the sidebar — not e.g. `refs/stash` or
     /// `refs/bisect`, and not the many non-ref files there (`config`,
     /// `hooks/`, `objects/`, ...).
-    private static func isRelevantCommonGitDirPath(_ path: String) -> Bool {
+    static func isRelevantCommonGitDirPath(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         if name == "packed-refs" { return true }
         return path.contains("/refs/heads/") || path.hasSuffix("/refs/heads")
@@ -191,7 +191,7 @@ final class WorktreeWatcher {
     /// sites above is safe. `callback` receives the raw list of changed paths
     /// for one coalesced batch of events; flags aren't needed since both
     /// callers only care about *which* paths changed.
-    private static func makeStream(
+    static func makeStream(
         paths: [String],
         latency: CFTimeInterval,
         callback: @escaping ([String]) -> Void
