@@ -29,6 +29,14 @@ public enum MainSelection: Equatable {
     }
 }
 
+/// Which neighbour `ProjectsStore.moveProject(_:direction:)` swaps a project
+/// towards — the VoiceOver "Move Up"/"Move Down" accessibility action
+/// equivalent of a drag reorder.
+public enum ProjectMoveDirection {
+    case up
+    case down
+}
+
 /// Drives the sidebar's project (and nested task) list live from the database,
 /// using GRDB's `ValueObservation`.
 @MainActor
@@ -543,7 +551,7 @@ public final class ProjectsStore {
     public func start() {
         guard observationTask == nil else { return }
         let observation = ValueObservation.tracking { db in
-            let projects = try Project.fetchAll(db)
+            let projects = try Project.order(Project.Columns.sortOrder, Project.Columns.id).fetchAll(db)
             var tasksByProject: [Int64: [TaskRecord]] = [:]
             for project in projects {
                 guard let projectId = project.id else { continue }
@@ -699,16 +707,49 @@ public final class ProjectsStore {
         let remote = await GitCLI.originRemote(at: path)
         let branch = await GitCLI.currentBranch(at: path)
 
-        let project = Project(
-            path: path.path,
-            displayName: path.lastPathComponent,
-            remote: remote,
-            baseRef: branch ?? "main"
-        )
         try await database.dbQueue.write { db in
-            var project = project
+            let maxSortOrder = try Int.fetchOne(db, sql: "SELECT MAX(sortOrder) FROM project") ?? -1
+            var project = Project(
+                path: path.path,
+                displayName: path.lastPathComponent,
+                remote: remote,
+                baseRef: branch ?? "main",
+                sortOrder: maxSortOrder + 1
+            )
             try project.insert(db)
         }
+    }
+
+    /// Reorders `projects` by moving the projects at `source` offsets to
+    /// `destination`, mirroring `List.onMove`'s semantics, and persists the
+    /// result as each affected project's new `sortOrder` in one write
+    /// transaction. Updates `projects` in place first (optimistic update) so
+    /// the drag doesn't visually snap back while the write is in flight; the
+    /// next `ValueObservation` tick overwrites it with the same (authoritative)
+    /// order.
+    public func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int) async throws {
+        var reordered = projects
+        reordered.move(fromOffsets: source, toOffset: destination)
+        projects = reordered
+
+        let orderedIDs = reordered.map(\.id)
+        try await database.dbQueue.write { db in
+            for (index, id) in orderedIDs.enumerated() {
+                guard let id else { continue }
+                try db.execute(sql: "UPDATE project SET sortOrder = ? WHERE id = ?", arguments: [index, id])
+            }
+        }
+    }
+
+    /// Moves `project` to just before/after `direction`'s neighbour — the
+    /// action VoiceOver's "Move Up"/"Move Down" accessibility actions invoke,
+    /// since drag reordering has no VoiceOver equivalent. A no-op if `project`
+    /// is already at that end of the list.
+    public func moveProject(_ project: Project, direction: ProjectMoveDirection) async throws {
+        guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        let destination = direction == .up ? index - 1 : index + 2
+        guard destination >= 0, destination <= projects.count else { return }
+        try await moveProjects(fromOffsets: IndexSet(integer: index), toOffset: destination)
     }
 
     public func removeProject(_ project: Project) async throws {
@@ -1017,7 +1058,9 @@ public final class ProjectsStore {
     }
 
     private func currentProjects() async -> [Project] {
-        (try? await database.dbQueue.read { db in try Project.fetchAll(db) }) ?? []
+        (try? await database.dbQueue.read { db in
+            try Project.order(Project.Columns.sortOrder, Project.Columns.id).fetchAll(db)
+        }) ?? []
     }
 
     private func allTasks(forProjectId projectId: Int64) async throws -> [TaskRecord] {

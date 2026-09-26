@@ -19,6 +19,7 @@ struct MigrationTests {
             "v4_task_base_commit",
             "v5_project_last_task_creation_choices",
             "v6_task_last_activity_at",
+            "v7_project_sort_order",
         ])
         try migrator.migrate(dbQueue)
 
@@ -28,6 +29,7 @@ struct MigrationTests {
             try #expect(db.tableExists("conversation"))
             try #expect(db.columns(in: "project").map(\.name).contains("lastUseWorktree"))
             try #expect(db.columns(in: "project").map(\.name).contains("lastTaskCreationMode"))
+            try #expect(db.columns(in: "project").map(\.name).contains("sortOrder"))
             try #expect(db.columns(in: "task").map(\.name).contains("baseCommit"))
             try #expect(db.columns(in: "task").map(\.name).contains("lastActivityAt"))
         }
@@ -45,7 +47,7 @@ struct MigrationTests {
         let appliedCount = try dbQueue.read { db in
             try migrator.appliedMigrations(db).count
         }
-        #expect(appliedCount == 6)
+        #expect(appliedCount == 7)
     }
 
     @Test("v5 is idempotent when the project columns were already added under an old migration name")
@@ -69,6 +71,34 @@ struct MigrationTests {
         try dbQueue.read { db in
             try #expect(db.columns(in: "project").map(\.name).contains("lastUseWorktree"))
             try #expect(db.columns(in: "project").map(\.name).contains("lastTaskCreationMode"))
+        }
+    }
+
+    @Test("v7 backfills sortOrder to match each project's pre-existing (rowid) order")
+    func v7BackfillsSortOrderInExistingRowidOrder() throws {
+        let dbQueue = try DatabaseQueue()
+        var migrator = DatabaseMigrator()
+        Migrations.register(in: &migrator)
+        try migrator.migrate(dbQueue, upTo: "v6_task_last_activity_at")
+
+        var ids: [Int64] = []
+        try dbQueue.write { db in
+            for path in ["/a", "/b", "/c"] {
+                try db.execute(
+                    sql: "INSERT INTO project (path, displayName, baseRef) VALUES (?, ?, 'main')",
+                    arguments: [path, path]
+                )
+                ids.append(db.lastInsertedRowID)
+            }
+        }
+
+        try migrator.migrate(dbQueue)
+
+        try dbQueue.read { db in
+            for (index, id) in ids.enumerated() {
+                let sortOrder = try Int.fetchOne(db, sql: "SELECT sortOrder FROM project WHERE id = ?", arguments: [id])
+                #expect(sortOrder == index)
+            }
         }
     }
 }
