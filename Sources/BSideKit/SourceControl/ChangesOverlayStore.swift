@@ -53,6 +53,7 @@ public final class ChangesOverlayStore {
     private var worktreeURL: URL? { task.map { URL(fileURLWithPath: $0.worktreePath) } }
     private var watcher: WorktreeWatcher?
     private var refreshGeneration = 0
+    private var diffLoadGeneration = 0
 
     public init() {}
 
@@ -94,9 +95,12 @@ public final class ChangesOverlayStore {
     }
 
     /// Selects `path` and loads its diff. A no-op when `path` is already
-    /// selected, so clicking the current row doesn't re-fetch its diff.
+    /// selected (so clicking the current row doesn't re-fetch its diff) or
+    /// when `path` is a folder row's id rather than a file's — folder rows
+    /// aggregate several files and have no diff of their own.
     public func select(_ path: String?) {
         guard path != selectedPath else { return }
+        if let path, !files.contains(where: { $0.path == path }) { return }
         selectedPath = path
         Task { await loadDiff() }
     }
@@ -176,12 +180,14 @@ public final class ChangesOverlayStore {
     }
 
     private func loadDiff() async {
+        diffLoadGeneration += 1
+        let generation = diffLoadGeneration
+
         guard let worktreeURL, let selectedPath, let file = files.first(where: { $0.path == selectedPath }) else {
             diffText = nil
             diffErrorMessage = nil
             return
         }
-        let requestedPath = selectedPath
         let requestedMode = mode
 
         do {
@@ -192,17 +198,26 @@ public final class ChangesOverlayStore {
                 switch requestedMode {
                 case .all, .uncommitted:
                     let ref = baseRefLabel ?? "HEAD"
-                    diff = try await GitCLI.workingTreeDiff(for: selectedPath, against: ref, at: worktreeURL)
+                    diff = try await GitCLI.workingTreeDiff(
+                        for: selectedPath, origPath: file.origPath, against: ref, at: worktreeURL
+                    )
                 case .committed:
                     guard let baseline = baseRefLabel else { return }
-                    diff = try await GitCLI.branchDiff(for: selectedPath, since: baseline, at: worktreeURL)
+                    diff = try await GitCLI.branchDiff(
+                        for: selectedPath, origPath: file.origPath, since: baseline, at: worktreeURL
+                    )
                 }
             }
-            guard self.selectedPath == requestedPath, self.mode == requestedMode else { return }
+            // A newer `loadDiff()` (a fresh selection, or a live refresh
+            // reloading the same path) may have started and even finished
+            // while this one was awaiting its diff; the generation counter
+            // catches that even when the newer call reselected the same
+            // path, which the old `selectedPath`/`mode` equality check missed.
+            guard generation == diffLoadGeneration else { return }
             diffText = diff
             diffErrorMessage = nil
         } catch {
-            guard self.selectedPath == requestedPath, self.mode == requestedMode else { return }
+            guard generation == diffLoadGeneration else { return }
             diffText = nil
             diffErrorMessage = Self.describe(error)
         }

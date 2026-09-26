@@ -361,12 +361,17 @@ extension GitCLI {
         return parseStatusRecords(data).filter { $0.kind == .untracked }.map(\.path)
     }
 
+    /// Above this many untracked files, a `diff --no-index` per file (even
+    /// bounded to `maxConcurrent` at a time) is too much process spawning for
+    /// one refresh; callers just get no +/- counts back.
+    public static let untrackedLineCountThreshold = 200
+
     /// Added/removed line counts for a batch of untracked files, bounded to
     /// `maxConcurrent` `diff --no-index` processes at a time. Shared by
-    /// `SourceControlStore` (which additionally caps the batch size before
-    /// calling this) and the Changes overlay.
+    /// `SourceControlStore` and the Changes overlay's `workingTreeChanges`;
+    /// both skip line counts outright above `untrackedLineCountThreshold`.
     public static func lineCounts(forUntracked paths: [String], at path: URL, maxConcurrent: Int = 8) async -> [String: LineCount] {
-        guard !paths.isEmpty else { return [:] }
+        guard !paths.isEmpty, paths.count <= untrackedLineCountThreshold else { return [:] }
         var result: [String: LineCount] = [:]
         var remaining = paths[...]
         await withTaskGroup(of: (String, LineCount?).self) { group in
@@ -403,7 +408,11 @@ extension GitCLI {
         let counts = parseNumstat(try await numstatData)
         var changes = parseNameStatusRecords(try await nameStatusData, counts: counts)
 
-        let untracked = try await untrackedPaths(at: path)
+        // A path can appear both in the diff (deleted since `ref`) and as an
+        // untracked file (recreated afterwards) — keep only the diff's entry
+        // so `BranchFileChange.id`, which is just `path`, stays unique.
+        let existingPaths = Set(changes.map(\.path))
+        let untracked = try await untrackedPaths(at: path).filter { !existingPaths.contains($0) }
         guard !untracked.isEmpty else { return changes }
         let untrackedCounts = await lineCounts(forUntracked: untracked, at: path)
         changes.append(
@@ -425,8 +434,13 @@ extension GitCLI {
     /// `ref` — the per-file counterpart to `workingTreeChanges`. Untracked
     /// files go through `diffForUntracked` instead, since `ref` (a commit)
     /// has no entry for them to diff against.
-    public static func workingTreeDiff(for filePath: String, against ref: String, at path: URL) async throws -> DiffText {
-        let data = try await run(["diff", ref, "--", filePath], in: path)
+    public static func workingTreeDiff(
+        for filePath: String, origPath: String? = nil, against ref: String, at path: URL
+    ) async throws -> DiffText {
+        var arguments = ["--literal-pathspecs", "diff", ref, "--"]
+        if let origPath { arguments.append(origPath) }
+        arguments.append(filePath)
+        let data = try await run(arguments, in: path)
         return makeDiffText(from: data)
     }
 
@@ -462,8 +476,13 @@ extension GitCLI {
     }
 
     /// The diff for a single file's committed changes since `baseline`.
-    public static func branchDiff(for filePath: String, since baseline: String, at path: URL) async throws -> DiffText {
-        let data = try await run(["diff", "\(baseline)..HEAD", "--", filePath], in: path)
+    public static func branchDiff(
+        for filePath: String, origPath: String? = nil, since baseline: String, at path: URL
+    ) async throws -> DiffText {
+        var arguments = ["--literal-pathspecs", "diff", "\(baseline)..HEAD", "--"]
+        if let origPath { arguments.append(origPath) }
+        arguments.append(filePath)
+        let data = try await run(arguments, in: path)
         return makeDiffText(from: data)
     }
 
