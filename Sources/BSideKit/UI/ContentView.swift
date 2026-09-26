@@ -122,12 +122,29 @@ public struct ContentView: View {
                 store.pendingTaskCreationProject = nil
             }
         }
+        // Same one-presentation-site rationale as the task-creation sheet
+        // above: every trigger just sets `store.pendingChangesOverlayTask`.
+        .sheet(item: pendingChangesOverlayTaskBinding) { task in
+            ChangesOverlaySheet(task: task) { path in
+                editorLauncher.openFile(
+                    URL(fileURLWithPath: task.worktreePath).appendingPathComponent(path),
+                    in: URL(fileURLWithPath: task.worktreePath)
+                )
+            }
+        }
     }
 
     private var pendingTaskCreationProjectBinding: Binding<Project?> {
         Binding(
             get: { store.pendingTaskCreationProject },
             set: { store.pendingTaskCreationProject = $0 }
+        )
+    }
+
+    private var pendingChangesOverlayTaskBinding: Binding<TaskRecord?> {
+        Binding(
+            get: { store.pendingChangesOverlayTask },
+            set: { store.pendingChangesOverlayTask = $0 }
         )
     }
 }

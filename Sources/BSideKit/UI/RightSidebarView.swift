@@ -19,6 +19,11 @@ struct RightSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if scStore.task != nil {
+                header
+                Rectangle().fill(theme.palette.separator).frame(height: 1)
+            }
+
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -82,6 +87,25 @@ struct RightSidebarView: View {
                 Button("Cancel", role: .cancel) { self.discardConfirmation = nil }
             }
         }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack {
+            Text("Source Control")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+            Spacer()
+            Button("Show All Changes") {
+                store.pendingChangesOverlayTask = scStore.task
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(theme.palette.accent)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Content

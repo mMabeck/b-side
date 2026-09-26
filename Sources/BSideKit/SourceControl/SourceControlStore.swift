@@ -240,7 +240,7 @@ public final class SourceControlStore {
             applyLineCounts(staged: counts.staged, unstaged: counts.unstaged, untracked: untrackedCounts)
         }
 
-        let baseline = await Self.resolvedBaseline(task: task, at: worktreeURL)
+        let baseline = await TaskBaseline.resolved(task: task, at: worktreeURL)
         guard generation == refreshGeneration else { return }
         if let baseline, let branch = try? await GitCLI.branchChanges(since: baseline, at: worktreeURL) {
             guard generation == refreshGeneration else { return }
@@ -303,37 +303,7 @@ public final class SourceControlStore {
 
     private static func untrackedLineCounts(_ paths: [String], at url: URL) async -> [String: GitCLI.LineCount] {
         guard !paths.isEmpty, paths.count <= untrackedLineCountThreshold else { return [:] }
-        var result: [String: GitCLI.LineCount] = [:]
-        var remaining = paths[...]
-        await withTaskGroup(of: (String, GitCLI.LineCount?).self) { group in
-            func addNext() {
-                guard let path = remaining.popFirst() else { return }
-                group.addTask {
-                    let count = try? await GitCLI.lineCount(forUntracked: path, at: url)
-                    return (path, count)
-                }
-            }
-            for _ in 0..<min(maxConcurrentUntrackedDiffs, paths.count) {
-                addNext()
-            }
-            while let (path, count) = await group.next() {
-                if let count {
-                    result[path] = count
-                }
-                addNext()
-            }
-        }
-        return result
-    }
-
-    /// The baseline for the branch view: the recorded `baseCommit`, or (for a
-    /// legacy task with none) the branch's own reflog creation commit — same
-    /// fallback `TaskWorktreeService.syncStatus` uses.
-    private static func resolvedBaseline(task: TaskRecord, at worktreeURL: URL) async -> String? {
-        if let baseCommit = task.baseCommit {
-            return baseCommit
-        }
-        return await GitCLI.reflogCreationCommit(forBranch: task.branchName, at: worktreeURL)
+        return await GitCLI.lineCounts(forUntracked: paths, at: url, maxConcurrent: maxConcurrentUntrackedDiffs)
     }
 
     // MARK: - Operations
@@ -483,7 +453,7 @@ public final class SourceControlStore {
             }
             return try await GitCLI.diff(for: row.path, staged: false, at: worktreeURL)
         case .branch:
-            guard let task, let baseline = await Self.resolvedBaseline(task: task, at: worktreeURL) else {
+            guard let task, let baseline = await TaskBaseline.resolved(task: task, at: worktreeURL) else {
                 return GitCLI.DiffText(text: "", isBinary: false, isTruncated: false)
             }
             return try await GitCLI.branchDiff(for: row.path, since: baseline, at: worktreeURL)

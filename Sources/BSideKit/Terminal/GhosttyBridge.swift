@@ -237,7 +237,9 @@ public enum GhosttyBridge {
     /// the same defensive basis — Ghostty's own default binds plain Cmd+R
     /// to `reload_config`, and `TerminalCommands`' "Restart Pi Session"
     /// deliberately uses Cmd+Shift+R instead of Cmd+R to avoid colliding
-    /// with it outright.
+    /// with it outright. Cmd+Shift+D (`ChangesCommands`' "Show All Changes")
+    /// is released on the same defensive basis, with no confirmed Ghostty
+    /// default either.
     ///
     /// Copy/paste/select-all/find (`cmd+c`/`cmd+v`/`cmd+a`/`cmd+f`) are
     /// deliberately left bound to the terminal: those are exactly the keys a
@@ -255,6 +257,7 @@ public enum GhosttyBridge {
     keybind = cmd+h=unbind
     keybind = cmd+m=unbind
     keybind = cmd+shift+r=unbind
+    keybind = cmd+shift+d=unbind
     \(digitUnbinds)
 
     """

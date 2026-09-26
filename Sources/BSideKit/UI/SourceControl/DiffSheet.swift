@@ -100,21 +100,11 @@ struct DiffSheet: View {
     }
 
     private func centeredMessage(_ message: String) -> some View {
-        Text(message)
-            .font(.system(size: 13))
-            .foregroundStyle(theme.palette.textSecondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(theme.palette.windowBackground)
+        SheetCenteredMessage(message: message, palette: theme.palette)
     }
 
     private var truncationBanner: some View {
-        Text("Diff truncated — showing a partial view of a very large change.")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(theme.palette.textPrimary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(theme.palette.statusNeedsAttention.opacity(0.18))
+        SheetTruncationBanner(palette: theme.palette)
     }
 
     // MARK: - Footer
@@ -138,25 +128,6 @@ struct DiffSheet: View {
         isDefaultAction: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        let button = Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isPrimary ? theme.palette.selectionForeground : theme.palette.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isPrimary ? theme.palette.accent : theme.palette.elevatedSurfaceBackground)
-                )
-        }
-        .buttonStyle(.plain)
-
-        return Group {
-            if isDefaultAction {
-                button.keyboardShortcut(.defaultAction)
-            } else {
-                button
-            }
-        }
+        ThemedSheetButton(title: title, palette: theme.palette, isPrimary: isPrimary, isDefaultAction: isDefaultAction, action: action)
     }
 }

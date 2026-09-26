@@ -346,6 +346,90 @@ extension GitCLI {
         return "/" + escaped
     }
 
+    // MARK: - Combined working-tree changes (Changes overlay)
+
+    /// Paths of untracked files only, via the same `-z` status parsing
+    /// `changedFiles` uses — shared by the Changes overlay's `.all` and
+    /// `.uncommitted` modes, which both fold untracked files (never part of
+    /// `git diff`'s output, tracked or not) into a combined committed +
+    /// uncommitted view.
+    public static func untrackedPaths(at path: URL) async throws -> [String] {
+        let data = try await run(
+            ["status", "--porcelain=v2", "-z", "--untracked-files=all"],
+            in: path
+        )
+        return parseStatusRecords(data).filter { $0.kind == .untracked }.map(\.path)
+    }
+
+    /// Added/removed line counts for a batch of untracked files, bounded to
+    /// `maxConcurrent` `diff --no-index` processes at a time. Shared by
+    /// `SourceControlStore` (which additionally caps the batch size before
+    /// calling this) and the Changes overlay.
+    public static func lineCounts(forUntracked paths: [String], at path: URL, maxConcurrent: Int = 8) async -> [String: LineCount] {
+        guard !paths.isEmpty else { return [:] }
+        var result: [String: LineCount] = [:]
+        var remaining = paths[...]
+        await withTaskGroup(of: (String, LineCount?).self) { group in
+            func addNext() {
+                guard let next = remaining.popFirst() else { return }
+                group.addTask {
+                    let count = try? await lineCount(forUntracked: next, at: path)
+                    return (next, count)
+                }
+            }
+            for _ in 0..<min(maxConcurrent, paths.count) {
+                addNext()
+            }
+            while let (next, count) = await group.next() {
+                if let count {
+                    result[next] = count
+                }
+                addNext()
+            }
+        }
+        return result
+    }
+
+    /// Everything changed in the working tree relative to `ref` — tracked
+    /// modifications (staged and unstaged combined, since a plain `git diff
+    /// <ref>` doesn't distinguish the index from the worktree) plus
+    /// untracked files. Two of the Changes overlay's three modes are just
+    /// this at different `ref`s: `.uncommitted` passes `"HEAD"`, `.all`
+    /// passes the task's baseline commit (which also folds in everything
+    /// committed since baseline, since it's further back than `HEAD`).
+    public static func workingTreeChanges(against ref: String, at path: URL) async throws -> [BranchFileChange] {
+        async let nameStatusData = run(["diff", "--name-status", "-z", ref], in: path)
+        async let numstatData = run(["diff", "--numstat", "-z", ref], in: path)
+        let counts = parseNumstat(try await numstatData)
+        var changes = parseNameStatusRecords(try await nameStatusData, counts: counts)
+
+        let untracked = try await untrackedPaths(at: path)
+        guard !untracked.isEmpty else { return changes }
+        let untrackedCounts = await lineCounts(forUntracked: untracked, at: path)
+        changes.append(
+            contentsOf: untracked.map { untrackedPath in
+                let count = untrackedCounts[untrackedPath]
+                return BranchFileChange(
+                    path: untrackedPath,
+                    kind: .untracked,
+                    linesAdded: count?.added,
+                    linesRemoved: count?.removed,
+                    isBinary: count?.isBinary ?? false
+                )
+            }
+        )
+        return changes
+    }
+
+    /// The diff for a single tracked file's working-tree change relative to
+    /// `ref` — the per-file counterpart to `workingTreeChanges`. Untracked
+    /// files go through `diffForUntracked` instead, since `ref` (a commit)
+    /// has no entry for them to diff against.
+    public static func workingTreeDiff(for filePath: String, against ref: String, at path: URL) async throws -> DiffText {
+        let data = try await run(["diff", ref, "--", filePath], in: path)
+        return makeDiffText(from: data)
+    }
+
     // MARK: - Diffs
 
     /// The diff for a single file, staged or unstaged against the working tree.
