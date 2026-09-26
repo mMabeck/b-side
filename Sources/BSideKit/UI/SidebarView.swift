@@ -1,5 +1,21 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// A dragged project header's payload: just its id, since `SidebarView`
+/// resolves source/destination indexes from `store.projects` itself rather
+/// than round-tripping any project data through the drag session.
+private struct ProjectDragPayload: Codable, Transferable {
+    let projectID: Int64
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .bSideProjectID)
+    }
+}
+
+private extension UTType {
+    static var bSideProjectID: UTType { UTType(exportedAs: "dev.mabeck.bside.project-id") }
+}
 
 /// Left sidebar: projects with tasks nested beneath, arranged like Dash's
 /// Electron task tree but styled after cmux's project list.
@@ -87,6 +103,11 @@ struct SidebarView: View {
                             projectRow(project, taskCount: tasks.count)
                                 .listRowInsets(Self.rowInsets)
                                 .listRowSeparator(.hidden)
+                                .draggable(ProjectDragPayload(projectID: project.id ?? -1))
+                                .dropDestination(for: ProjectDragPayload.self) { items, _ in
+                                    guard let dragged = items.first else { return false }
+                                    return reorderProject(draggedID: dragged.projectID, ontoID: project.id)
+                                }
                         }
                     }
                 }
@@ -247,6 +268,21 @@ struct SidebarView: View {
         }
     }
 
+    /// Moves the project with `draggedID` to the position `ontoID` currently
+    /// occupies, called from a project header's `.dropDestination`. Returns
+    /// whether the drop was accepted, as `dropDestination`'s closure expects.
+    /// A no-op (accepted, but nothing moves) when the two ids are the same or
+    /// either can't be resolved against `store.projects` — e.g. a stale drag
+    /// payload from a project since removed.
+    private func reorderProject(draggedID: Int64, ontoID: Int64?) -> Bool {
+        guard let ontoID, draggedID != ontoID else { return true }
+        guard let fromIndex = store.projects.firstIndex(where: { $0.id == draggedID }),
+              let toIndex = store.projects.firstIndex(where: { $0.id == ontoID }) else { return false }
+        let destination = toIndex > fromIndex ? toIndex + 1 : toIndex
+        Task { try? await store.moveProjects(fromOffsets: IndexSet(integer: fromIndex), toOffset: destination) }
+        return true
+    }
+
     /// A project row: just the project's folder name, bold, with the
     /// add-task button and task count trailing. Branch and path live on the
     /// project dashboard instead, keeping the sidebar scannable.
@@ -282,10 +318,37 @@ struct SidebarView: View {
             Button("New Task…") {
                 store.pendingTaskCreationProject = project
             }
+            Button("Move Up") {
+                Task { try? await store.moveProject(project, direction: .up) }
+            }
+            .disabled(!canMoveProject(project, direction: .up))
+            Button("Move Down") {
+                Task { try? await store.moveProject(project, direction: .down) }
+            }
+            .disabled(!canMoveProject(project, direction: .down))
             Button("Remove Project", role: .destructive) {
                 Task { try? await store.removeProject(project) }
             }
         }
+        .accessibilityActions {
+            Button("Move Up") {
+                Task { try? await store.moveProject(project, direction: .up) }
+            }
+            .disabled(!canMoveProject(project, direction: .up))
+            Button("Move Down") {
+                Task { try? await store.moveProject(project, direction: .down) }
+            }
+            .disabled(!canMoveProject(project, direction: .down))
+        }
+    }
+
+    /// Whether `project` has a neighbour on `direction`'s side to move
+    /// towards — disables the "Move Up"/"Move Down" context menu items and
+    /// accessibility actions at the ends of the list, matching `.onMove`'s
+    /// own behaviour of doing nothing past either end.
+    private func canMoveProject(_ project: Project, direction: ProjectMoveDirection) -> Bool {
+        guard let index = store.projects.firstIndex(where: { $0.id == project.id }) else { return false }
+        return direction == .up ? index > 0 : index < store.projects.count - 1
     }
 
     /// A quiet, low-contrast "+" beside each project header for starting a

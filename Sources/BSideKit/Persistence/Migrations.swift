@@ -101,5 +101,23 @@ enum Migrations {
                 t.add(column: "lastActivityAt", .datetime)
             }
         }
+
+        // Added so the user can drag-reorder projects in the sidebar
+        // (`ProjectsStore.moveProjects`) instead of always seeing them in
+        // insertion (rowid) order. Backfilled from each project's current
+        // `id` so existing installs keep their present displayed order
+        // (`Project.fetchAll` had no explicit `ORDER BY`, i.e. rowid/id
+        // order) instead of the backfill silently reshuffling them. A new
+        // project not yet given an explicit position defaults to `0` here;
+        // `ProjectsStore.addProject` overrides that with max+1 before insert.
+        migrator.registerMigration("v7_project_sort_order") { db in
+            try db.alter(table: "project") { t in
+                t.add(column: "sortOrder", .integer).notNull().defaults(to: 0)
+            }
+            for (index, row) in try Row.fetchAll(db, sql: "SELECT id FROM project ORDER BY id").enumerated() {
+                let id: Int64 = row["id"]
+                try db.execute(sql: "UPDATE project SET sortOrder = ? WHERE id = ?", arguments: [index, id])
+            }
+        }
     }
 }
