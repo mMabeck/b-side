@@ -271,9 +271,9 @@ struct SidebarView: View {
     /// Moves the project with `draggedID` to the position `ontoID` currently
     /// occupies, called from a project header's `.dropDestination`. Returns
     /// whether the drop was accepted, as `dropDestination`'s closure expects.
-    /// A no-op (accepted, but nothing moves) when the two ids are the same or
-    /// either can't be resolved against `store.projects` — e.g. a stale drag
-    /// payload from a project since removed.
+    /// Accepted without moving anything when the ids match; rejected
+    /// (`false`) when either id can't be resolved against `store.projects`,
+    /// e.g. a stale payload from a project since removed.
     private func reorderProject(draggedID: Int64, ontoID: Int64?) -> Bool {
         guard let ontoID, draggedID != ontoID else { return true }
         guard let fromIndex = store.projects.firstIndex(where: { $0.id == draggedID }),
