@@ -67,6 +67,7 @@ struct BSideApp: App {
             NavigationCommands(store: store)
             TerminalCommands(store: store)
             SubagentSwapCommands(store: store)
+            ChangesCommands(store: store)
         }
 
         Settings {

@@ -156,6 +156,15 @@ public final class ProjectsStore {
     /// stuck open pointed at a stale project.
     public var pendingTaskCreationProject: Project?
 
+    /// The task the Changes overlay (`ChangesOverlaySheet`) should be
+    /// presented for, or `nil` when it shouldn't be showing. Both triggers —
+    /// the Source Control panel's "Show All Changes" button and the View
+    /// menu's Cmd+Shift+D — set this instead of keeping their own `@State`
+    /// sheet flag, same rationale as `pendingTaskCreationProject`: presented
+    /// once, in `ContentView`, so it can't be shown twice or left pointed at
+    /// a stale task.
+    public var pendingChangesOverlayTask: TaskRecord?
+
     public var selectedTask: TaskRecord? {
         guard let selectedTaskID else { return nil }
         return tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == selectedTaskID }
