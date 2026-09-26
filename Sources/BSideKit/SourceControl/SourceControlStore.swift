@@ -292,18 +292,14 @@ public final class SourceControlStore {
         }
     }
 
-    /// Above this many untracked files, a `diff --no-index` per file (even
-    /// bounded to `maxConcurrentUntrackedDiffs` at a time) is too much process
-    /// spawning for one refresh; those rows just show no +/- counts.
-    private static let untrackedLineCountThreshold = 200
     /// Caps how many `diff --no-index` processes run at once — refreshing a
     /// worktree with hundreds of untracked files used to spawn one per file
-    /// concurrently on every refresh.
+    /// concurrently on every refresh. `GitCLI.lineCounts(forUntracked:)`
+    /// itself skips line counts outright above `untrackedLineCountThreshold`.
     private static let maxConcurrentUntrackedDiffs = 8
 
     private static func untrackedLineCounts(_ paths: [String], at url: URL) async -> [String: GitCLI.LineCount] {
-        guard !paths.isEmpty, paths.count <= untrackedLineCountThreshold else { return [:] }
-        return await GitCLI.lineCounts(forUntracked: paths, at: url, maxConcurrent: maxConcurrentUntrackedDiffs)
+        await GitCLI.lineCounts(forUntracked: paths, at: url, maxConcurrent: maxConcurrentUntrackedDiffs)
     }
 
     // MARK: - Operations
@@ -456,7 +452,7 @@ public final class SourceControlStore {
             guard let task, let baseline = await TaskBaseline.resolved(task: task, at: worktreeURL) else {
                 return GitCLI.DiffText(text: "", isBinary: false, isTruncated: false)
             }
-            return try await GitCLI.branchDiff(for: row.path, since: baseline, at: worktreeURL)
+            return try await GitCLI.branchDiff(for: row.path, origPath: row.origPath, since: baseline, at: worktreeURL)
         }
     }
 

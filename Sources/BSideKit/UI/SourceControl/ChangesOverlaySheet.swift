@@ -114,7 +114,11 @@ struct ChangesOverlaySheet: View {
             SheetCenteredMessage(message: "Couldn't load changes: \(message)", palette: theme.palette)
         case .loaded:
             if store.files.isEmpty {
-                emptyState
+                if store.mode != .uncommitted, store.baseRefLabel == nil {
+                    noBaselineState
+                } else {
+                    emptyState
+                }
             } else {
                 HSplitView {
                     treeList
@@ -135,6 +139,15 @@ struct ChangesOverlaySheet: View {
         .foregroundStyle(theme.palette.textSecondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.palette.windowBackground)
+    }
+
+    /// Shown instead of `emptyState` for `.all`/`.committed` when
+    /// `TaskBaseline` couldn't resolve a baseline commit at all — an empty
+    /// file list there means "couldn't compare", not "nothing changed".
+    private var noBaselineState: some View {
+        SheetCenteredMessage(message: "Couldn't determine this task's base commit", palette: theme.palette)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(theme.palette.windowBackground)
     }
 
     // MARK: - Tree
@@ -331,7 +344,16 @@ private struct ResizableSheetWindowAccessor: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    // Mirrors `WindowAccessor` (`ThemedWindow.swift`): `makeNSView` can run
+    // before the view is attached to a window, so `view.window` is nil and
+    // the style mask never gets set. Retrying here on every body update
+    // catches the window once it exists; the insert is a no-op once already
+    // applied.
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            nsView.window?.styleMask.insert(.resizable)
+        }
+    }
 }
 
 extension View {

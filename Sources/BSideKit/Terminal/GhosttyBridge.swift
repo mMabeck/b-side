@@ -238,8 +238,9 @@ public enum GhosttyBridge {
     /// to `reload_config`, and `TerminalCommands`' "Restart Pi Session"
     /// deliberately uses Cmd+Shift+R instead of Cmd+R to avoid colliding
     /// with it outright. Cmd+Shift+D (`ChangesCommands`' "Show All Changes")
-    /// is released on the same defensive basis, with no confirmed Ghostty
-    /// default either.
+    /// is unbound because it's required, not defensive: Ghostty's macOS
+    /// default binds cmd+shift+d to `new_split:down`, which would otherwise
+    /// split the terminal instead of opening the overlay.
     ///
     /// Copy/paste/select-all/find (`cmd+c`/`cmd+v`/`cmd+a`/`cmd+f`) are
     /// deliberately left bound to the terminal: those are exactly the keys a

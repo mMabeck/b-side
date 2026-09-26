@@ -33,10 +33,9 @@ public struct ChangesCommands: Commands {
 
 /// The Changes overlay's key equivalent, as plain data so it's directly
 /// testable without introspecting a rendered `Commands` scene — same
-/// rationale as `EditorShortcut`/`TerminalCloseShortcut`. Ghostty has no
-/// confirmed default binding on Cmd+Shift+D, but it's released defensively
-/// in `GhosttyBridge.appOwnedKeybinds` anyway, on the same basis as
-/// Cmd+Shift+N there.
+/// rationale as `EditorShortcut`/`TerminalCloseShortcut`. Ghostty's macOS
+/// default binds Cmd+Shift+D to `new_split:down`, so it's released in
+/// `GhosttyBridge.appOwnedKeybinds` because it's required, not defensive.
 public enum ChangesOverlayShortcut {
     public static let showAllChanges = KeyboardShortcut("d", modifiers: [.command, .shift])
 }
