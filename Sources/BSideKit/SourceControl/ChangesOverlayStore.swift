@@ -1,11 +1,9 @@
 import Foundation
 import Observation
 
-/// Drives the "Changes" overlay: a VS Code–like file tree plus the selected
-/// file's unified diff, over one of three combined views of what a task has
-/// changed — see `Mode`. A separate store from `SourceControlStore`, with
-/// its own watcher and refresh cycle, since the overlay is opened rarely and
-/// its three modes are pointless work to run on every sidebar refresh.
+/// Drives the "Changes" overlay: a file tree plus the selected file's diff,
+/// over one of three views (see `Mode`). Separate from `SourceControlStore`
+/// since the overlay opens rarely and its modes are pointless work on every sidebar refresh.
 @MainActor
 @Observable
 public final class ChangesOverlayStore {
@@ -40,10 +38,8 @@ public final class ChangesOverlayStore {
     public private(set) var diffText: GitCLI.DiffText?
     public private(set) var diffErrorMessage: String?
     public private(set) var branchName: String?
-    /// The ref the current mode's files are shown against: the task's
-    /// baseline commit for `.all`/`.committed`, or `"HEAD"` for
-    /// `.uncommitted`. `nil` only when `.all`/`.committed` couldn't resolve a
-    /// baseline at all.
+    /// The task's baseline for `.all`/`.committed`, `"HEAD"` for `.uncommitted`.
+    /// `nil` only when a baseline couldn't be resolved.
     public private(set) var baseRefLabel: String?
 
     public var totalAdded: Int { files.reduce(0) { $0 + ($1.linesAdded ?? 0) } }
@@ -57,8 +53,7 @@ public final class ChangesOverlayStore {
 
     public init() {}
 
-    /// Starts driving the overlay for `task`: resets to `.all` with no
-    /// selection, and starts a watcher so it live-refreshes while open.
+    /// Resets to `.all` with no selection, and starts a watcher so it live-refreshes while open.
     public func present(task: TaskRecord) {
         self.task = task
         mode = .all
@@ -80,8 +75,7 @@ public final class ChangesOverlayStore {
         Task { await refresh() }
     }
 
-    /// Stops the watcher; call when the overlay is dismissed so it doesn't
-    /// keep refreshing (and spawning git processes) in the background.
+    /// Call on dismiss so it doesn't keep refreshing (and spawning git processes) in the background.
     public func dismiss() {
         watcher?.stop()
         watcher = nil
@@ -94,10 +88,7 @@ public final class ChangesOverlayStore {
         Task { await refresh() }
     }
 
-    /// Selects `path` and loads its diff. A no-op when `path` is already
-    /// selected (so clicking the current row doesn't re-fetch its diff) or
-    /// when `path` is a folder row's id rather than a file's — folder rows
-    /// aggregate several files and have no diff of their own.
+    /// No-op if already selected, or if `path` is a folder row's id (folders have no diff of their own).
     public func select(_ path: String?) {
         guard path != selectedPath else { return }
         if let path, !files.contains(where: { $0.path == path }) { return }
@@ -157,11 +148,8 @@ public final class ChangesOverlayStore {
         tree = ChangesTreeBuilder.build(files)
         loadState = .loaded
 
-        // Keep the current selection if it's still present; otherwise fall
-        // back to the first file (VS Code's own behaviour when the selected
-        // file drops out of the list). Either way, reload the diff: even a
-        // preserved selection's content may have changed since the last
-        // refresh, which is the whole point of live-refreshing this overlay.
+        // Keep the current selection if still present, else fall back to the
+        // first file. Either way reload the diff: a preserved selection's content may have changed.
         if selectedPath == nil || !files.contains(where: { $0.path == selectedPath }) {
             selectedPath = files.first?.path
         }
@@ -208,11 +196,8 @@ public final class ChangesOverlayStore {
                     )
                 }
             }
-            // A newer `loadDiff()` (a fresh selection, or a live refresh
-            // reloading the same path) may have started and even finished
-            // while this one was awaiting its diff; the generation counter
-            // catches that even when the newer call reselected the same
-            // path, which the old `selectedPath`/`mode` equality check missed.
+            // A newer `loadDiff()` may have finished while this one awaited its
+            // diff; the generation counter catches even a reselection of the same path.
             guard generation == diffLoadGeneration else { return }
             diffText = diff
             diffErrorMessage = nil
