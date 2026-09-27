@@ -61,8 +61,7 @@ extension GitCLI {
         public let isBinary: Bool
     }
 
-    /// A file change committed on a branch, independent of staged/unstaged state
-    /// (see `branchChanges`).
+    /// Independent of staged/unstaged state (see `branchChanges`).
     public struct BranchFileChange: Sendable, Equatable, Identifiable {
         public var path: String
         public var origPath: String?
@@ -74,9 +73,7 @@ extension GitCLI {
         public var id: String { path }
     }
 
-    /// A diff's text, capped for the UI: full diffs beyond `diffSizeLimit` are
-    /// truncated rather than handed whole to a text view, and binary files never
-    /// get diff text at all.
+    /// Full diffs beyond `diffSizeLimit` are truncated; binary files never get diff text.
     public struct DiffText: Sendable, Equatable {
         public let text: String
         public let isBinary: Bool
@@ -89,8 +86,7 @@ extension GitCLI {
 
     // MARK: - Status
 
-    /// Changed files, split into staged and unstaged `FileChange`s. A file with
-    /// both staged and unstaged changes appears twice, once per area.
+    /// A file with both staged and unstaged changes appears twice, once per area.
     public static func changedFiles(at path: URL) async throws -> [FileChange] {
         let data = try await run(
             ["status", "--porcelain=v2", "-z", "--untracked-files=all"],
@@ -194,8 +190,7 @@ extension GitCLI {
 
     // MARK: - Line counts
 
-    /// Added/removed line counts, keyed by path, loaded separately from
-    /// `changedFiles` so the sidebar can show file kinds before diff stats land.
+    /// Loaded separately from `changedFiles` so the sidebar can show file kinds before diff stats land.
     public static func lineCounts(at path: URL) async throws -> (staged: [String: LineCount], unstaged: [String: LineCount]) {
         async let stagedData = run(["diff", "--cached", "--numstat", "-z"], in: path)
         async let unstagedData = run(["diff", "--numstat", "-z"], in: path)
@@ -204,9 +199,7 @@ extension GitCLI {
         return (staged, unstaged)
     }
 
-    /// Line counts for a single untracked file, via `diff --no-index` against
-    /// `/dev/null`. `--no-index` exits 1 when the compared files differ, which is
-    /// the success case here, so it's in `allowedExitStatuses`.
+    /// `--no-index` exits 1 when the compared files differ — the success case here.
     public static func lineCount(forUntracked filePath: String, at path: URL) async throws -> LineCount {
         let data = try await run(
             ["diff", "--no-index", "--numstat", "-z", "/dev/null", filePath],
@@ -259,8 +252,7 @@ extension GitCLI {
         _ = try await run(["add", "-A"], in: path)
     }
 
-    /// Unstages `paths`. Falls back to `rm --cached` when the repo has no commits
-    /// yet, since `restore --staged` needs a HEAD to restore from.
+    /// Falls back to `rm --cached` when the repo has no commits yet, since `restore --staged` needs a HEAD.
     public static func unstage(_ paths: [String], at path: URL) async throws {
         guard !paths.isEmpty else { return }
         do {
@@ -278,37 +270,24 @@ extension GitCLI {
         }
     }
 
-    /// Reverts `paths` to their `HEAD` content, in both the index and the working
-    /// tree, in one atomic `restore` so neither side lands out of sync with the
-    /// other if the process is interrupted.
-    ///
-    /// Every path must already exist in `HEAD` — for a path with no `HEAD` entry
-    /// (a file staged as newly added, or a rename's new name), `restore
-    /// --source=HEAD` doesn't revert it, it deletes it outright, since there's
-    /// nothing at that path in `HEAD` to restore. Callers must route those
+    /// One atomic `restore` (index + worktree) so neither side lands out of
+    /// sync if interrupted. Every path must already exist in `HEAD` — a
+    /// newly-added or renamed path has no `HEAD` entry, so `restore
+    /// --source=HEAD` would delete it instead of reverting it. Route those
     /// through `unstage` + Trash instead; see `SourceControlStore.discard`.
-    ///
-    /// Untracked files aren't handled here — the UI discards those via Trash.
     public static func discardTracked(_ paths: [String], at path: URL) async throws {
         guard !paths.isEmpty else { return }
         _ = try await run(["restore", "--staged", "--worktree", "--source=HEAD", "--"] + paths, in: path)
     }
 
-    /// Reverts `paths` in the working tree only, from the index (`restore`'s
-    /// default source when `--source` is omitted) — the index/staged state is
-    /// left untouched. This is "Discard Changes" for an unstaged row: undo the
-    /// edits on disk without touching whatever's staged for the same path.
+    /// From the index (`restore`'s default source), leaving staged state untouched.
     public static func discardWorktree(_ paths: [String], at path: URL) async throws {
         guard !paths.isEmpty else { return }
         _ = try await run(["restore", "--worktree", "--"] + paths, in: path)
     }
 
-    /// Appends `filePath` to the worktree-root `.gitignore`, creating it if
-    /// needed and skipping the append if the path is already listed. The
-    /// pattern is anchored to the worktree root with a leading `/` and has its
-    /// glob metacharacters, a leading `#`/`!`, and trailing spaces escaped, so
-    /// an arbitrary tracked path can't be misread as a glob, a comment, a
-    /// negation, or have trailing whitespace silently stripped.
+    /// Anchored with a leading `/`; glob metacharacters, a leading `#`/`!`,
+    /// and trailing spaces are escaped so an arbitrary path can't be misread.
     public static func addToGitignore(_ filePath: String, at path: URL) throws {
         let gitignoreURL = path.appendingPathComponent(".gitignore")
         let existing = (try? String(contentsOf: gitignoreURL, encoding: .utf8)) ?? ""
@@ -348,11 +327,8 @@ extension GitCLI {
 
     // MARK: - Combined working-tree changes (Changes overlay)
 
-    /// Paths of untracked files only, via the same `-z` status parsing
-    /// `changedFiles` uses — shared by the Changes overlay's `.all` and
-    /// `.uncommitted` modes, which both fold untracked files (never part of
-    /// `git diff`'s output, tracked or not) into a combined committed +
-    /// uncommitted view.
+    /// Shared by the Changes overlay's `.all`/`.uncommitted` modes, which fold
+    /// untracked files (never part of `git diff`'s output) into a combined view.
     public static func untrackedPaths(at path: URL) async throws -> [String] {
         let data = try await run(
             ["status", "--porcelain=v2", "-z", "--untracked-files=all"],
@@ -361,15 +337,10 @@ extension GitCLI {
         return parseStatusRecords(data).filter { $0.kind == .untracked }.map(\.path)
     }
 
-    /// Above this many untracked files, a `diff --no-index` per file (even
-    /// bounded to `maxConcurrent` at a time) is too much process spawning for
-    /// one refresh; callers just get no +/- counts back.
+    /// Above this many, per-file `diff --no-index` is too much process spawning for one refresh.
     public static let untrackedLineCountThreshold = 200
 
-    /// Added/removed line counts for a batch of untracked files, bounded to
-    /// `maxConcurrent` `diff --no-index` processes at a time. Shared by
-    /// `SourceControlStore` and the Changes overlay's `workingTreeChanges`;
-    /// both skip line counts outright above `untrackedLineCountThreshold`.
+    /// Bounded to `maxConcurrent` `diff --no-index` processes at a time.
     public static func lineCounts(forUntracked paths: [String], at path: URL, maxConcurrent: Int = 8) async -> [String: LineCount] {
         guard !paths.isEmpty, paths.count <= untrackedLineCountThreshold else { return [:] }
         var result: [String: LineCount] = [:]
@@ -395,22 +366,16 @@ extension GitCLI {
         return result
     }
 
-    /// Everything changed in the working tree relative to `ref` — tracked
-    /// modifications (staged and unstaged combined, since a plain `git diff
-    /// <ref>` doesn't distinguish the index from the worktree) plus
-    /// untracked files. Two of the Changes overlay's three modes are just
-    /// this at different `ref`s: `.uncommitted` passes `"HEAD"`, `.all`
-    /// passes the task's baseline commit (which also folds in everything
-    /// committed since baseline, since it's further back than `HEAD`).
+    /// Tracked modifications (staged+unstaged combined) plus untracked files.
+    /// `.uncommitted` mode passes `"HEAD"`; `.all` passes the task's baseline commit.
     public static func workingTreeChanges(against ref: String, at path: URL) async throws -> [BranchFileChange] {
         async let nameStatusData = run(["diff", "--name-status", "-z", ref], in: path)
         async let numstatData = run(["diff", "--numstat", "-z", ref], in: path)
         let counts = parseNumstat(try await numstatData)
         var changes = parseNameStatusRecords(try await nameStatusData, counts: counts)
 
-        // A path can appear both in the diff (deleted since `ref`) and as an
-        // untracked file (recreated afterwards) — keep only the diff's entry
-        // so `BranchFileChange.id`, which is just `path`, stays unique.
+        // A path can appear in both the diff (deleted since `ref`) and as
+        // recreated untracked file; keep only the diff's entry so `id` (just `path`) stays unique.
         let existingPaths = Set(changes.map(\.path))
         let untracked = try await untrackedPaths(at: path).filter { !existingPaths.contains($0) }
         guard !untracked.isEmpty else { return changes }
@@ -430,10 +395,7 @@ extension GitCLI {
         return changes
     }
 
-    /// The diff for a single tracked file's working-tree change relative to
-    /// `ref` — the per-file counterpart to `workingTreeChanges`. Untracked
-    /// files go through `diffForUntracked` instead, since `ref` (a commit)
-    /// has no entry for them to diff against.
+    /// Per-file counterpart to `workingTreeChanges`; untracked files go through `diffForUntracked` instead.
     public static func workingTreeDiff(
         for filePath: String, origPath: String? = nil, against ref: String, at path: URL
     ) async throws -> DiffText {
@@ -465,8 +427,7 @@ extension GitCLI {
         return makeDiffText(from: data)
     }
 
-    /// Everything committed on the current branch since `baseline`, i.e. `git diff
-    /// baseline..HEAD` — committed work only, never against the dirty working tree.
+    /// `git diff baseline..HEAD` — committed work only, never against the dirty working tree.
     public static func branchChanges(since baseline: String, at path: URL) async throws -> [BranchFileChange] {
         let range = "\(baseline)..HEAD"
         async let nameStatusData = run(["diff", "--name-status", "-z", range], in: path)
@@ -539,9 +500,7 @@ extension GitCLI {
     }
 
     /// `detectBinary` is `false` for `showCommit`: a multi-file commit's patch
-    /// can mix binary and text files, and flagging the whole thing binary (and
-    /// discarding its text) because one file in it is would hide every other
-    /// file's diff.
+    /// can mix binary and text, and flagging the whole thing binary would hide every other file's diff.
     static func makeDiffText(from data: Data, detectBinary: Bool = true) -> DiffText {
         // Cap before scanning for the binary marker, so a huge diff is never
         // decoded in full; a binary file's marker line is near the top anyway.
