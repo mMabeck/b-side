@@ -245,7 +245,7 @@ struct RightSidebarView: View {
             requestDiscard(for: selectedRowsOrThis(row))
         } : nil
 
-        return SourceControlRowView(row: row, palette: theme.palette, showsDirectory: false, onStage: onStage, onUnstage: onUnstage, onDiscard: onDiscard)
+        return SourceControlRowView(row: row, palette: theme.palette, onStage: onStage, onUnstage: onUnstage, onDiscard: onDiscard)
             .tag(row.id)
             .contentShape(Rectangle())
             .onTapGesture { openDiff(for: row) }
@@ -500,10 +500,10 @@ private struct SourceControlTreeRow<RowContent: View>: View {
     private func folderHoverButtons(_ folder: ChangesTreeRowNode.Folder) -> some View {
         HStack(spacing: 4) {
             if let onStageFolder {
-                folderIconButton("plus", label: "Stage \(folder.displayName)") { onStageFolder(folder.children.flatMap(\.leaves)) }
+                folderIconButton("plus", label: "Stage \(folder.displayName)") { onStageFolder(node.leaves) }
             }
             if let onUnstageFolder {
-                folderIconButton("minus", label: "Unstage \(folder.displayName)") { onUnstageFolder(folder.children.flatMap(\.leaves)) }
+                folderIconButton("minus", label: "Unstage \(folder.displayName)") { onUnstageFolder(node.leaves) }
             }
         }
     }
