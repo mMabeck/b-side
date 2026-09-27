@@ -43,6 +43,18 @@ struct BSideApp: App {
             logger.fault("Failed to open database: \(error, privacy: .public)")
             fatalError("Failed to open database: \(error)")
         }
+
+        // Otherwise a resident `llama-server` from this launch keeps running
+        // (and ~800 MB resident) after the app itself has quit; the pidfile
+        // in `TitleModelServer` also catches this if the app is killed
+        // before this notification fires.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { await TitleModelServer.shared.shutdown() }
+        }
     }
 
     var body: some Scene {
