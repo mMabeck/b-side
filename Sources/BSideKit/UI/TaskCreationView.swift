@@ -11,11 +11,8 @@ public enum TaskCreationMode: String, CaseIterable, Identifiable, Sendable {
 /// Pure validation and formatting rules for ``TaskCreationView``, kept free
 /// of SwiftUI so they're directly unit-testable.
 enum TaskCreationValidation {
-    /// Whether the form has enough information to attempt `create()`. The
-    /// task name may be left blank (it falls back to a placeholder). When
-    /// `useWorktree` is off the task runs in place, so no base ref or branch
-    /// is required either; otherwise a non-blank base ref (new branch) or a
-    /// chosen branch (existing branch) is required.
+    /// A blank task name falls back to a placeholder. With `useWorktree` off
+    /// the task runs in place, so no base ref/branch is required either.
     static func canCreate(
         name: String,
         mode: TaskCreationMode,
@@ -32,20 +29,14 @@ enum TaskCreationValidation {
         }
     }
 
-    /// A branch's label in the existing-branch picker: its name, plus where
-    /// it's already checked out if it is (those entries are shown but
-    /// disabled, since a worktree can't reuse a branch that's live elsewhere).
+    /// Shown but disabled if already checked out elsewhere, since a worktree can't reuse a live branch.
     static func displayName(for branch: TaskWorktreeService.BranchOption) -> String {
         guard let checkedOutAt = branch.checkedOutAt else { return branch.name }
         return "\(branch.name) (checked out at \(checkedOutAt))"
     }
 }
 
-/// Sheet for creating a task: name, base ref (new branch) or an existing
-/// branch to attach a worktree to, then a themed log panel of setup command
-/// output while creation runs. Styled entirely from `GhosttyResolvedTheme`
-/// like the rest of the app's chrome — see `SidebarView`/`ProjectDashboardView`
-/// for the same `.plain`-button-over-palette-fill convention.
+/// Sheet for creating a task: name, base ref/branch, then a log panel of setup command output.
 struct TaskCreationView: View {
     var store: ProjectsStore
     var onFinished: () -> Void
@@ -54,17 +45,12 @@ struct TaskCreationView: View {
 
     @ObservedObject private var theme: GhosttyResolvedTheme = .shared
 
-    /// The project this task will be created in. Defaults to the project the
-    /// sheet was opened for, but changeable via `projectField`'s fuzzy search
-    /// — every field below that depends on the project (base ref, branches,
-    /// worktree/mode defaults) is re-seeded when this changes, in
-    /// `applyProjectDefaults(_:)`.
+    /// Changeable via `projectField`; dependent fields are re-seeded in `applyProjectDefaults(_:)`.
     @State private var selectedProject: Project
     @State private var isProjectPickerOpen = false
     @State private var projectQuery = ""
     @State private var highlightedProjectIndex = 0
-    /// Row to scroll into view; set only by arrow keys so hovering a
-    /// half-visible row doesn't make the list jump under the pointer.
+    /// Set only by arrow keys so hovering a half-visible row doesn't make the list jump under the pointer.
     @State private var projectScrollTarget: Int?
     @State private var projectDropdownContentHeight: CGFloat = 0
     @FocusState private var projectQueryFocused: Bool
@@ -120,15 +106,9 @@ struct TaskCreationView: View {
         }
         .frame(width: 460)
         .background(theme.palette.windowBackground)
-        // The sheet gets its own `NSWindow`, so it needs the palette applied
-        // to that window too — not just a themed SwiftUI background — or the
-        // system-drawn text inside it renders in light `aqua` over this dark
-        // background.
+        // The sheet gets its own `NSWindow`, so system-drawn text needs the palette applied to it directly too.
         .themedWindow(theme.palette)
-        // Keyed on the selected project's id, so switching projects in
-        // `projectField` reruns this rather than only firing once. The
-        // `guard` after both awaits drops a stale load's results if the
-        // project changed again before it finished.
+        // The `guard` after both awaits drops a stale load if the project changed again before it finished.
         .task(id: selectedProject.id) {
             let project = selectedProject
             let loadedBranches = (try? await TaskWorktreeService.availableBranches(for: project)) ?? []
@@ -240,11 +220,7 @@ struct TaskCreationView: View {
         )
     }
 
-    /// The "Project" field: a themed menu-label button showing the current
-    /// selection that swaps to a fuzzy-search text field plus a ranked
-    /// dropdown while open, closed only by choosing a project or Escape (not
-    /// by focus loss) so a click on a dropdown row is never raced against a
-    /// focus-driven close.
+    /// Closed only by choosing a project or Escape, not focus loss, so a click on a dropdown row is never raced against a focus-driven close.
     private var projectField: some View {
         VStack(alignment: .leading, spacing: 6) {
             if isProjectPickerOpen {
@@ -292,10 +268,7 @@ struct TaskCreationView: View {
         }
     }
 
-    /// Scrolls once the matches outgrow `maxHeight`; below that it hugs its
-    /// rows (measured into `projectDropdownContentHeight`) instead of letting
-    /// the greedy `ScrollView` claim the full height, which would otherwise
-    /// push or overlap the fields beneath it.
+    /// Hugs its rows below `maxHeight` instead of letting the greedy `ScrollView` claim full height and overlap fields beneath it.
     private var projectDropdown: some View {
         let maxHeight: CGFloat = 220
         return ScrollViewReader { proxy in
@@ -393,11 +366,7 @@ struct TaskCreationView: View {
         projectQueryFocused = false
     }
 
-    /// Re-seeds every field that depends on the project when the selection
-    /// changes in `projectField`: branches/base refs are reloaded by the
-    /// `.task(id: selectedProject.id)` in `body` reacting to `selectedProject`
-    /// changing, not here, so clearing them to empty just avoids showing the
-    /// old project's options while that reload is in flight.
+    /// Branches/base refs are reloaded by `body`'s `.task(id:)`, not here; clearing them just avoids showing stale options while that reload is in flight.
     private func applyProjectDefaults(_ project: Project) {
         baseRef = project.baseRef
         useWorktree = project.lastUseWorktree
