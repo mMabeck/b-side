@@ -12,6 +12,8 @@ import OSLog
 ///
 /// The transcript parsing and title derivation below are pure and call no
 /// model; only `applyRename` touches git or the filesystem.
+/// `ProjectsStore.applyAutoRename` tries `TaskTitleGenerator`'s local model
+/// first and falls back to `deriveTitle` below whenever it returns `nil`.
 public enum TaskAutoRenameService {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-auto-rename")
 

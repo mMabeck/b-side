@@ -278,6 +278,7 @@ struct ProjectsStoreAutoRenameTests {
         }
 
         let store = await ProjectsStore(database: database)
+        await MainActor.run { store.titleGenerator = { _ in nil } }
         let placeholderTask = try await store.createTask(project: insertedProject, name: "")
         #expect(placeholderTask.awaitingAutoRename == true)
 
@@ -350,6 +351,7 @@ struct ProjectsStoreAutoRenameTests {
         }
 
         let store = await ProjectsStore(database: database)
+        await MainActor.run { store.titleGenerator = { _ in nil } }
         let task = try await store.createTask(project: insertedProject, name: "")
 
         await store.applyAutoRename(task: task, project: insertedProject, prompt: "```")
@@ -358,6 +360,62 @@ struct ProjectsStoreAutoRenameTests {
             try TaskRecord.fetchOne(db, key: task.id!)
         }
         #expect(refetched?.name == "New Task")
+        #expect(refetched?.awaitingAutoRename == false)
+    }
+
+    @Test("applyAutoRename falls back to the heuristic title when the injected generator returns nil")
+    func fallsBackToHeuristicWhenGeneratorReturnsNil() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let database = try AppDatabase.openInMemory()
+        let project = Project(path: repoURL.path, displayName: "repo", baseRef: "main")
+        let insertedProject = try await database.dbQueue.write { db -> Project in
+            var project = project
+            try project.insert(db)
+            return project
+        }
+
+        let store = await ProjectsStore(database: database)
+        await MainActor.run { store.titleGenerator = { _ in nil } }
+        let task = try await store.createTask(project: insertedProject, name: "")
+
+        await store.applyAutoRename(task: task, project: insertedProject, prompt: "fix the login bug")
+
+        let refetched = try await database.dbQueue.read { db in
+            try TaskRecord.fetchOne(db, key: task.id!)
+        }
+        #expect(refetched?.name == "fix the login bug")
+        #expect(refetched?.branchName == "task/fix-the-login-bug")
+        #expect(refetched?.awaitingAutoRename == false)
+    }
+
+    @Test("applyAutoRename uses the injected generator's title for both the task name and the branch slug")
+    func usesModelTitleForNameAndBranchSlug() async throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        let database = try AppDatabase.openInMemory()
+        let project = Project(path: repoURL.path, displayName: "repo", baseRef: "main")
+        let insertedProject = try await database.dbQueue.write { db -> Project in
+            var project = project
+            try project.insert(db)
+            return project
+        }
+
+        let store = await ProjectsStore(database: database)
+        await MainActor.run { store.titleGenerator = { _ in "Fix Login Bug" } }
+        let task = try await store.createTask(project: insertedProject, name: "")
+
+        await store.applyAutoRename(task: task, project: insertedProject, prompt: "the login page throws a 500, please fix")
+
+        let refetched = try await database.dbQueue.read { db in
+            try TaskRecord.fetchOne(db, key: task.id!)
+        }
+        #expect(refetched?.name == "Fix Login Bug")
+        #expect(refetched?.branchName == "task/fix-login-bug")
         #expect(refetched?.awaitingAutoRename == false)
     }
 }
