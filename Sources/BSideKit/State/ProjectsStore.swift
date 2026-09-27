@@ -48,9 +48,11 @@ public final class ProjectsStore {
     /// Task ids with a live terminal that have output since last viewed — the sidebar's blue "unread" dot. In-memory only.
     public private(set) var unreadTaskIDs: Set<Int64> = []
 
-    /// Idempotent since `/agent/{taskId}/busy` may repeat.
+    /// Idempotent since `/agent/{taskId}/busy` may repeat. Clears a question's red
+    /// state too: Pi reporting busy means it resumed, so the question was answered.
     public func setTaskBusy(_ taskId: Int64) {
         busyTaskIDs.insert(taskId)
+        taskIDsNeedingAttention.remove(taskId)
         bumpTaskActivity(taskId)
     }
 

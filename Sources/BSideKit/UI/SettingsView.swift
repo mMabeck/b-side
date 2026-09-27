@@ -19,6 +19,8 @@ public struct SettingsView: View {
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             TerminalSettingsTab(theme: theme)
                 .tabItem { Label("Terminal", systemImage: "terminal") }
+            KeybindingsSettingsTab(theme: theme)
+                .tabItem { Label("Keybindings", systemImage: "keyboard") }
             NotificationsSettingsTab(theme: theme)
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
@@ -180,6 +182,50 @@ private struct TerminalSettingsTab: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .background(theme.palette.windowBackground)
+        .frame(width: 480, height: 420, alignment: .top)
+    }
+}
+
+private struct KeybindingsSettingsTab: View {
+    var theme: GhosttyResolvedTheme
+    @State private var query = ""
+
+    private var filteredSections: [KeybindingSection] {
+        guard !query.isEmpty else { return KeybindingsReference.sections }
+        return KeybindingsReference.sections.compactMap { section in
+            let rows = section.rows.filter { $0.title.localizedCaseInsensitiveContains(query) }
+            return rows.isEmpty ? nil : KeybindingSection(title: section.title, rows: rows)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField("Filter Shortcuts", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(12)
+
+            List {
+                ForEach(filteredSections) { section in
+                    Section(section.title) {
+                        ForEach(section.rows) { row in
+                            LabeledContent(row.title) {
+                                Text(row.symbols)
+                                    .foregroundStyle(theme.palette.textSecondary)
+                                    .accessibilityLabel(row.accessibilityLabel)
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+
+            Text("Ghostty's own terminal keybinds apply otherwise.")
+                .font(.caption)
+                .foregroundStyle(theme.palette.textSecondary)
+                .padding(12)
+        }
         .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }

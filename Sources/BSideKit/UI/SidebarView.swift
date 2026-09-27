@@ -157,7 +157,7 @@ struct SidebarView: View {
         let status: TaskStatus
         let summary: TaskChildSummary
         let isVanished: Bool
-        /// Merged into base ref *and* no uncommitted changes on top.
+        /// Merged into base ref *and* no uncommitted changes on top; hidden on a closed task, where it's just noise.
         let isMerged: Bool
         /// Mutually exclusive with `isMerged`.
         let hasPendingWork: Bool
@@ -180,9 +180,10 @@ struct SidebarView: View {
             needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
             busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
-        let isMerged = syncStatus.map(BranchSyncSummary.isEffectivelyMerged) ?? false
+        let effectivelyMerged = syncStatus.map(BranchSyncSummary.isEffectivelyMerged) ?? false
+        let isMerged = effectivelyMerged && status != .inactive
         let hasPendingWork = syncStatus.map(BranchSyncSummary.hasPendingWork(for:)) ?? false
-        let syncText = isMerged ? nil : syncStatus.flatMap(BranchSyncSummary.behindCaption(for:))
+        let syncText = effectivelyMerged ? nil : syncStatus.flatMap(BranchSyncSummary.behindCaption(for:))
         return TaskStatusInfo(
             status: status,
             summary: summary,

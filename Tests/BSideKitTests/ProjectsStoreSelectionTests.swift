@@ -117,4 +117,17 @@ struct ProjectsStoreSelectionTests {
         #expect(!store.unreadTaskIDs.contains(id))
     }
 
+    @Test("A busy report clears a question's attention state, even for the already-selected task")
+    func busyClearsAttentionOnSelectedTask() async throws {
+        let (store, projectA, _, taskA) = try await makeStore()
+        let id = try #require(taskA.id)
+        store.selectTask(taskA, project: projectA)
+
+        store.handleTerminalBell(taskID: id)
+        #expect(store.taskIDsNeedingAttention.contains(id))
+
+        store.setTaskBusy(id)
+        #expect(!store.taskIDsNeedingAttention.contains(id))
+    }
+
 }
