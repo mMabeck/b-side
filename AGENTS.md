@@ -129,5 +129,8 @@ swift test --filter GitCLITests
 - **`bundle.sh` must ad-hoc sign the assembled `.app`.** With only the
   linker's signature (identifier `BSide`, Info.plist unbound),
   usernotificationsd rejects every request (`addRequest not allowed`).
+  Run `scripts/make-signing-identity.sh` once per machine: with a stable
+  self-signed identity, macOS privacy grants (e.g. Documents) survive rebuilds
+  and worktree switches; ad-hoc signing re-prompts after every build.
 - **After moving the checkout**, run `git worktree repair` and
   `swift package reset`; SwiftPM caches absolute XCFramework paths.

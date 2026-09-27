@@ -70,8 +70,21 @@ PLIST
 # usernotificationsd rejects every notification request ("addRequest not
 # allowed: dev.mabeck.bside"). Signing the assembled .app binds Info.plist and
 # makes the code identity match the bundle identifier.
-echo "Signing $APP_DIR (ad-hoc)..."
-codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"
+# The stable local identity from make-signing-identity.sh keeps privacy (TCC)
+# grants across rebuilds; an ad-hoc signature changes with every build.
+SIGN_KEYCHAIN="$HOME/Library/Keychains/bside-signing.keychain-db"
+SIGN_IDENTITY="-"
+if [ -f "$SIGN_KEYCHAIN" ]; then
+    security unlock-keychain -p "bside-local" "$SIGN_KEYCHAIN"
+    SIGN_IDENTITY="$(security find-identity -p codesigning "$SIGN_KEYCHAIN" \
+        | awk '/"B-Side Local Signing"/ { print $2; exit }')"
+fi
+if [ -z "$SIGN_IDENTITY" ] || [ "$SIGN_IDENTITY" = "-" ]; then
+    SIGN_IDENTITY="-"
+    echo "note: ad-hoc signing; run scripts/make-signing-identity.sh to stop repeated privacy prompts"
+fi
+echo "Signing $APP_DIR..."
+codesign --force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP_DIR"
 codesign --verify --strict "$APP_DIR"
 
 echo "Built $APP_DIR"
