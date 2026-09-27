@@ -6,10 +6,11 @@ import OSLog
 /// a small Qwen3 gguf), for `ProjectsStore.applyAutoRename` to prefer over
 /// `TaskAutoRenameService.deriveTitle`'s heuristic. Every failure mode —
 /// missing binary, missing model file, a slow or crashed process, or output
-/// that doesn't look like a title — reports `nil` rather than throwing, so
-/// the caller can fall back unconditionally.
+/// that doesn't look like a title — is distinguished internally as a
+/// `TitleGenerationFailure`, logged, and then collapsed to `nil` for the
+/// public API so the caller can fall back unconditionally.
 public enum TaskTitleGenerator {
-    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-title-generator")
+    fileprivate static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-title-generator")
 
     /// UserDefaults key overriding the default model path below.
     public static let modelPathDefaultsKey = "settings.titleModel.path"
@@ -25,24 +26,52 @@ public enum TaskTitleGenerator {
     ]
 
     private static let timeout: TimeInterval = 15
+    /// How long a SIGTERM'd (or cancelled) child is given to exit on its own
+    /// before escalating to SIGKILL.
+    private static let terminationGracePeriod: TimeInterval = 1
     private static let maxTitleWords = 8
     private static let maxTitleLength = 60
     private static let endOfTextMarker = "[end of text]"
     private static let maxQuestionLength = 1000
 
     /// Runs the title model on the first 1000 characters of `prompt` and
-    /// returns a cleaned single-line title, or `nil` if the binary or model
-    /// file isn't present, the process times out or fails to launch, or its
-    /// output fails validation. Runs off the main actor.
+    /// returns a cleaned single-line title, or `nil` for any failure —
+    /// see `TitleGenerationFailure`, which is logged distinctly before
+    /// being collapsed here. Runs off the main actor.
     public static func generate(fromPrompt prompt: String) async -> String? {
-        guard let binaryPath = resolveBinaryPath() else {
-            logger.notice("title model skipped: llama-completion binary not found")
+        let result = await generateResult(
+            fromPrompt: prompt,
+            binaryPath: resolveBinaryPath(),
+            modelPath: resolveModelPath(),
+            timeout: timeout,
+            gracePeriod: terminationGracePeriod
+        )
+
+        switch result {
+        case .success(let title):
+            return title
+        case .failure(let failure):
+            log(failure)
             return nil
         }
-        guard let modelPath = resolveModelPath() else {
-            logger.notice("title model skipped: model file not found")
-            return nil
-        }
+    }
+
+    /// Testable core: takes already-resolved paths (rather than probing the
+    /// filesystem/`UserDefaults` itself) and explicit timing, so tests can
+    /// point it at fake `#!/bin/sh` scripts and short timeouts. `onLaunch`,
+    /// when provided, is called once with the child's pid right after a
+    /// successful `Process.run()`, letting tests confirm the process is gone
+    /// once this returns.
+    static func generateResult(
+        fromPrompt prompt: String,
+        binaryPath: String?,
+        modelPath: String?,
+        timeout: TimeInterval,
+        gracePeriod: TimeInterval,
+        onLaunch: (@Sendable (pid_t) -> Void)? = nil
+    ) async -> Result<String, TitleGenerationFailure> {
+        guard let binaryPath else { return .failure(.binaryNotFound) }
+        guard let modelPath else { return .failure(.modelNotFound) }
 
         let question = String(prompt.prefix(maxQuestionLength))
         let fullPrompt = """
@@ -71,17 +100,13 @@ public enum TaskTitleGenerator {
             "-p", fullPrompt,
         ]
 
-        guard let rawOutput = await runProcess(binaryPath: binaryPath, arguments: arguments, timeout: timeout) else {
-            logger.notice("title model skipped: process timed out or failed to launch")
-            return nil
-        }
-
-        guard let title = cleanTitle(fromRawOutput: rawOutput) else {
-            logger.notice("title model skipped: output failed validation")
-            return nil
-        }
-
-        return title
+        return await runProcess(
+            binaryPath: binaryPath,
+            arguments: arguments,
+            timeout: timeout,
+            gracePeriod: gracePeriod,
+            onLaunch: onLaunch
+        )
     }
 
     // MARK: - Binary/model resolution
@@ -100,6 +125,34 @@ public enum TaskTitleGenerator {
         let expanded = ((configured ?? defaultModelPath) as NSString).expandingTildeInPath
         guard FileManager.default.fileExists(atPath: expanded) else { return nil }
         return expanded
+    }
+
+    // MARK: - Failure logging
+
+    /// Logs each `TitleGenerationFailure` distinctly. `binaryNotFound` and
+    /// `modelNotFound` are expected on machines without the model installed,
+    /// so they log at `.notice`; everything else is `.error`. Prompt/output
+    /// content is `.private`; the failure reason and any exit status are
+    /// `.public`.
+    private static func log(_ failure: TitleGenerationFailure) {
+        switch failure {
+        case .binaryNotFound:
+            logger.notice("title model skipped: llama-completion binary not found")
+        case .modelNotFound:
+            logger.notice("title model skipped: model file not found")
+        case .launchFailed(let reason):
+            logger.error("title model failed to launch: \(reason, privacy: .public)")
+        case .timedOut:
+            logger.error("title model timed out or was cancelled and its process was terminated")
+        case .nonZeroExit(let status, let stderrTail):
+            logger.error(
+                "title model exited with status \(status, privacy: .public), stderr: \(stderrTail, privacy: .private)"
+            )
+        case .undecodableOutput:
+            logger.error("title model produced output that could not be decoded as UTF-8")
+        case .rejectedOutput(let raw):
+            logger.error("title model output failed validation: \(raw, privacy: .private)")
+        }
     }
 
     // MARK: - Output cleanup/validation
@@ -145,69 +198,45 @@ public enum TaskTitleGenerator {
 
     // MARK: - Process execution
 
-    /// Runs `binaryPath` with `arguments` (no shell), discarding stderr and
-    /// collecting stdout, and terminates the process if it hasn't exited
-    /// within `timeout`. Waits for both stdout EOF and process termination
-    /// before resolving, the same way `GitCLI`/`StreamingProcessRunner` do,
-    /// so the final chunk of output can't race process exit. Returns `nil`
-    /// on timeout or a launch failure rather than throwing, since every
-    /// caller here treats "no title" the same way regardless of cause.
-    private static func runProcess(binaryPath: String, arguments: [String], timeout: TimeInterval) async -> String? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: binaryPath)
-            process.arguments = arguments
-            process.standardError = FileHandle.nullDevice
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-
-            let outputBox = OutputBox()
-
-            let group = DispatchGroup()
-            group.enter()  // pipe EOF
-            group.enter()  // termination
-
-            let resumeBox = ResumeBox(continuation: continuation)
-
-            pipe.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                if data.isEmpty {
-                    handle.readabilityHandler = nil
-                    group.leave()
-                } else {
-                    outputBox.append(data)
-                }
-            }
-
-            process.terminationHandler = { _ in
-                group.leave()
-            }
-
-            group.notify(queue: .global()) {
-                resumeBox.resume(with: outputBox.decodedString())
-            }
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if process.isRunning {
-                    process.terminate()
-                }
-                resumeBox.resume(with: nil)
-            }
-
-            do {
-                try process.run()
-            } catch {
-                resumeBox.resume(with: nil)
-            }
+    /// Runs `binaryPath` with `arguments` (no shell) via `ProcessRunner`,
+    /// which owns the SIGTERM→SIGKILL escalation on timeout/cancellation and
+    /// guarantees the continuation resumes exactly once, only after the
+    /// child has actually exited (or been killed and reaped) or failed to
+    /// launch.
+    private static func runProcess(
+        binaryPath: String,
+        arguments: [String],
+        timeout: TimeInterval,
+        gracePeriod: TimeInterval,
+        onLaunch: (@Sendable (pid_t) -> Void)?
+    ) async -> Result<String, TitleGenerationFailure> {
+        let runner = ProcessRunner(binaryPath: binaryPath, arguments: arguments)
+        return await withTaskCancellationHandler {
+            await runner.run(timeout: timeout, gracePeriod: gracePeriod, onLaunch: onLaunch)
+        } onCancel: {
+            runner.cancel(gracePeriod: gracePeriod)
         }
     }
 }
 
-/// Accumulates a title-model process's stdout bytes across reads on a
-/// background dispatch source, mirroring `LineBuffer`'s lock pattern since
-/// closures crossing into `Process`'s callback queues aren't `Sendable`
-/// under Swift 6 strict concurrency.
+/// Every distinguishable way title generation can fail, so
+/// `TaskTitleGenerator.generate` can log a specific reason before collapsing
+/// to `nil` for its caller. `Error` reasons are captured as their
+/// description rather than the `Error` itself so this stays `Sendable`.
+enum TitleGenerationFailure: Error, Sendable {
+    case binaryNotFound
+    case modelNotFound
+    case launchFailed(String)
+    case timedOut
+    case nonZeroExit(status: Int32, stderrTail: String)
+    case undecodableOutput
+    case rejectedOutput(raw: String)
+}
+
+/// Accumulates a process's output bytes across reads on a background
+/// dispatch source, mirroring `LineBuffer`'s lock pattern since closures
+/// crossing into `Process`'s callback queues aren't `Sendable` under Swift 6
+/// strict concurrency.
 private final class OutputBox: @unchecked Sendable {
     private var data = Data()
     private let lock = NSLock()
@@ -225,21 +254,180 @@ private final class OutputBox: @unchecked Sendable {
     }
 }
 
-/// Resumes `runProcess`'s continuation exactly once, whichever of the
-/// normal-completion path or the timeout path gets there first.
-private final class ResumeBox: @unchecked Sendable {
-    private var continuation: CheckedContinuation<String?, Never>?
+/// Runs a single child process to completion, separating stdout from a
+/// drained (never `nullDevice`) stderr pipe so a chatty child can't block on
+/// a full stderr buffer, and resuming its continuation exactly once: on a
+/// launch failure, on the process actually terminating, or — after a
+/// timeout or the awaiting `Task` being cancelled — once the SIGTERM→SIGKILL
+/// escalation has actually reaped it. `Process.terminate()`/`kill()` are
+/// only ever called after a successful `run()`, since calling them before
+/// launch is undefined behavior.
+private final class ProcessRunner: @unchecked Sendable {
+    private let process = Process()
+    private let stdoutBox = OutputBox()
+    private let stderrBox = OutputBox()
     private let lock = NSLock()
 
-    init(continuation: CheckedContinuation<String?, Never>) {
-        self.continuation = continuation
+    private var continuation: CheckedContinuation<Result<String, TitleGenerationFailure>, Never>?
+    private var hasLaunched = false
+    private var terminatedEarly = false
+    private var timeoutWorkItem: DispatchWorkItem?
+    private var killWorkItem: DispatchWorkItem?
+
+    init(binaryPath: String, arguments: [String]) {
+        process.executableURL = URL(fileURLWithPath: binaryPath)
+        process.arguments = arguments
     }
 
-    func resume(with value: String?) {
+    func run(
+        timeout: TimeInterval,
+        gracePeriod: TimeInterval,
+        onLaunch: (@Sendable (pid_t) -> Void)?
+    ) async -> Result<String, TitleGenerationFailure> {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Result<String, TitleGenerationFailure>, Never>) in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
+
+            // See GitCLI.run/StreamingProcessRunner: don't resolve until both
+            // pipes have hit EOF and the process has terminated, or the
+            // final chunk of output can race process exit.
+            let group = DispatchGroup()
+            group.enter()  // stdout EOF
+            group.enter()  // stderr EOF
+            group.enter()  // termination
+
+            stdoutPipe.fileHandleForReading.readabilityHandler = { [stdoutBox] handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    group.leave()
+                } else {
+                    stdoutBox.append(data)
+                }
+            }
+            stderrPipe.fileHandleForReading.readabilityHandler = { [stderrBox] handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    group.leave()
+                } else {
+                    stderrBox.append(data)
+                }
+            }
+
+            process.terminationHandler = { _ in
+                group.leave()
+            }
+
+            group.notify(queue: .global()) { [weak self] in
+                self?.finish()
+            }
+
+            let timeoutItem = DispatchWorkItem { [weak self] in
+                self?.handleEarlyTermination(gracePeriod: gracePeriod, reason: "timed out")
+            }
+            lock.lock()
+            timeoutWorkItem = timeoutItem
+            lock.unlock()
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
+
+            do {
+                try process.run()
+                lock.lock()
+                hasLaunched = true
+                lock.unlock()
+                onLaunch?(process.processIdentifier)
+            } catch {
+                timeoutItem.cancel()
+                process.terminationHandler = nil
+                stdoutPipe.fileHandleForReading.readabilityHandler = nil
+                stderrPipe.fileHandleForReading.readabilityHandler = nil
+                stdoutPipe.fileHandleForReading.closeFile()
+                stdoutPipe.fileHandleForWriting.closeFile()
+                stderrPipe.fileHandleForReading.closeFile()
+                stderrPipe.fileHandleForWriting.closeFile()
+                resume(.failure(.launchFailed("\(error)")))
+            }
+        }
+    }
+
+    /// Terminates the child if the awaiting `Task` is cancelled, escalating
+    /// the same way a timeout does. Safe to call even if the process hasn't
+    /// launched yet (a no-op) or has already finished.
+    func cancel(gracePeriod: TimeInterval) {
+        handleEarlyTermination(gracePeriod: gracePeriod, reason: "was cancelled")
+    }
+
+    private func handleEarlyTermination(gracePeriod: TimeInterval, reason: String) {
+        lock.lock()
+        guard hasLaunched, process.isRunning else {
+            lock.unlock()
+            return
+        }
+        terminatedEarly = true
+        lock.unlock()
+
+        let pid = process.processIdentifier
+        TaskTitleGenerator.logger.error(
+            "title model \(reason, privacy: .public); sending SIGTERM (pid \(pid, privacy: .public))"
+        )
+        process.terminate()
+
+        let killItem = DispatchWorkItem { [weak self] in
+            self?.escalateToKill()
+        }
+        lock.lock()
+        killWorkItem = killItem
+        lock.unlock()
+        DispatchQueue.global().asyncAfter(deadline: .now() + gracePeriod, execute: killItem)
+    }
+
+    private func escalateToKill() {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        TaskTitleGenerator.logger.error(
+            "title model still running after grace period; sending SIGKILL (pid \(pid, privacy: .public))"
+        )
+        kill(pid, SIGKILL)
+    }
+
+    private func finish() {
+        lock.lock()
+        let wasTerminatedEarly = terminatedEarly
+        timeoutWorkItem?.cancel()
+        killWorkItem?.cancel()
+        lock.unlock()
+
+        let result: Result<String, TitleGenerationFailure>
+        if wasTerminatedEarly {
+            result = .failure(.timedOut)
+        } else if process.terminationReason != .exit || process.terminationStatus != 0 {
+            let stderrTail = String((stderrBox.decodedString() ?? "").suffix(500))
+            result = .failure(.nonZeroExit(status: process.terminationStatus, stderrTail: stderrTail))
+        } else if let rawOutput = stdoutBox.decodedString() {
+            if let title = TaskTitleGenerator.cleanTitle(fromRawOutput: rawOutput) {
+                result = .success(title)
+            } else {
+                result = .failure(.rejectedOutput(raw: rawOutput))
+            }
+        } else {
+            result = .failure(.undecodableOutput)
+        }
+
+        resume(result)
+    }
+
+    private func resume(_ result: Result<String, TitleGenerationFailure>) {
         lock.lock()
         let pending = continuation
         continuation = nil
         lock.unlock()
-        pending?.resume(returning: value)
+        pending?.resume(returning: result)
     }
 }

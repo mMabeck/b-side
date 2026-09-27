@@ -74,3 +74,250 @@ enum TaskTitleGeneratorRealModelAvailability {
         return FileManager.default.fileExists(atPath: modelPath)
     }
 }
+
+/// Exercises `TaskTitleGenerator.generateResult`'s process-handling with
+/// fake `#!/bin/sh` scripts standing in for `llama-completion`, so these run
+/// on any machine regardless of whether the real model is installed.
+@Suite("TaskTitleGenerator process handling")
+struct TaskTitleGeneratorProcessTests {
+    private static let fakeModelPath = "/dev/null"
+
+    private func makeScript(_ body: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("title-gen-fake-\(UUID().uuidString)")
+        let script = "#!/bin/sh\n" + body + "\n"
+        try script.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+
+    @Test("returns the cleaned title on success")
+    func success() async throws {
+        let script = try makeScript(#"echo "Fix Login Bug [end of text]""#)
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: script.path,
+            modelPath: Self.fakeModelPath,
+            timeout: 5,
+            gracePeriod: 1
+        )
+
+        switch result {
+        case .success(let title):
+            #expect(title == "Fix Login Bug")
+        case .failure(let failure):
+            Issue.record("expected success, got \(failure)")
+        }
+    }
+
+    @Test("non-zero exit is reported as a failure, not the partial title")
+    func nonZeroExit() async throws {
+        let script = try makeScript(
+            """
+            echo "Partial Title"
+            echo "boom: something went wrong" >&2
+            exit 3
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: script.path,
+            modelPath: Self.fakeModelPath,
+            timeout: 5,
+            gracePeriod: 1
+        )
+
+        switch result {
+        case .success(let title):
+            Issue.record("expected failure, got title \(title)")
+        case .failure(let failure):
+            guard case .nonZeroExit(let status, let stderrTail) = failure else {
+                Issue.record("expected nonZeroExit, got \(failure)")
+                return
+            }
+            #expect(status == 3)
+            #expect(stderrTail.contains("boom"))
+        }
+    }
+
+    @Test("a crash by signal is reported as a failure")
+    func crashBySignal() async throws {
+        let script = try makeScript("kill -SEGV $$")
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: script.path,
+            modelPath: Self.fakeModelPath,
+            timeout: 5,
+            gracePeriod: 1
+        )
+
+        switch result {
+        case .success(let title):
+            Issue.record("expected failure, got title \(title)")
+        case .failure:
+            break
+        }
+    }
+
+    @Test("a launch failure (non-executable path) fails immediately without hanging")
+    func launchFailure() async throws {
+        let nonExecutable = FileManager.default.temporaryDirectory
+            .appendingPathComponent("title-gen-not-executable-\(UUID().uuidString)")
+        try "not a script".write(to: nonExecutable, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: nonExecutable) }
+
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: nonExecutable.path,
+            modelPath: Self.fakeModelPath,
+            timeout: 5,
+            gracePeriod: 1
+        )
+
+        switch result {
+        case .success(let title):
+            Issue.record("expected failure, got title \(title)")
+        case .failure(let failure):
+            guard case .launchFailed = failure else {
+                Issue.record("expected launchFailed, got \(failure)")
+                return
+            }
+        }
+    }
+
+    @Test("binaryNotFound is reported when no binary path is resolved")
+    func binaryNotFound() async {
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: nil,
+            modelPath: Self.fakeModelPath,
+            timeout: 5,
+            gracePeriod: 1
+        )
+        guard case .failure(.binaryNotFound) = result else {
+            Issue.record("expected binaryNotFound, got \(result)")
+            return
+        }
+    }
+
+    @Test("modelNotFound is reported when no model path is resolved")
+    func modelNotFound() async throws {
+        let script = try makeScript(#"echo "Fix Login Bug [end of text]""#)
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: script.path,
+            modelPath: nil,
+            timeout: 5,
+            gracePeriod: 1
+        )
+        guard case .failure(.modelNotFound) = result else {
+            Issue.record("expected modelNotFound, got \(result)")
+            return
+        }
+    }
+
+    @Test("a timed-out child is killed and reaped, and reported as timedOut")
+    func timeout() async throws {
+        let script = try makeScript("trap '' TERM\nsleep 30")
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let pidBox = PidBox()
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "prompt",
+            binaryPath: script.path,
+            modelPath: Self.fakeModelPath,
+            timeout: 0.5,
+            gracePeriod: 0.5,
+            onLaunch: { pid in pidBox.set(pid) }
+        )
+
+        guard case .failure(.timedOut) = result else {
+            Issue.record("expected timedOut, got \(result)")
+            return
+        }
+
+        let pid = try #require(pidBox.get())
+        #expect(kill(pid, 0) != 0, "child process should have been reaped after timeout")
+    }
+
+    @Test("cancelling the awaiting task kills the child")
+    func cancellation() async throws {
+        let script = try makeScript("trap '' TERM\nsleep 30")
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let pidBox = PidBox()
+        let launched = LaunchedSignal()
+
+        let task = Task {
+            await TaskTitleGenerator.generateResult(
+                fromPrompt: "prompt",
+                binaryPath: script.path,
+                modelPath: Self.fakeModelPath,
+                timeout: 30,
+                gracePeriod: 0.5,
+                onLaunch: { pid in
+                    pidBox.set(pid)
+                    launched.signal()
+                }
+            )
+        }
+
+        await launched.wait()
+        task.cancel()
+        _ = await task.value
+
+        let pid = try #require(pidBox.get())
+        let deadline = Date().addingTimeInterval(5)
+        while kill(pid, 0) == 0, Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(kill(pid, 0) != 0, "child process should have been killed after cancellation")
+    }
+}
+
+/// Thread-safe box for a child pid captured from an `onLaunch` hook, which
+/// fires on a background dispatch queue.
+private final class PidBox: @unchecked Sendable {
+    private var pid: pid_t?
+    private let lock = NSLock()
+
+    func set(_ value: pid_t) {
+        lock.lock()
+        pid = value
+        lock.unlock()
+    }
+
+    func get() -> pid_t? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pid
+    }
+}
+
+/// Signals once, from a background dispatch queue, that a value is ready —
+/// used here so the cancellation test waits for the child to actually be
+/// launched before cancelling it.
+private final class LaunchedSignal: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+
+    func signal() {
+        semaphore.signal()
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                self.semaphore.wait()
+                continuation.resume()
+            }
+        }
+    }
+}
