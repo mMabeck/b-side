@@ -86,55 +86,27 @@ struct SubagentStripRendererTests {
         #expect(labelLine.contains("more"))
     }
 
-    @Test("The viewed card's border uses double-line box-drawing characters")
-    func viewedCardUsesDoubleBorder() {
+    @Test("A card's border is double-line when viewed, single-line otherwise", arguments: [true, false])
+    func cardBorderReflectsViewedState(isViewed: Bool) {
         let run = makeRun(id: "c1")
-        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: "c1", columns: 120, now: Date())
-        #expect(result.lines[0].contains("╔"))
-        #expect(result.lines[SubagentStripRenderer.cardRowCount - 1].contains("╚"))
+        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: isViewed ? "c1" : nil, columns: 120, now: Date())
+        #expect(result.lines[0].contains(isViewed ? "╔" : "┌"))
+        #expect(result.lines[SubagentStripRenderer.cardRowCount - 1].contains(isViewed ? "╚" : "└"))
     }
 
-    @Test("An unviewed card's border uses single-line box-drawing characters")
-    func unviewedCardUsesSingleBorder() {
-        let run = makeRun(id: "c1")
-        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: Date())
-        #expect(result.lines[0].contains("┌"))
-        #expect(result.lines[SubagentStripRenderer.cardRowCount - 1].contains("└"))
-    }
-
-    @Test("An active run's status row shows a spinner and elapsed time")
-    func activeRunShowsSpinnerAndElapsed() {
-        let run = makeRun(id: "c1", state: .active)
-        let now = Date(timeIntervalSinceReferenceDate: 18)
-        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: now)
+    @Test("Each run state renders its own status row text", arguments: [
+        (state: ChildRunState.active, now: 18.0, expectedSubstrings: ["working", "18s"]),
+        (state: ChildRunState.blocked, now: 7.0, expectedSubstrings: ["waiting for you"]),
+        (state: ChildRunState.completed, now: 999.0, expectedSubstrings: ["done", "10s"]),
+        (state: ChildRunState.failed, now: 0.0, expectedSubstrings: ["failed"]),
+    ])
+    func statusRowReflectsRunState(state: ChildRunState, now: Double, expectedSubstrings: [String]) {
+        let run = makeRun(id: "c1", state: state)
+        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: Date(timeIntervalSinceReferenceDate: now))
         let statusRow = result.lines[SubagentStripRenderer.cardRowCount - 2]
-        #expect(statusRow.contains("working"))
-        #expect(statusRow.contains("18s"))
-    }
-
-    @Test("A blocked run's status row asks for the user")
-    func blockedRunShowsWaiting() {
-        let run = makeRun(id: "c1", state: .blocked)
-        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: Date(timeIntervalSinceReferenceDate: 7))
-        let statusRow = result.lines[SubagentStripRenderer.cardRowCount - 2]
-        #expect(statusRow.contains("waiting for you"))
-    }
-
-    @Test("A completed run's status row says done, with the recorded elapsed time")
-    func completedRunShowsDone() {
-        let run = makeRun(id: "c1", state: .completed)
-        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: Date(timeIntervalSinceReferenceDate: 999))
-        let statusRow = result.lines[SubagentStripRenderer.cardRowCount - 2]
-        #expect(statusRow.contains("done"))
-        #expect(statusRow.contains("10s"))
-    }
-
-    @Test("A failed run's status row says failed")
-    func failedRunShowsFailed() {
-        let run = makeRun(id: "c1", state: .failed)
-        let result = SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: Date())
-        let statusRow = result.lines[SubagentStripRenderer.cardRowCount - 2]
-        #expect(statusRow.contains("failed"))
+        for substring in expectedSubstrings {
+            #expect(statusRow.contains(substring))
+        }
     }
 
     @Test("The label row summarises run counts by state")

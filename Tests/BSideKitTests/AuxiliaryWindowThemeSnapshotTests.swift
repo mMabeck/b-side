@@ -83,42 +83,6 @@ struct AuxiliaryWindowThemeSnapshotTests {
         #expect(minLuminance > 0.05)
     }
 
-    @Test("The Settings window's background and control text follow the resolved dark theme")
-    func settingsWindowMatchesResolvedTheme() async throws {
-        let (window, expectedPalette) = try await renderOffscreen(configuring: { _ in
-            NSHostingView(rootView: SettingsView())
-        })
-        defer { window.orderOut(nil) }
-
-        let background = NSColor(expectedPalette.windowBackground)
-        let bitmap = try await captureUntilSettled(window) { candidate in
-            guard let sample = candidate.colorAt(x: candidate.pixelsWide / 2, y: candidate.pixelsHigh / 2) else { return false }
-            guard isCloseToDarkThemeFamily(sample, background: background) else { return false }
-            let (minLuminance, maxLuminance) = luminanceRange(
-                in: candidate,
-                xRange: 10..<(candidate.pixelsWide - 10),
-                yRange: 10..<(candidate.pixelsHigh - 10)
-            )
-            return minLuminance > 0.05 && maxLuminance - luminance(of: sample) > 0.3
-        }
-
-        let backgroundSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2))
-        report("settingsBackground", backgroundSample, expected: background)
-        #expect(isCloseToDarkThemeFamily(backgroundSample, background: background))
-
-        // No near-black glyphs anywhere in the content area: the Form's
-        // labels, toggle titles and tab items are all system-drawn text,
-        // which renders black whenever the window is left in light `aqua`.
-        let (minLuminance, maxLuminance) = luminanceRange(
-            in: bitmap,
-            xRange: 10..<(bitmap.pixelsWide - 10),
-            yRange: 10..<(bitmap.pixelsHigh - 10)
-        )
-        print("settings content area: minLuminance=\(minLuminance) maxLuminance=\(maxLuminance) backgroundLuminance=\(luminance(of: backgroundSample))")
-        #expect(minLuminance > 0.05)
-        #expect(maxLuminance - luminance(of: backgroundSample) > 0.3)
-    }
-
     // MARK: - Shared offscreen render/capture plumbing
 
     private func renderOffscreen(

@@ -40,20 +40,9 @@ struct SubagentStripBatchTrackerTests {
         #expect(ids == ["a"])
     }
 
-    @Test("A finished run disappears once the linger window has elapsed")
-    func finishedRunDisappearsAfterLinger() {
-        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
-        let ids = SubagentStripBatchTracker.nextBatch(
-            allRuns: [run],
-            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 0.1),
-            swappedInChildID: nil
-        )
-        #expect(ids.isEmpty)
-    }
-
-    @Test("A failed run also disappears once the linger window has elapsed")
-    func failedRunDisappearsAfterLinger() {
-        let run = makeRun(id: "a", state: .failed, endedAt: epoch)
+    @Test("A finished or failed run disappears once the linger window has elapsed", arguments: [ChildRunState.completed, ChildRunState.failed])
+    func finishedOrFailedRunDisappearsAfterLinger(state: ChildRunState) {
+        let run = makeRun(id: "a", state: state, endedAt: epoch)
         let ids = SubagentStripBatchTracker.nextBatch(
             allRuns: [run],
             now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 0.1),
@@ -112,40 +101,20 @@ struct SubagentStripBatchTrackerTests {
         #expect(visible.map(\.id) == ["a", "b"])
     }
 
-    @Test("agedOutPaneIDs tears down a live pane once its card has left the strip")
-    func agedOutPaneIDsClosesExpiredCard() {
-        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
+    @Test("agedOutPaneIDs tears down a pane once its finished card has left the strip, but leaves a swapped-in or still-active one alone", arguments: [
+        (state: ChildRunState.completed, elapsedPastLinger: 0.1, swappedInChildID: nil, expectAgedOut: true),
+        (state: ChildRunState.completed, elapsedPastLinger: 100, swappedInChildID: "a", expectAgedOut: false),
+        (state: ChildRunState.active, elapsedPastLinger: 0.1, swappedInChildID: nil, expectAgedOut: false),
+    ] as [(ChildRunState, TimeInterval, String?, Bool)])
+    func agedOutPaneIDs(state: ChildRunState, elapsedPastLinger: TimeInterval, swappedInChildID: String?, expectAgedOut: Bool) {
+        let run = makeRun(id: "a", state: state, endedAt: state == .active ? nil : epoch)
         let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
             allRuns: [run],
             livePaneIDs: ["a"],
-            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 0.1),
-            swappedInChildID: nil
+            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + elapsedPastLinger),
+            swappedInChildID: swappedInChildID
         )
-        #expect(agedOut == ["a"])
-    }
-
-    @Test("agedOutPaneIDs leaves a swapped-in pane alone even past the linger window")
-    func agedOutPaneIDsKeepsSwappedInPane() {
-        let run = makeRun(id: "a", state: .completed, endedAt: epoch)
-        let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
-            allRuns: [run],
-            livePaneIDs: ["a"],
-            now: epoch.addingTimeInterval(SubagentStripBatchTracker.lingerInterval + 100),
-            swappedInChildID: "a"
-        )
-        #expect(agedOut.isEmpty)
-    }
-
-    @Test("agedOutPaneIDs leaves an active run's pane alone")
-    func agedOutPaneIDsKeepsActivePane() {
-        let run = makeRun(id: "a", state: .active)
-        let agedOut = SubagentStripBatchTracker.agedOutPaneIDs(
-            allRuns: [run],
-            livePaneIDs: ["a"],
-            now: epoch,
-            swappedInChildID: nil
-        )
-        #expect(agedOut.isEmpty)
+        #expect(agedOut == (expectAgedOut ? ["a"] : []))
     }
 
     @Test("reset is a harmless no-op now that visibility carries no tracked state")

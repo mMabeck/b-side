@@ -7,35 +7,17 @@ import Testing
 struct TaskAlertTests {
     // MARK: - Classification
 
-    @Test("A title containing 'question' classifies as a question")
-    func titleQuestionClassifiesAsQuestion() {
-        #expect(TaskAlertClassifier.classify(title: "Pi has a question", body: "Ready?") == .question)
-    }
-
-    @Test("A plain 'finished' title classifies as finished")
-    func finishedTitleClassifiesAsFinished() {
-        #expect(TaskAlertClassifier.classify(title: "Pi finished", body: "Ready for your next prompt.") == .finished)
-    }
-
-    @Test("A 'failed' title with no question keyword classifies as finished")
-    func failedTitleClassifiesAsFinished() {
-        #expect(TaskAlertClassifier.classify(title: "Pi failed", body: "Something broke.") == .finished)
-    }
-
-    @Test("Classification is case-insensitive")
-    func classificationIsCaseInsensitive() {
-        #expect(TaskAlertClassifier.classify(title: "PI HAS A QUESTION", body: "") == .question)
-    }
-
-    @Test("A question keyword in the body alone is enough")
-    func bodyKeywordAloneClassifiesAsQuestion() {
-        #expect(TaskAlertClassifier.classify(title: "Ready", body: "Waiting on your input") == .question)
-        #expect(TaskAlertClassifier.classify(title: "Ready", body: "Needs permission to continue") == .question)
-    }
-
-    @Test("A session-prefixed question title still classifies as a question")
-    func sessionPrefixedTitleClassifiesAsQuestion() {
-        #expect(TaskAlertClassifier.classify(title: "my-session — Pi has a question", body: "") == .question)
+    @Test("Title/body keywords classify as question or finished, case-insensitively and regardless of session prefix", arguments: [
+        (title: "Pi has a question", body: "Ready?", expected: TaskAlertKind.question),
+        (title: "Pi finished", body: "Ready for your next prompt.", expected: TaskAlertKind.finished),
+        (title: "Pi failed", body: "Something broke.", expected: TaskAlertKind.finished),
+        (title: "PI HAS A QUESTION", body: "", expected: TaskAlertKind.question),
+        (title: "Ready", body: "Waiting on your input", expected: TaskAlertKind.question),
+        (title: "Ready", body: "Needs permission to continue", expected: TaskAlertKind.question),
+        (title: "my-session — Pi has a question", body: "", expected: TaskAlertKind.question),
+    ])
+    func classification(title: String, body: String, expected: TaskAlertKind) {
+        #expect(TaskAlertClassifier.classify(title: title, body: body) == expected)
     }
 
     // MARK: - Debounce

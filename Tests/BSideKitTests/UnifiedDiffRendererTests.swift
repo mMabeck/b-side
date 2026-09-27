@@ -33,70 +33,33 @@ struct UnifiedDiffRendererTests {
     +let added = 2
     """
 
-    @Test("Added lines are coloured with statusSuccess")
-    func addedLineColour() {
+    private enum ExpectedRole { case dimmed, accent, primary, added, removed }
+
+    @Test("Each diff line kind is coloured distinctly: git/index/file headers dimmed, hunk header accented, +/- lines success/error, context primary", arguments: [
+        (lineIndex: 0, prefix: "diff --git", role: ExpectedRole.dimmed),
+        (lineIndex: 1, prefix: "index ", role: ExpectedRole.dimmed),
+        (lineIndex: 2, prefix: "--- ", role: ExpectedRole.dimmed),
+        (lineIndex: 3, prefix: "+++ ", role: ExpectedRole.dimmed),
+        (lineIndex: 4, prefix: "@@", role: ExpectedRole.accent),
+        (lineIndex: 5, prefix: " let unchanged", role: ExpectedRole.primary),
+        (lineIndex: 6, prefix: "-let removed", role: ExpectedRole.removed),
+        (lineIndex: 7, prefix: "+let added", role: ExpectedRole.added),
+    ])
+    private func lineColour(lineIndex: Int, prefix: String, role: ExpectedRole) {
         let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
         let lines = sampleDiff.components(separatedBy: "\n")
-        let addedLineStart = lines[0..<(lines.count - 1)].reduce(0) { $0 + $1.count + 1 }
+        let lineStart = lines[0..<lineIndex].reduce(0) { $0 + $1.count + 1 }
+        let expectedColor: Color
+        switch role {
+        case .dimmed: expectedColor = palette.textDisabled
+        case .accent: expectedColor = palette.accent
+        case .primary: expectedColor = palette.textPrimary
+        case .added: expectedColor = palette.statusSuccess
+        case .removed: expectedColor = palette.statusError
+        }
 
-        #expect(sameColor(color(at: addedLineStart, in: attributed), palette.statusSuccess))
-    }
-
-    @Test("Removed lines are coloured with statusError")
-    func removedLineColour() {
-        let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
-        let lines = sampleDiff.components(separatedBy: "\n")
-        let removedLineStart = lines[0..<(lines.count - 2)].reduce(0) { $0 + $1.count + 1 }
-
-        #expect(sameColor(color(at: removedLineStart, in: attributed), palette.statusError))
-    }
-
-    @Test("Hunk headers are coloured with accent")
-    func hunkHeaderColour() {
-        let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
-        let lines = sampleDiff.components(separatedBy: "\n")
-        let hunkLineStart = lines[0..<4].reduce(0) { $0 + $1.count + 1 }
-
-        #expect(lines[4].hasPrefix("@@"))
-        #expect(sameColor(color(at: hunkLineStart, in: attributed), palette.accent))
-    }
-
-    @Test("Context lines use textPrimary, not added/removed colours")
-    func contextLineColour() {
-        let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
-        let lines = sampleDiff.components(separatedBy: "\n")
-        let contextLineStart = lines[0..<5].reduce(0) { $0 + $1.count + 1 }
-
-        #expect(lines[5] == " let unchanged = 1")
-        #expect(sameColor(color(at: contextLineStart, in: attributed), palette.textPrimary))
-    }
-
-    @Test("+++ and --- file headers are dimmed, not treated as added/removed content")
-    func fileHeadersAreNotAddedOrRemoved() {
-        let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
-        let lines = sampleDiff.components(separatedBy: "\n")
-
-        let removedHeaderStart = lines[0..<2].reduce(0) { $0 + $1.count + 1 }
-        #expect(lines[2].hasPrefix("--- "))
-        #expect(sameColor(color(at: removedHeaderStart, in: attributed), palette.textDisabled))
-        #expect(!sameColor(color(at: removedHeaderStart, in: attributed), palette.statusError))
-
-        let addedHeaderStart = lines[0..<3].reduce(0) { $0 + $1.count + 1 }
-        #expect(lines[3].hasPrefix("+++ "))
-        #expect(sameColor(color(at: addedHeaderStart, in: attributed), palette.textDisabled))
-        #expect(!sameColor(color(at: addedHeaderStart, in: attributed), palette.statusSuccess))
-    }
-
-    @Test("diff --git and index lines are dimmed")
-    func gitAndIndexHeadersAreDimmed() {
-        let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
-
-        #expect(sameColor(color(at: 0, in: attributed), palette.textDisabled))
-
-        let lines = sampleDiff.components(separatedBy: "\n")
-        let indexLineStart = lines[0].count + 1
-        #expect(lines[1].hasPrefix("index "))
-        #expect(sameColor(color(at: indexLineStart, in: attributed), palette.textDisabled))
+        #expect(lines[lineIndex].hasPrefix(prefix))
+        #expect(sameColor(color(at: lineStart, in: attributed), expectedColor))
     }
 
     @Test("A 10k-line diff renders under a reasonable time bound")

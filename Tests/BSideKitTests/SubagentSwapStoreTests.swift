@@ -27,20 +27,12 @@ struct SubagentSwapStoreTests {
         #expect(swap.shownChildID(forTask: 1) == nil)
     }
 
-    @Test("Toggling the already-shown child swaps back to the parent")
-    func toggleShownChildSwapsBack() {
+    @Test("Toggling the already-shown child swaps back to the parent; toggling a different child swaps to it", arguments: [("c1", nil), ("c2", "c2")] as [(String, String?)])
+    func toggleChild(childId: String, expectedShown: String?) {
         let swap = SubagentSwapStore()
         swap.show(childId: "c1", forTask: 1)
-        swap.toggle(childId: "c1", forTask: 1)
-        #expect(swap.shownChildID(forTask: 1) == nil)
-    }
-
-    @Test("Toggling a different child swaps to it")
-    func toggleDifferentChildSwapsToIt() {
-        let swap = SubagentSwapStore()
-        swap.show(childId: "c1", forTask: 1)
-        swap.toggle(childId: "c2", forTask: 1)
-        #expect(swap.shownChildID(forTask: 1) == "c2")
+        swap.toggle(childId: childId, forTask: 1)
+        #expect(swap.shownChildID(forTask: 1) == expectedShown)
     }
 
     @Test("version bumps when the shown child changes, but not when highlighting alone")
@@ -73,20 +65,12 @@ struct SubagentSwapStoreTests {
         #expect(swap.shownChildID(forTask: 2) == "c2")
     }
 
-    @Test("Closing the currently shown child auto-returns to the parent")
-    func closingShownChildReturnsToParent() {
+    @Test("Closing the currently shown child auto-returns to the parent; closing an unshown child does nothing", arguments: [("c1", nil), ("c2", "c1")] as [(String, String?)])
+    func handleClosed(closedChildId: String, expectedShown: String?) {
         let swap = SubagentSwapStore()
         swap.show(childId: "c1", forTask: 1)
-        swap.handleClosed(childId: "c1", taskId: 1)
-        #expect(swap.shownChildID(forTask: 1) == nil)
-    }
-
-    @Test("Closing a child that isn't shown does nothing")
-    func closingUnshownChildIsANoOp() {
-        let swap = SubagentSwapStore()
-        swap.show(childId: "c1", forTask: 1)
-        swap.handleClosed(childId: "c2", taskId: 1)
-        #expect(swap.shownChildID(forTask: 1) == "c1")
+        swap.handleClosed(childId: closedChildId, taskId: 1)
+        #expect(swap.shownChildID(forTask: 1) == expectedShown)
     }
 
     @Test("Highlighting a headless card doesn't change what the main area shows")

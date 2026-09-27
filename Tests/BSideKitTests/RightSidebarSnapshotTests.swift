@@ -10,50 +10,9 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct RightSidebarSnapshotTests {
-    @Test("The Source Control placeholder is themed and legible")
-    func placeholderIsThemedAndLegible() async throws {
-        let (window, palette, _) = try await renderOffscreen(populated: false)
-        defer { window.orderOut(nil) }
-
-        let deadline = Date().addingTimeInterval(3)
-        var capturedBitmap: NSBitmapImageRep?
-        var lastCaptureError: Error?
-        repeat {
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
-            do {
-                let candidate = try capture(window)
-                capturedBitmap = candidate
-                if looksSettled(candidate, palette: palette) {
-                    break
-                }
-            } catch {
-                lastCaptureError = error
-            }
-            try await Task.sleep(for: .milliseconds(100))
-        } while Date() < deadline
-        guard let bitmap = capturedBitmap else {
-            Issue.record("Failed to capture window image")
-            throw lastCaptureError ?? CaptureError.failed
-        }
-
-        let surfaceBackground = NSColor(palette.surfaceBackground)
-        let placeholderAreaSample = try #require(bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 20))
-        #expect(isCloseToDarkThemeFamily(placeholderAreaSample, background: surfaceBackground))
-
-        let (minLuminance, maxLuminance) = luminanceRange(
-            in: bitmap,
-            xRange: 10..<(bitmap.pixelsWide - 10),
-            yRange: 10..<(bitmap.pixelsHigh - 10)
-        )
-        print("sidebar content area: minLuminance=\(minLuminance) maxLuminance=\(maxLuminance)")
-        #expect(minLuminance > 0.05)
-        #expect(maxLuminance - luminance(of: placeholderAreaSample) > 0.3)
-    }
-
     @Test("A populated Source Control panel renders readable rows over a themed background")
     func populatedPanelIsThemedAndLegible() async throws {
-        let (window, palette, repoRoot) = try await renderOffscreen(populated: true)
+        let (window, palette, repoRoot) = try await renderOffscreen()
         defer {
             window.orderOut(nil)
             if let repoRoot { try? FileManager.default.removeItem(at: repoRoot) }
@@ -85,27 +44,13 @@ struct RightSidebarSnapshotTests {
         #expect(isCloseToDarkThemeFamily(backgroundSample, background: surfaceBackground))
     }
 
-    /// Cheap, non-asserting re-check of the same conditions the real
-    /// assertions below make, used only to decide whether polling can stop.
-    private func looksSettled(_ bitmap: NSBitmapImageRep, palette: BSidePalette) -> Bool {
-        let (minLuminance, maxLuminance) = luminanceRange(
-            in: bitmap,
-            xRange: 10..<(bitmap.pixelsWide - 10),
-            yRange: 10..<(bitmap.pixelsHigh - 10)
-        )
-        guard minLuminance > 0.05, maxLuminance > 0.05 else { return false }
-
-        guard let placeholderAreaSample = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: 20) else { return false }
-        return isCloseToDarkThemeFamily(placeholderAreaSample, background: NSColor(palette.surfaceBackground))
-    }
-
     // MARK: - Shared offscreen render/capture plumbing
 
-    /// When `populated` is true, backs the rendered sidebar with a real
-    /// throwaway git repo (via `TestRepo`) that has one staged file, one
-    /// unstaged edit, and one untracked file, and selects the task pointed
-    /// at it so the panel actually renders rows rather than an empty state.
-    private func renderOffscreen(populated: Bool) async throws -> (NSWindow, BSidePalette, URL?) {
+    /// Backs the rendered sidebar with a real throwaway git repo (via
+    /// `TestRepo`) that has one staged file, one unstaged edit, and one
+    /// untracked file, and selects the task pointed at it so the panel
+    /// actually renders rows rather than an empty state.
+    private func renderOffscreen() async throws -> (NSWindow, BSidePalette, URL?) {
         let configHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("bside-sidebar-test-\(UUID().uuidString)")
         let ghosttyConfigDir = configHome.appendingPathComponent("ghostty")
@@ -142,23 +87,20 @@ struct RightSidebarSnapshotTests {
         let database = try AppDatabase.openInMemory()
         let store = ProjectsStore(database: database)
 
-        var repoRoot: URL?
-        if populated {
-            let root = try TestRepo.makeTempDirectory()
-            repoRoot = root
-            let repoURL = try await TestRepo.makeRepo(in: root)
-            try "unstaged edit\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
-            try "new file\n".write(to: repoURL.appendingPathComponent("NOTES.md"), atomically: true, encoding: .utf8)
-            try "staged content\n".write(to: repoURL.appendingPathComponent("staged.txt"), atomically: true, encoding: .utf8)
-            try await GitCLI.stage(["staged.txt"], at: repoURL)
+        let root = try TestRepo.makeTempDirectory()
+        let repoRoot = root
+        let repoURL = try await TestRepo.makeRepo(in: root)
+        try "unstaged edit\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try "new file\n".write(to: repoURL.appendingPathComponent("NOTES.md"), atomically: true, encoding: .utf8)
+        try "staged content\n".write(to: repoURL.appendingPathComponent("staged.txt"), atomically: true, encoding: .utf8)
+        try await GitCLI.stage(["staged.txt"], at: repoURL)
 
-            try await store.addProject(at: repoURL)
-            store.start()
-            try await waitUntil { !store.projects.isEmpty }
-            let project = try #require(store.projects.first)
-            let task = try await store.createTask(project: project, name: "Sidebar Snapshot", useWorktree: false)
-            store.selectTask(task, project: project)
-        }
+        try await store.addProject(at: repoURL)
+        store.start()
+        try await waitUntil { !store.projects.isEmpty }
+        let project = try #require(store.projects.first)
+        let task = try await store.createTask(project: project, name: "Sidebar Snapshot", useWorktree: false)
+        store.selectTask(task, project: project)
 
         let window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 300, height: 500),

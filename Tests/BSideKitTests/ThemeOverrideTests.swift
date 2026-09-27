@@ -8,31 +8,14 @@ import Testing
 /// runtime, no real `UserDefaults` reads for the pure-function cases.
 @MainActor
 struct ThemeOverrideTests {
-    @Test("useConfig yields no override, deferring to the config file's own directive")
-    func useConfigYieldsNoDirective() {
-        let directive = ThemeOverride.directive(
-            mode: .useConfig,
-            singleThemeName: "Ayu Mirage"
-        )
-        #expect(directive == nil)
-    }
-
-    @Test("single mode with a theme name yields a fixed directive")
-    func singleModeYieldsFixedDirective() {
-        let directive = ThemeOverride.directive(
-            mode: .single,
-            singleThemeName: "Ayu Mirage"
-        )
-        #expect(directive == .fixed("Ayu Mirage"))
-    }
-
-    @Test("single mode with an empty theme name yields no directive")
-    func singleModeWithEmptyNameYieldsNoDirective() {
-        let directive = ThemeOverride.directive(
-            mode: .single,
-            singleThemeName: ""
-        )
-        #expect(directive == nil)
+    @Test("directive(mode:) defers to the config in useConfig mode, and in single mode is fixed unless the name is empty", arguments: [
+        (mode: ThemeOverrideMode.useConfig, name: "Ayu Mirage", expected: nil),
+        (mode: ThemeOverrideMode.single, name: "Ayu Mirage", expected: GhosttyBridge.ThemeDirective.fixed("Ayu Mirage")),
+        (mode: ThemeOverrideMode.single, name: "", expected: nil),
+    ])
+    func directiveForMode(mode: ThemeOverrideMode, name: String, expected: GhosttyBridge.ThemeDirective?) {
+        let directive = ThemeOverride.directive(mode: mode, singleThemeName: name)
+        #expect(directive == expected)
     }
 
     @Test("currentDirective reads the same UserDefaults keys @AppStorage writes to")
@@ -47,24 +30,17 @@ struct ThemeOverrideTests {
         #expect(ThemeOverride.currentDirective(defaults: defaults) == .fixed("Ayu Mirage"))
     }
 
-    @Test("A stored matchSystem mode migrates to Single Theme using the old dark theme name")
-    func legacyMatchSystemMigratesToSingleWithDarkName() {
+    @Test("A stored matchSystem mode migrates to Single Theme using the old dark theme name, or falls back to Use Ghostty Config when there isn't one", arguments: [
+        (legacyDarkThemeName: "Ayu Mirage", expected: GhosttyBridge.ThemeDirective.fixed("Ayu Mirage")),
+        (legacyDarkThemeName: "", expected: nil),
+    ])
+    func legacyMatchSystemMigrates(legacyDarkThemeName: String, expected: GhosttyBridge.ThemeDirective?) {
         let directive = ThemeOverride.directive(
             rawMode: "matchSystem",
             singleThemeName: "",
-            legacyDarkThemeName: "Ayu Mirage"
+            legacyDarkThemeName: legacyDarkThemeName
         )
-        #expect(directive == .fixed("Ayu Mirage"))
-    }
-
-    @Test("A stored matchSystem mode with no dark theme name falls back to Use Ghostty Config")
-    func legacyMatchSystemWithNoDarkNameFallsBackToUseConfig() {
-        let directive = ThemeOverride.directive(
-            rawMode: "matchSystem",
-            singleThemeName: "",
-            legacyDarkThemeName: ""
-        )
-        #expect(directive == nil)
+        #expect(directive == expected)
     }
 
     @Test("currentDirective migrates a prior install's stored matchSystem mode")

@@ -11,19 +11,12 @@ struct TaskAutoRenameServiceTranscriptTests {
     private let thinkingChange = #"{"type":"thinking_level_change","id":"c","parentId":"b","timestamp":"2026-09-22T18:47:13Z","thinkingLevel":"medium"}"#
     private let systemMessage = #"{"type":"message","id":"d","parentId":"c","timestamp":"2026-09-22T18:47:13Z","message":{"role":"system","content":"","sections":{"preamble":"you are pi"}}}"#
 
-    @Test("finds the first user message's plain-string content")
-    func findsFirstUserPromptAsPlainString() {
-        let userMessage = #"{"type":"message","id":"e","parentId":"d","timestamp":"2026-09-22T18:47:14Z","message":{"role":"user","content":"fix the login bug","timestamp":123}}"#
-        let lines = [header, sessionInfo, modelChange, thinkingChange, systemMessage, userMessage]
-
-        #expect(TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) == "fix the login bug")
-    }
-
-    @Test("finds the first user message's text block among a content array")
-    func findsFirstUserPromptFromContentBlocks() {
-        let userMessage = #"""
-        {"type":"message","id":"e","parentId":"d","timestamp":"2026-09-22T18:47:14Z","message":{"role":"user","content":[{"type":"text","text":"fix the login bug"}],"timestamp":123}}
-        """#
+    @Test("finds the first user message's content, whether a plain string or a text-block array", arguments: [
+        "\"fix the login bug\"",
+        "[{\"type\":\"text\",\"text\":\"fix the login bug\"}]",
+    ])
+    func findsFirstUserPrompt(contentJSON: String) {
+        let userMessage = "{\"type\":\"message\",\"id\":\"e\",\"parentId\":\"d\",\"timestamp\":\"2026-09-22T18:47:14Z\",\"message\":{\"role\":\"user\",\"content\":\(contentJSON),\"timestamp\":123}}"
         let lines = [header, sessionInfo, modelChange, thinkingChange, systemMessage, userMessage]
 
         #expect(TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) == "fix the login bug")
@@ -39,55 +32,28 @@ struct TaskAutoRenameServiceTranscriptTests {
         #expect(TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) == nil)
     }
 
-    @Test("skips a tool result line that precedes the first user message, ignoring it as noise")
-    func skipsToolResultPrecedingNothing() {
-        let toolResult = #"""
-        {"type":"message","id":"z","parentId":"y","timestamp":"2026-09-22T18:47:13Z","message":{"role":"toolResult","toolCallId":"t1","toolName":"bash","content":[{"type":"text","text":"stray output"}]}}
-        """#
+    @Test("a tool result, an assistant message, or blank lines preceding the first user message are all skipped as noise", arguments: [
+        [#"{"type":"message","id":"z","parentId":"y","timestamp":"2026-09-22T18:47:13Z","message":{"role":"toolResult","toolCallId":"t1","toolName":"bash","content":[{"type":"text","text":"stray output"}]}}"#],
+        [#"{"type":"message","id":"x","parentId":"w","timestamp":"2026-09-22T18:47:13Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"planning..."},{"type":"text","text":"Working on it."}]}}"#],
+        ["", "   "],
+    ])
+    func skipsNoiseBeforeFirstUserMessage(precedingLines: [String]) {
         let userMessage = #"{"type":"message","id":"e","parentId":"d","timestamp":"2026-09-22T18:47:14Z","message":{"role":"user","content":"real prompt"}}"#
-        let lines = [header, toolResult, userMessage]
+        let lines = [header] + precedingLines + [userMessage]
 
         #expect(TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) == "real prompt")
-    }
-
-    @Test("ignores assistant messages and returns the first user message that follows them")
-    func ignoresAssistantMessagesBeforeFirstUser() {
-        let assistantMessage = #"""
-        {"type":"message","id":"x","parentId":"w","timestamp":"2026-09-22T18:47:13Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"planning..."},{"type":"text","text":"Working on it."}]}}
-        """#
-        let userMessage = #"{"type":"message","id":"e","parentId":"d","timestamp":"2026-09-22T18:47:14Z","message":{"role":"user","content":"add dark mode"}}"#
-        let lines = [header, assistantMessage, userMessage]
-
-        #expect(TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) == "add dark mode")
-    }
-
-    @Test("empty lines and blank lines between records are skipped without error")
-    func toleratesBlankLines() {
-        let userMessage = #"{"type":"message","id":"e","parentId":"d","timestamp":"2026-09-22T18:47:14Z","message":{"role":"user","content":"add dark mode"}}"#
-        let lines = [header, "", "   ", userMessage]
-
-        #expect(TaskAutoRenameService.firstUserPromptText(inTranscriptLines: lines) == "add dark mode")
     }
 }
 
 @Suite("TaskAutoRenameService title derivation")
 struct TaskAutoRenameServiceTitleTests {
-    @Test("strips markdown emphasis, code, and heading markers")
-    func stripsMarkdown() {
-        let title = TaskAutoRenameService.deriveTitle(fromPrompt: "fix the `login()` **bug** in #urgent module")
-        #expect(title == "fix the login() bug in urgent module")
-    }
-
-    @Test("strips leading punctuation like list markers and quotes")
-    func stripsLeadingPunctuation() {
-        let title = TaskAutoRenameService.deriveTitle(fromPrompt: "- fix the bug")
-        #expect(title == "fix the bug")
-    }
-
-    @Test("collapses internal whitespace, including newlines and tabs, into single spaces")
-    func collapsesWhitespace() {
-        let title = TaskAutoRenameService.deriveTitle(fromPrompt: "fix   the\n\nlogin\tbug")
-        #expect(title == "fix the login bug")
+    @Test("cleans up markdown, leading punctuation, and internal whitespace", arguments: [
+        ("fix the `login()` **bug** in #urgent module", "fix the login() bug in urgent module"),
+        ("- fix the bug", "fix the bug"),
+        ("fix   the\n\nlogin\tbug", "fix the login bug"),
+    ])
+    func cleansUpPromptFormatting(prompt: String, expected: String) {
+        #expect(TaskAutoRenameService.deriveTitle(fromPrompt: prompt) == expected)
     }
 
     @Test("truncates long prompts at a word boundary near the max length")

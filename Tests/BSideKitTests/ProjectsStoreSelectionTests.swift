@@ -124,88 +124,40 @@ struct ProjectsStoreSelectionTests {
 
     // MARK: - Selection reconciliation (pure)
 
-    @Test("A live selected task is left untouched")
-    func reconcileKeepsLiveTaskSelected() {
+    @Test(
+        "reconcileSelection handles live/stale/vanished tasks and projects",
+        arguments: [
+            // (name, selectedProjectID, selectedTaskID, hasProjects, hasTaskInProject1, expectedProjectID, expectedTaskID)
+            ("live task is left untouched", 1, 10, true, true, 1, 10),
+            ("stale project id on a live task clears selection", 999, 10, true, true, nil, nil),
+            ("vanished task falls back to its still-live parent project", 1, 10, true, false, 1, nil),
+            ("vanished task whose project is also gone leaves no selection", 1, 10, false, false, nil, nil),
+            ("vanished project with no task selected leaves no selection", 1, nil, false, false, nil, nil),
+            ("live project with no task selected is left untouched", 1, nil, true, false, 1, nil),
+            ("no selection at all stays no selection", nil, nil, true, false, nil, nil),
+        ] as [(String, Int64?, Int64?, Bool, Bool, Int64?, Int64?)]
+    )
+    func reconcileSelection(
+        name: String,
+        selectedProjectID: Int64?,
+        selectedTaskID: Int64?,
+        hasProjects: Bool,
+        hasTaskInProject1: Bool,
+        expectedProjectID: Int64?,
+        expectedTaskID: Int64?
+    ) {
+        let projects = hasProjects ? [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")] : []
+        let tasksByProject: [Int64: [TaskRecord]] = hasTaskInProject1
+            ? [1: [TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")]]
+            : [:]
         let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: 1,
-            selectedTaskID: 10,
-            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
-            tasksByProject: [1: [TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")]]
+            selectedProjectID: selectedProjectID,
+            selectedTaskID: selectedTaskID,
+            projects: projects,
+            tasksByProject: tasksByProject
         )
-        #expect(reconciled.selectedProjectID == 1)
-        #expect(reconciled.selectedTaskID == 10)
-    }
-
-    @Test("A live selected task whose recorded project id is stale clears selection")
-    func reconcileClearsSelectionWhenLiveTaskHasStaleProjectID() {
-        let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: 999,
-            selectedTaskID: 10,
-            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
-            tasksByProject: [1: [TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")]]
-        )
-        #expect(reconciled.selectedProjectID == nil)
-        #expect(reconciled.selectedTaskID == nil)
-    }
-
-    @Test("A vanished selected task falls back to its still-live parent project")
-    func reconcileFallsBackToParentProjectWhenTaskVanishes() {
-        let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: 1,
-            selectedTaskID: 10,
-            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
-            tasksByProject: [1: []]
-        )
-        #expect(reconciled.selectedProjectID == 1)
-        #expect(reconciled.selectedTaskID == nil)
-    }
-
-    @Test("A vanished selected task whose project is also gone leaves no selection")
-    func reconcileClearsSelectionWhenTaskAndProjectVanish() {
-        let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: 1,
-            selectedTaskID: 10,
-            projects: [],
-            tasksByProject: [:]
-        )
-        #expect(reconciled.selectedProjectID == nil)
-        #expect(reconciled.selectedTaskID == nil)
-    }
-
-    @Test("A vanished selected project with no task selected leaves no selection")
-    func reconcileClearsSelectionWhenOnlyProjectVanishes() {
-        let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: 1,
-            selectedTaskID: nil,
-            projects: [],
-            tasksByProject: [:]
-        )
-        #expect(reconciled.selectedProjectID == nil)
-        #expect(reconciled.selectedTaskID == nil)
-    }
-
-    @Test("A live selected project with no task selected is left untouched")
-    func reconcileKeepsLiveProjectSelected() {
-        let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: 1,
-            selectedTaskID: nil,
-            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
-            tasksByProject: [:]
-        )
-        #expect(reconciled.selectedProjectID == 1)
-        #expect(reconciled.selectedTaskID == nil)
-    }
-
-    @Test("No selection at all stays no selection")
-    func reconcileLeavesNoSelectionAsIs() {
-        let reconciled = ProjectsStore.reconcileSelection(
-            selectedProjectID: nil,
-            selectedTaskID: nil,
-            projects: [Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")],
-            tasksByProject: [:]
-        )
-        #expect(reconciled.selectedProjectID == nil)
-        #expect(reconciled.selectedTaskID == nil)
+        #expect(reconciled.selectedProjectID == expectedProjectID, "\(name): projectID")
+        #expect(reconciled.selectedTaskID == expectedTaskID, "\(name): taskID")
     }
 
     @Test("Archiving the selected task clears it and falls back to the parent project")

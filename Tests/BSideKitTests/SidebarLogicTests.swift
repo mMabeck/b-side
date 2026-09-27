@@ -103,33 +103,20 @@ struct SidebarLogicTests {
 
     // MARK: - Merged badge vs pending-work pill decision
 
-    @Test("A merged, clean branch reads as merged with no pending work")
-    func mergedCleanBranchReadsMerged() {
-        let status = TaskWorktreeService.BranchSyncStatus(ahead: 0, behind: 0, merged: true, hasUncommittedChanges: false)
-        #expect(BranchSyncSummary.isEffectivelyMerged(status))
-        #expect(!BranchSyncSummary.hasPendingWork(for: status))
-    }
-
-    @Test("A merged branch with uncommitted changes must not read as merged, and must read as pending")
-    func mergedButDirtyBranchIsNotEffectivelyMerged() {
-        let status = TaskWorktreeService.BranchSyncStatus(ahead: 0, behind: 0, merged: true, hasUncommittedChanges: true)
-        #expect(!BranchSyncSummary.isEffectivelyMerged(status))
-        #expect(BranchSyncSummary.hasPendingWork(for: status))
-    }
-
-    @Test("An unmerged branch with new commits ahead of base reads as pending, not merged")
-    func aheadUnmergedBranchIsPending() {
-        let status = TaskWorktreeService.BranchSyncStatus(ahead: 3, behind: 0, merged: false, hasUncommittedChanges: false)
-        #expect(!BranchSyncSummary.isEffectivelyMerged(status))
-        #expect(BranchSyncSummary.hasPendingWork(for: status))
-    }
-
-    @Test("A clean, unmerged, behind-only branch has no pending work of its own")
-    func behindOnlyBranchHasNoPendingWork() {
-        let status = TaskWorktreeService.BranchSyncStatus(ahead: 0, behind: 4, merged: false, hasUncommittedChanges: false)
-        #expect(!BranchSyncSummary.isEffectivelyMerged(status))
-        #expect(!BranchSyncSummary.hasPendingWork(for: status))
-        #expect(BranchSyncSummary.behindCaption(for: status) == "↓4")
+    @Test("Merged/pending-work status follows ahead/behind/merged/dirty in combination", arguments: [
+        // (ahead, behind, merged, dirty, expectedMerged, expectedPending)
+        (0, 0, true, false, true, false),
+        (0, 0, true, true, false, true),
+        (3, 0, false, false, false, true),
+        (0, 4, false, false, false, false),
+    ])
+    func mergedAndPendingWorkStatus(ahead: Int, behind: Int, merged: Bool, dirty: Bool, expectedMerged: Bool, expectedPending: Bool) {
+        let status = TaskWorktreeService.BranchSyncStatus(ahead: ahead, behind: behind, merged: merged, hasUncommittedChanges: dirty)
+        #expect(BranchSyncSummary.isEffectivelyMerged(status) == expectedMerged)
+        #expect(BranchSyncSummary.hasPendingWork(for: status) == expectedPending)
+        if behind > 0, ahead == 0, !merged, !dirty {
+            #expect(BranchSyncSummary.behindCaption(for: status) == "↓\(behind)")
+        }
     }
 
     @Test("Pending-work accessibility label covers commits-ahead, uncommitted changes, and both together")

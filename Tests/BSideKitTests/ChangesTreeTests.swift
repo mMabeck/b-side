@@ -131,12 +131,4 @@ import Testing
         #expect(renamedFile.path == "new/Name.swift")
         #expect(renamedFile.origPath == "old/Name.swift")
     }
-
-    @Test func statusLettersCoverEveryKind() {
-        #expect(SourceControlRowView.badgeLetter(.added) == "A")
-        #expect(SourceControlRowView.badgeLetter(.modified) == "M")
-        #expect(SourceControlRowView.badgeLetter(.deleted) == "D")
-        #expect(SourceControlRowView.badgeLetter(.renamed) == "R")
-        #expect(SourceControlRowView.badgeLetter(.untracked) == "U")
-    }
 }

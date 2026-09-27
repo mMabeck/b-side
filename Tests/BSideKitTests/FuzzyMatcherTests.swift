@@ -27,28 +27,15 @@ struct FuzzyMatcherTests {
         #expect(FuzzyMatcher.score(query: "a", candidate: "") == nil)
     }
 
-    @Test("a prefix match scores higher than a contiguous match elsewhere in the string")
-    func prefixOutranksContiguous() {
-        let prefixScore = FuzzyMatcher.score(query: "dash", candidate: "dash-pi")
-        let containsScore = FuzzyMatcher.score(query: "dash", candidate: "b-side-dash-fork")
-        #expect(prefixScore != nil && containsScore != nil)
-        #expect(prefixScore! > containsScore!)
-    }
-
-    @Test("a contiguous match scores higher than a scattered subsequence match")
-    func contiguousOutranksScattered() {
-        let contiguousScore = FuzzyMatcher.score(query: "side", candidate: "b-side")
-        let scatteredScore = FuzzyMatcher.score(query: "side", candidate: "synsforum-internal-dashboard-editor")
-        #expect(contiguousScore != nil && scatteredScore != nil)
-        #expect(contiguousScore! > scatteredScore!)
-    }
-
-    @Test("a match starting at a word boundary scores higher than one that doesn't")
-    func wordBoundaryOutranksMidWord() {
-        let boundaryScore = FuzzyMatcher.score(query: "s", candidate: "a-side") // 's' right after '-'
-        let midWordScore = FuzzyMatcher.score(query: "s", candidate: "aside") // 's' mid-word
-        #expect(boundaryScore != nil && midWordScore != nil)
-        #expect(boundaryScore! > midWordScore!)
+    @Test("Prefix beats contiguous, contiguous beats scattered, and word-boundary beats mid-word", arguments: [
+        (query: "dash", higher: "dash-pi", lower: "b-side-dash-fork"),
+        (query: "side", higher: "b-side", lower: "synsforum-internal-dashboard-editor"),
+        (query: "s", higher: "a-side", lower: "aside"),
+    ])
+    func matchQualityOutranks(query: String, higher: String, lower: String) throws {
+        let higherScore = try #require(FuzzyMatcher.score(query: query, candidate: higher))
+        let lowerScore = try #require(FuzzyMatcher.score(query: query, candidate: lower))
+        #expect(higherScore > lowerScore)
     }
 
     @Test("rank drops non-matching items and orders the rest best-first")

@@ -25,16 +25,12 @@ struct NavigationShortcutsTests {
         #expect(ids == [3, 1, 2])
     }
 
-    @Test("Removing open terminals drops only the removed ids, preserving order")
-    func removingOpenTerminalsPreservesOrder() {
-        let ids = ProjectsStore.removingOpenTerminals([1, 5], from: [3, 1, 2, 5])
-        #expect(ids == [3, 2])
-    }
-
-    @Test("Removing ids not present in the list is a no-op")
-    func removingOpenTerminalsIgnoresUnknownIds() {
-        let ids = ProjectsStore.removingOpenTerminals([99], from: [3, 1, 2])
-        #expect(ids == [3, 1, 2])
+    @Test("Removing open terminals drops only the removed ids, preserving order; unknown ids are a no-op", arguments: [
+        (remove: [1, 5], from: [3, 1, 2, 5], expected: [3, 2]),
+        (remove: [99], from: [3, 1, 2], expected: [3, 1, 2]),
+    ] as [(Set<Int64>, [Int64], [Int64])])
+    func removingOpenTerminals(remove: Set<Int64>, from: [Int64], expected: [Int64]) {
+        #expect(ProjectsStore.removingOpenTerminals(remove, from: from) == expected)
     }
 
     // MARK: - NavigationShortcuts index mapping
