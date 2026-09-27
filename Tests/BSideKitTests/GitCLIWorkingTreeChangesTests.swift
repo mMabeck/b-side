@@ -33,6 +33,15 @@ import Testing
         #expect(changes.contains { $0.path == "README.md" && $0.kind == .modified })
         #expect(changes.contains { $0.path == "second.txt" && $0.kind == .modified })
         #expect(changes.contains { $0.path == "untracked.txt" && $0.kind == .untracked })
+
+        // parseNumstat: a modified tracked file reports both added and
+        // removed lines, an untracked file (via diff --no-index) only added.
+        let modified = try #require(changes.first { $0.path == "second.txt" })
+        #expect(modified.linesAdded == 1)
+        #expect(modified.linesRemoved == 1)
+        let untracked = try #require(changes.first { $0.path == "untracked.txt" })
+        #expect(untracked.linesAdded == 1)
+        #expect(untracked.linesRemoved == 0)
     }
 
     @Test func allCombinesCommittedAndUncommittedAgainstBaseline() async throws {
@@ -75,6 +84,12 @@ import Testing
                 $0.path == "new-name.txt" && $0.origPath == "orig-name.txt" && $0.kind == .renamed
             }
         )
+
+        // parseNumstat: a rename's `added\tremoved\t\0` record has an empty
+        // path field, resolved via the trailing old/new path tokens, keyed on the new path.
+        let renamed = try #require(changes.first { $0.path == "new-name.txt" })
+        #expect(renamed.linesAdded == 0)
+        #expect(renamed.linesRemoved == 0)
     }
 
     @Test func workingTreeDiffShowsATrackedFilesChange() async throws {
