@@ -1,8 +1,6 @@
 import Foundation
 
-/// Formats a task row's trailing branch-sync summary from the existing git
-/// layer's `TaskWorktreeService.BranchSyncStatus`. Kept quiet and compact: a
-/// clean, unmerged branch shows nothing at all.
+/// Formats a task row's trailing branch-sync summary. A clean, unmerged branch shows nothing at all.
 public enum BranchSyncSummary {
     public static func text(ahead: Int, behind: Int, merged: Bool) -> String? {
         if merged { return "merged" }
@@ -16,10 +14,7 @@ public enum BranchSyncSummary {
         text(ahead: status.ahead, behind: status.behind, merged: status.merged)
     }
 
-    /// Whether a task has work the base ref doesn't have yet: commits of its
-    /// own beyond the base, or uncommitted edits sitting in its worktree.
-    /// Never true at the same time as ``isEffectivelyMerged(_:)`` reads true,
-    /// since uncommitted changes alone already forces that false.
+    /// Never true alongside ``isEffectivelyMerged(_:)``, since uncommitted changes alone forces that false.
     public static func hasPendingWork(ahead: Int, hasUncommittedChanges: Bool) -> Bool {
         ahead > 0 || hasUncommittedChanges
     }
@@ -28,23 +23,17 @@ public enum BranchSyncSummary {
         hasPendingWork(ahead: status.ahead, hasUncommittedChanges: status.hasUncommittedChanges)
     }
 
-    /// The "Merged" badge's actual gate: the branch must be merged into its
-    /// base ref *and* have no uncommitted changes sitting on top of it — a
-    /// branch that's landed but has since gained local edits hasn't fully
-    /// landed those edits too, so it must not read as done.
+    /// The "Merged" badge's gate: merged into base *and* no uncommitted changes on top.
     public static func isEffectivelyMerged(_ status: TaskWorktreeService.BranchSyncStatus) -> Bool {
         status.merged && !status.hasUncommittedChanges
     }
 
-    /// The quiet, non-actionable behind-only caption — kept separate from
-    /// ``hasPendingWork(for:)`` since being behind the base ref isn't "pending
-    /// work" of the task's own.
+    /// Kept separate from ``hasPendingWork(for:)``: being behind base isn't "pending work" of the task's own.
     public static func behindCaption(for status: TaskWorktreeService.BranchSyncStatus) -> String? {
         status.behind > 0 ? "↓\(status.behind)" : nil
     }
 
-    /// VoiceOver label for the pending-work pill, e.g. "3 commits not
-    /// merged, uncommitted changes". `nil` when there's nothing pending.
+    /// E.g. "3 commits not merged, uncommitted changes". `nil` when nothing pending.
     public static func accessibilityLabel(ahead: Int, hasUncommittedChanges: Bool) -> String? {
         guard hasPendingWork(ahead: ahead, hasUncommittedChanges: hasUncommittedChanges) else { return nil }
         var parts: [String] = []
