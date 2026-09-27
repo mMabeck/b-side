@@ -111,10 +111,11 @@ struct ProjectDashboardView: View {
         // never reads as "merged" here either — with a trailing ● marker
         // for those edits, kept text-only since this card has no room for
         // the sidebar's styled pending pill.
-        let syncText: String? = syncStatus.flatMap { status -> String? in
-            let effectivelyMerged = BranchSyncSummary.isEffectivelyMerged(status)
-            let base = BranchSyncSummary.text(ahead: status.ahead, behind: status.behind, merged: effectivelyMerged)
-            guard !effectivelyMerged, status.hasUncommittedChanges else { return base }
+        let syncText: String? = syncStatus.flatMap { sync -> String? in
+            let effectivelyMerged = BranchSyncSummary.isEffectivelyMerged(sync)
+            if effectivelyMerged && status == .inactive { return nil }
+            let base = BranchSyncSummary.text(ahead: sync.ahead, behind: sync.behind, merged: effectivelyMerged)
+            guard !effectivelyMerged, sync.hasUncommittedChanges else { return base }
             let parts: [String?] = [base, "●"]
             return parts.compactMap { $0 }.joined(separator: " ")
         }
