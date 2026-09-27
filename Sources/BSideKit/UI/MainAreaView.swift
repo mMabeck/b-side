@@ -249,13 +249,6 @@ struct MainAreaView: View {
             Task { await Self.resolveTranscriptPath(for: conversation, locations: locations, store: store) }
         }
         if task.awaitingAutoRename {
-            // Fired off the main actor and not awaited: this just gets the
-            // resident title-model server loading in the background so it's
-            // likely already warm by the time `watchForAutoRename` finds the
-            // user's first prompt.
-            Task.detached(priority: .utility) {
-                await TitleModelServer.shared.prewarm()
-            }
             autoRenameWatchers[id] = Task {
                 await Self.watchForAutoRename(taskId: id, project: project, conversation: conversation, locations: locations, store: store)
             }
