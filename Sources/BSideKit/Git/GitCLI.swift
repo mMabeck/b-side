@@ -1,16 +1,12 @@
 import Foundation
 import OSLog
 
-/// Typed async interface over the `git` CLI.
-///
-/// Shells out to `git` rather than linking libgit2 — see the "Git implementation"
-/// section of the native rewrite plan. Every subcommand that has a porcelain or
-/// `-z`-delimited format uses it instead of parsing human-readable output.
+/// Typed async interface over the `git` CLI, shelling out rather than
+/// linking libgit2. Every subcommand with a porcelain or `-z`-delimited
+/// format uses it instead of parsing human-readable output.
 public enum GitCLI {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "git")
 
-    /// A failed `git` invocation: exit status and stderr, plus the arguments that
-    /// produced it, so callers and logs can tell commands apart.
     public struct CommandError: Error, Sendable, CustomStringConvertible {
         public let arguments: [String]
         public let status: Int32
@@ -53,10 +49,7 @@ public enum GitCLI {
 
     // MARK: - Process execution
 
-    /// Runs a git subcommand and returns its raw stdout, throwing `CommandError` on
-    /// a non-zero exit status. Never blocks the calling actor: the process is read
-    /// via readability handlers on a background queue and the continuation resumes
-    /// from the termination handler.
+    /// Never blocks the calling actor: read via readability handlers on a background queue.
     @discardableResult
     static func run(
         _ arguments: [String],
