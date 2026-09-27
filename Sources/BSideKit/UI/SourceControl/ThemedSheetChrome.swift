@@ -1,33 +1,36 @@
 import SwiftUI
 
-/// Small pill button used in sheet headers/footers, themed from the current
-/// palette rather than system `.bordered` styling — shared by `DiffSheet`
-/// and `ChangesOverlaySheet` so their buttons never drift out of sync.
+/// Sheet footer/header action button, on native `.glass`/`.glassProminent`
+/// styles tinted with the brand accent — shared by `DiffSheet`,
+/// `ChangesOverlaySheet`, and `TaskCreationView` so their buttons never drift out of sync.
 struct ThemedSheetButton: View {
     let title: String
     let palette: BSidePalette
     var isPrimary: Bool = false
+    var isEnabled: Bool = true
     var isDefaultAction: Bool = false
     let action: () -> Void
 
     var body: some View {
-        let button = Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isPrimary ? palette.selectionForeground : palette.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isPrimary ? palette.accent : palette.elevatedSurfaceBackground)
-                )
+        Group {
+            if isDefaultAction {
+                buttonContent.keyboardShortcut(.defaultAction)
+            } else {
+                buttonContent
+            }
         }
-        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+    }
 
-        if isDefaultAction {
-            button.keyboardShortcut(.defaultAction)
+    @ViewBuilder
+    private var buttonContent: some View {
+        if isPrimary {
+            Button(title, action: action)
+                .buttonStyle(.glassProminent)
+                .tint(palette.accent)
         } else {
-            button
+            Button(title, action: action)
+                .buttonStyle(.glass)
         }
     }
 }

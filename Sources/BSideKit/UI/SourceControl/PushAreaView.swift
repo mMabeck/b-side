@@ -23,7 +23,8 @@ struct PushAreaView: View {
                 Button(action: onPush) {
                     Label(pushTitle, systemImage: "arrow.up.circle")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
+                .tint(palette.accent)
                 .disabled(!canPush)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .accessibilityLabel(aheadCount.map { "Push, \($0) commit\($0 == 1 ? "" : "s") ahead" } ?? "Push")

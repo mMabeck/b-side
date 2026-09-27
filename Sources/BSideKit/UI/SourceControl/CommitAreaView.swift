@@ -43,7 +43,8 @@ struct CommitAreaView: View {
     @ViewBuilder
     private var commitButton: some View {
         let button = Button("Commit", action: onCommit)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glassProminent)
+            .tint(palette.accent)
             .disabled(!canCommit)
             .frame(maxWidth: .infinity, alignment: .trailing)
 

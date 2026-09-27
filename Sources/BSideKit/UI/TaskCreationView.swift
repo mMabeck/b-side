@@ -378,66 +378,26 @@ struct TaskCreationView: View {
     }
 
     private var modeToggle: some View {
-        HStack(spacing: 8) {
+        Picker("Start from", selection: $mode) {
             ForEach(Mode.allCases) { candidate in
-                modeToggleButton(candidate)
+                Text(candidate.rawValue).tag(candidate)
             }
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 
     private var worktreeToggleRow: some View {
         VStack(alignment: .leading, spacing: 6) {
-            themedToggle(isOn: $useWorktree)
+            Toggle("Use worktree", isOn: $useWorktree)
+                .toggleStyle(.switch)
+                .labelsHidden()
             if !useWorktree {
                 Text("Runs in the project folder on its current branch.")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.palette.textSecondary)
             }
         }
-    }
-
-    private func themedToggle(isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
-        } label: {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isOn.wrappedValue ? theme.palette.accent : theme.palette.elevatedSurfaceBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(theme.palette.separator, lineWidth: isOn.wrappedValue ? 0 : 1)
-                )
-                .frame(width: 34, height: 20)
-                .overlay(
-                    Circle()
-                        .fill(theme.palette.selectionForeground)
-                        .frame(width: 16, height: 16)
-                        .padding(2)
-                        .frame(maxWidth: .infinity, alignment: isOn.wrappedValue ? .trailing : .leading)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func modeToggleButton(_ candidate: Mode) -> some View {
-        let isSelected = mode == candidate
-        return Button {
-            mode = candidate
-        } label: {
-            Text(candidate.rawValue)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isSelected ? theme.palette.selectionForeground : theme.palette.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isSelected ? theme.palette.accent : theme.palette.elevatedSurfaceBackground)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(theme.palette.separator, lineWidth: isSelected ? 0 : 1)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private var branchPicker: some View {
@@ -568,47 +528,26 @@ struct TaskCreationView: View {
             Spacer()
 
             if isCreating || isFinished || errorMessage != nil {
-                themedButton(isFinished || errorMessage != nil ? "Done" : "Cancel", isPrimary: true) {
-                    dismiss()
-                }
+                ThemedSheetButton(
+                    title: isFinished || errorMessage != nil ? "Done" : "Cancel",
+                    palette: theme.palette,
+                    isPrimary: true,
+                    action: { dismiss() }
+                )
             } else {
-                themedButton("Cancel", isPrimary: false) { dismiss() }
-                themedButton("Create", isPrimary: true, isEnabled: canCreate, isDefaultAction: true) { create() }
+                ThemedSheetButton(title: "Cancel", palette: theme.palette, action: { dismiss() })
+                ThemedSheetButton(
+                    title: "Create",
+                    palette: theme.palette,
+                    isPrimary: true,
+                    isEnabled: canCreate,
+                    isDefaultAction: true,
+                    action: { create() }
+                )
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-    }
-
-    private func themedButton(
-        _ title: String,
-        isPrimary: Bool,
-        isEnabled: Bool = true,
-        isDefaultAction: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        let button = Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isPrimary ? theme.palette.selectionForeground : theme.palette.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isPrimary ? theme.palette.accent : theme.palette.elevatedSurfaceBackground)
-                )
-                .opacity(isEnabled ? 1 : 0.5)
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-
-        return Group {
-            if isDefaultAction {
-                button.keyboardShortcut(.defaultAction)
-            } else {
-                button
-            }
-        }
     }
 
     // MARK: - Create
