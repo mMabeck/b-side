@@ -1,31 +1,22 @@
 import Foundation
 
-/// `UserDefaults`/`@AppStorage` keys backing the Appearance tab's theme
-/// override. Grouped here so ``SettingsView`` and ``ThemeOverride`` agree on
-/// the exact strings without importing one another's private state.
+/// Grouped here so ``SettingsView`` and ``ThemeOverride`` agree on the exact strings.
 enum AppearanceSettingsKeys {
     static let mode = "settings.appearance.mode"
     static let singleThemeName = "settings.appearance.singleThemeName"
 }
 
-/// The raw `mode` value written by the retired Match System mode. B-Side no
-/// longer offers it — the app's appearance is derived from the chosen theme
-/// alone, never the macOS system setting — but a prior install may still
-/// have it stored; see ``ThemeOverride/directive(rawMode:singleThemeName:legacyDarkThemeName:)``.
+/// The retired Match System mode's raw value; B-Side no longer offers it,
+/// but a prior install may still have it stored.
 private let legacyMatchSystemRawValue = "matchSystem"
 
-/// The `UserDefaults` key Match System used to store its dark-theme slot,
-/// kept only so the migration above can still read a prior install's value.
+/// Kept only so the migration below can read a prior install's dark-theme slot.
 private let legacyDarkThemeNameKey = "settings.appearance.darkThemeName"
 
-/// How the Appearance tab picks a theme, mirrored 1:1 by
-/// ``AppearanceSettingsKeys/mode``'s stored raw value.
 enum ThemeOverrideMode: String, CaseIterable {
-    /// The default: behaviour is unchanged from before this feature existed
-    /// — whatever `theme = ...` directive (if any) is in the user's own
-    /// `~/.config/ghostty/config` wins.
+    /// Whatever `theme = ...` directive is in `~/.config/ghostty/config` wins.
     case useConfig
-    /// One catalog theme name, used regardless of the user's own config.
+    /// One catalog theme name, regardless of the user's own config.
     case single
 
     var label: String {
@@ -36,14 +27,9 @@ enum ThemeOverrideMode: String, CaseIterable {
     }
 }
 
-/// Turns the Appearance tab's stored preference into an optional
-/// ``GhosttyBridge/ThemeDirective``, the same shape `GhosttyBridge` already
-/// extracts from a config file's `theme = ...` line — so it can be fed
-/// straight into ``GhosttyBridge/resolveUserConfig(override:)`` as a
-/// stand-in for (and override of) whatever the config file itself says.
-/// Kept as a pure function of its inputs, not a `UserDefaults` reader, so it
-/// is trivially testable; ``currentDirective(defaults:)`` below is the thin
-/// `UserDefaults`-reading wrapper actual callers use.
+/// Turns the Appearance tab's preference into a ``GhosttyBridge/ThemeDirective``
+/// so it can override ``GhosttyBridge/resolveUserConfig(override:)``. Kept
+/// pure, not a `UserDefaults` reader, so it's trivially testable; ``currentDirective(defaults:)`` is the thin wrapper callers use.
 enum ThemeOverride {
     static func directive(
         mode: ThemeOverrideMode,
@@ -58,14 +44,8 @@ enum ThemeOverride {
         }
     }
 
-    /// Resolves the raw `UserDefaults` values into a directive, migrating
-    /// the retired Match System mode (``legacyMatchSystemRawValue``) to
-    /// Single Theme on the fly: a prior install's stored dark-theme slot
-    /// becomes the single theme name, or the mode falls back to Use Ghostty
-    /// Config if that slot was itself empty. Kept as a pure function of its
-    /// inputs, not a `UserDefaults` reader, so the migration is trivially
-    /// testable; ``currentDirective(defaults:)`` below is the thin
-    /// `UserDefaults`-reading wrapper actual callers use.
+    /// Migrates the retired Match System mode to Single Theme on the fly: a
+    /// prior install's dark-theme slot becomes the single theme name, or falls back to Use Ghostty Config if empty.
     static func directive(
         rawMode: String?,
         singleThemeName: String,
@@ -78,9 +58,7 @@ enum ThemeOverride {
         return directive(mode: mode, singleThemeName: singleThemeName)
     }
 
-    /// Reads the Appearance tab's current preference straight from
-    /// `defaults` — the same store `@AppStorage` writes to (`.standard` by
-    /// default), so this reflects whatever the Settings window last set.
+    /// `defaults` is the same store `@AppStorage` writes to.
     static func currentDirective(defaults: UserDefaults = .standard) -> GhosttyBridge.ThemeDirective? {
         directive(
             rawMode: defaults.string(forKey: AppearanceSettingsKeys.mode),
