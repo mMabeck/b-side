@@ -1,13 +1,11 @@
 import SwiftUI
 
 /// One row in the Source Control sidebar's file list: a kind badge letter, the
-/// file name, its dimmed containing directory, and either +N/-N line counts
-/// or (on hover) stage/unstage/discard buttons in their place.
+/// file name, and either +N/-N line counts or (on hover) stage/unstage/discard
+/// buttons in their place.
 struct SourceControlRowView: View {
     let row: SourceControlStore.Row
     let palette: BSidePalette
-    /// Hidden inside a folder tree row, where the folder path already conveys it.
-    var showsDirectory: Bool = true
     var onStage: (() -> Void)?
     var onUnstage: (() -> Void)?
     var onDiscard: (() -> Void)?
@@ -22,20 +20,11 @@ struct SourceControlRowView: View {
                 .frame(width: 14, alignment: .center)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(row.displayName)
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if showsDirectory, !row.directory.isEmpty {
-                    Text(row.directory)
-                        .font(.system(size: 10))
-                        .foregroundStyle(palette.textDisabled)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-            }
+            Text(row.displayName)
+                .font(.system(size: 12))
+                .foregroundStyle(palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
 
             Spacer(minLength: 4)
 
