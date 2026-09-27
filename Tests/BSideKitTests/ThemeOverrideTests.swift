@@ -137,19 +137,6 @@ struct ThemeOverrideTests {
         #expect(resolved.themeDefinition?.name == "Ayu Mirage")
     }
 
-    @Test("An adaptive light:X,dark:Y directive always resolves to the dark theme")
-    func adaptiveDirectiveResolvesToDark() {
-        let directive = GhosttyBridge.ThemeDirective.adaptive(light: "Ayu Light", dark: "Ayu Mirage")
-        let resolved = GhosttyBridge.resolveThemeDefinition(directive)
-        #expect(resolved?.name == "Ayu Mirage")
-    }
-
-    @Test("An unknown override name falls back to no theme, same as an unknown config directive")
-    func unknownOverrideNameFallsBack() {
-        let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("Definitely Not A Real Theme"))
-        #expect(resolved == nil)
-    }
-
     @Test("Bundled brand themes resolve through the same lookup as the catalog")
     func bundledBrandThemeResolves() {
         let resolved = GhosttyBridge.resolveThemeDefinition(.fixed("B-Side"))

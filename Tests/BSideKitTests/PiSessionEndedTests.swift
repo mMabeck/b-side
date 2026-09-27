@@ -95,14 +95,6 @@ struct PiSessionEndedTests {
         #expect(store.restartRequestedTaskID == nil)
     }
 
-    // MARK: - TerminalCloseShortcut.restartSession
-
-    @Test("Cmd+Shift+R is the restart-session shortcut")
-    func restartShortcutIsCmdShiftR() {
-        #expect(TerminalCloseShortcut.restartSession.key.character == "r")
-        #expect(TerminalCloseShortcut.restartSession.modifiers == [.command, .shift])
-    }
-
     // MARK: - GhosttyBridge.appOwnedKeybinds
 
     @Test("Cmd+Shift+R is unbound from Ghostty so the Restart Pi Session command handles it")

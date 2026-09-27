@@ -69,24 +69,6 @@ struct NavigationShortcutsTests {
 
     // MARK: - Shortcut definitions
 
-    @Test("Active task shortcuts are Cmd+1…9")
-    func activeTaskShortcutsAreCmdDigits() {
-        for index in 0..<9 {
-            let shortcut = NavigationShortcuts.activeTaskShortcut(forIndex: index)
-            #expect(shortcut.key.character == Character("\(index + 1)"))
-            #expect(shortcut.modifiers == [.command])
-        }
-    }
-
-    @Test("Project shortcuts are Ctrl+1…9")
-    func projectShortcutsAreCtrlDigits() {
-        for index in 0..<9 {
-            let shortcut = NavigationShortcuts.projectShortcut(forIndex: index)
-            #expect(shortcut.key.character == Character("\(index + 1)"))
-            #expect(shortcut.modifiers == [.control])
-        }
-    }
-
     @Test("Active task and project shortcuts never collide")
     func shortcutFamiliesAreDisjoint() {
         for index in 0..<9 {

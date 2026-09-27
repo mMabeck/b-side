@@ -31,18 +31,8 @@ struct ProjectsStoreOrderingTests {
         return (store, projectA, projectB, projectC)
     }
 
-    @Test("moveProjects updates in-memory order immediately")
-    func moveProjectsUpdatesInMemoryOrderImmediately() async throws {
-        let (store, projectA, projectB, projectC) = try await makeStore()
-        #expect(store.projects.map(\.id) == [projectA.id, projectB.id, projectC.id])
-
-        try await store.moveProjects(fromOffsets: IndexSet(integer: 0), toOffset: 3)
-
-        #expect(store.projects.map(\.id) == [projectB.id, projectC.id, projectA.id])
-    }
-
-    @Test("moveProjects persists sortOrder to the database, not just in-memory state")
-    func moveProjectsPersistsSortOrder() async throws {
+    @Test("moveProjects updates in-memory order immediately and persists sortOrder to the database")
+    func moveProjectsUpdatesInMemoryOrderAndPersists() async throws {
         let database = try AppDatabase.openInMemory()
         let store = ProjectsStore(database: database)
         store.playAlertSound = { _ in }
@@ -58,16 +48,16 @@ struct ProjectsStoreOrderingTests {
         }
         store.start()
         try await waitUntil { store.projects.count == 3 }
+        #expect(store.projects.map(\.id) == [projectA.id, projectB.id, projectC.id])
 
-        try await store.moveProjects(fromOffsets: IndexSet(integer: 2), toOffset: 0)
-        try await waitUntil {
-            store.projects.map(\.id) == [projectC.id, projectA.id, projectB.id]
-        }
+        try await store.moveProjects(fromOffsets: IndexSet(integer: 0), toOffset: 3)
+
+        #expect(store.projects.map(\.id) == [projectB.id, projectC.id, projectA.id])
 
         let persisted = try await database.dbQueue.read { db in
             try Project.order(Project.Columns.sortOrder, Project.Columns.id).fetchAll(db)
         }
-        #expect(persisted.map(\.id) == [projectC.id, projectA.id, projectB.id])
+        #expect(persisted.map(\.id) == [projectB.id, projectC.id, projectA.id])
     }
 
     @Test("moveProject(direction: .up/.down) swaps with the adjacent neighbour")

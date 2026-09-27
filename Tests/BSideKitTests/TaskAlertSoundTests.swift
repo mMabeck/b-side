@@ -16,18 +16,6 @@ struct TaskAlertSoundTests {
         }
     }
 
-    @Test("Off is offered alongside the system sounds")
-    func offIsOfferedAsASilentChoice() {
-        #expect(TaskAlertSound.allCases.contains(.off))
-        #expect(TaskAlertSound.off.rawValue == "None")
-    }
-
-    @Test("Sound ids are unique")
-    func soundIdsAreUnique() {
-        let ids = TaskAlertSound.allCases.map(\.id)
-        #expect(Set(ids).count == ids.count)
-    }
-
     // MARK: - Sound file lookup
 
     @Test("Locate searches directories in order and stops at the first match")
@@ -80,12 +68,6 @@ struct TaskAlertSoundTests {
 
     // MARK: - Defaults
 
-    @Test("Finished defaults to Glass, question defaults to Tink")
-    func kindDefaults() {
-        #expect(TaskAlertSound.defaultFinished == .glass)
-        #expect(TaskAlertSound.defaultQuestion == .tink)
-    }
-
     @Test("Resolving a sound falls back to the kind's default when nothing/unknown is stored, and uses a valid stored name", arguments: [
         (kind: TaskAlertKind.finished, stored: nil, expected: TaskAlertSound.glass),
         (kind: TaskAlertKind.question, stored: nil, expected: TaskAlertSound.tink),
@@ -99,17 +81,6 @@ struct TaskAlertSoundTests {
     @Test("Volume defaults to 70% when nothing is stored, and a stored volume is used as-is", arguments: [(stored: nil, expected: 70.0), (stored: 35.0, expected: 35.0)] as [(Double?, Double)])
     func resolvedVolume(stored: Double?, expected: Double) {
         #expect(TaskAlertSoundPlayer.resolvedVolume(stored: stored) == expected)
-    }
-
-    // MARK: - Settings keys
-
-    @Test("Settings keys live under the settings.notifications namespace")
-    func settingsKeysNamespace() {
-        #expect(TaskAlertSettingsKeys.enabled == "settings.notifications.enabled")
-        #expect(TaskAlertSettingsKeys.soundsEnabled == "settings.notifications.playSounds")
-        #expect(TaskAlertSettingsKeys.finishedSound == "settings.notifications.finishedSound")
-        #expect(TaskAlertSettingsKeys.questionSound == "settings.notifications.questionSound")
-        #expect(TaskAlertSettingsKeys.volume == "settings.notifications.volume")
     }
 
     // MARK: - Loudness

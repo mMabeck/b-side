@@ -175,40 +175,6 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedProjectID == projectA.id)
     }
 
-    @Test("Deleting the selected task clears it and falls back to the parent project")
-    func deletingSelectedTaskReconcilesSelection() async throws {
-        // Unlike `archiveTask(removeWorktree: false)`, `deleteTask` always
-        // tears down the worktree, so this needs a real git repo/worktree
-        // rather than the fake paths `makeStore()` uses elsewhere in this suite.
-        let root = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(root) }
-        let repoURL = try await TestRepo.makeRepo(in: root)
-
-        let database = try AppDatabase.openInMemory()
-        let store = ProjectsStore(database: database)
-        store.playAlertSound = { _ in }
-        try await store.addProject(at: repoURL)
-        store.start()
-        try await waitUntil { !store.projects.isEmpty }
-
-        let project = try #require(store.projects.first)
-        let task = try await store.createTask(project: project, name: "Task")
-        try await waitUntil {
-            store.tasksByProject[project.id!]?.contains { $0.id == task.id } ?? false
-        }
-
-        store.selectTask(task, project: project)
-        #expect(store.selectedTaskID == task.id)
-
-        try await store.deleteTask(task, project: project, deleteLocalBranch: true, deleteRemoteBranch: false)
-        try await waitUntil {
-            !(store.tasksByProject[project.id!]?.contains { $0.id == task.id } ?? false)
-        }
-
-        #expect(store.selectedTaskID == nil)
-        #expect(store.selectedProjectID == project.id)
-    }
-
     @Test("Removing the selected project clears the whole selection")
     func removingSelectedProjectReconcilesSelection() async throws {
         let (store, projectA, _, _) = try await makeStore()

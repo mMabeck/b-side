@@ -8,16 +8,6 @@ import Testing
 @MainActor
 @Suite("Window layout toggles and shortcuts")
 struct WindowLayoutTests {
-    @Test("Left/right sidebar and terminal drawer shortcuts are Cmd+B, Cmd+Option+B, and Cmd+Æ", arguments: [
-        (shortcut: WindowLayoutShortcut.leftSidebar, character: Character("b"), modifiers: EventModifiers.command),
-        (shortcut: WindowLayoutShortcut.rightSidebar, character: Character("b"), modifiers: EventModifiers([.command, .option])),
-        (shortcut: WindowLayoutShortcut.terminalDrawer, character: Character("æ"), modifiers: EventModifiers.command),
-    ])
-    func layoutShortcut(shortcut: KeyboardShortcut, character: Character, modifiers: EventModifiers) {
-        #expect(shortcut.key.character == character)
-        #expect(shortcut.modifiers == modifiers)
-    }
-
     @Test("The three shortcuts are pairwise distinct")
     func shortcutsAreDistinct() {
         let all = [

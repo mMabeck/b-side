@@ -40,14 +40,10 @@ struct ProjectsStoreActivityOrderingTests {
         return (store, project, taskA, taskB)
     }
 
-    @Test("movingToFront moves a tracked id to the front, leaving others' order")
-    func movingToFrontMovesTrackedID() {
+    @Test("movingToFront moves a tracked id to the front, leaving others' order, and is a no-op for an untracked id")
+    func movingToFront() {
         #expect(ProjectsStore.movingToFront(2, in: [1, 2, 3]) == [2, 1, 3])
         #expect(ProjectsStore.movingToFront(3, in: [1, 2, 3]) == [3, 1, 2])
-    }
-
-    @Test("movingToFront is a no-op for an id that isn't present")
-    func movingToFrontNoOpForUntrackedID() {
         #expect(ProjectsStore.movingToFront(9, in: [1, 2, 3]) == [1, 2, 3])
         #expect(ProjectsStore.movingToFront(9, in: []) == [])
     }
