@@ -60,13 +60,26 @@ swift test --filter GitCLITests
   offscreen `NSWindow`.
 - Use a per-test `UserDefaults(suiteName:)`; leaked `settings.appearance.*`
   keys contaminate snapshots. Inject sound playback as a no-op.
+- Keep the suite lean (cut from 535 to 270 tests in Sept 2026; don't regrow
+  it). Add a test only for a distinct behaviour or a real regression, not for
+  each edge case of a change. Fold same-shape cases into one
+  `@Test(arguments:)`. Don't test constants, shortcuts, default values,
+  rawValues, or plain round-trips. Extend an existing snapshot rather than
+  adding one (keep 2–3 total), and no wall-clock timing assertions.
+  Delete throwaway visual-inspection tests before committing.
 
 ## Conventions
 
 - Conventional Commits with a scope, e.g. `fix(subagents): ...`.
+- Comments are rare and short: only a non-obvious why, an AppKit/libghostty
+  quirk, or a concurrency/ordering invariant. At most 1–3 lines, and
+  none that restate the name or signature. No `- Parameter`/`- Returns:`
+  blocks on internal helpers, no history ("used to", "no longer"), and no
+  references to tests, reviews, or tasks. A test's `@Test("...")` string is
+  its documentation; don't repeat it in a comment.
 - Work on a feature branch; merge current `main` into it, verify there, then
-  fast-forward `main`. There is no remote; diff against local `main`. Don't
-  push or publish without explicit permission.
+  fast-forward `main`. Diff against local `main`. Don't push to `origin`
+  or publish without explicit permission.
 - Native-first UI: standard controls and system text, keep VoiceOver and
   reduced-motion support. Justify any custom replacement of a system control.
 - Maintained, common dependencies are fine; minimising dependency count is not
