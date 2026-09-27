@@ -201,6 +201,10 @@ private struct KeybindingsSettingsTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            TextField("Filter Shortcuts", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(12)
+
             List {
                 ForEach(filteredSections) { section in
                     Section(section.title) {
@@ -216,7 +220,6 @@ private struct KeybindingsSettingsTab: View {
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
-            .searchable(text: $query, prompt: "Filter Shortcuts")
 
             Text("Ghostty's own terminal keybinds apply otherwise.")
                 .font(.caption)
@@ -224,7 +227,7 @@ private struct KeybindingsSettingsTab: View {
                 .padding(12)
         }
         .background(theme.palette.windowBackground)
-        .frame(width: 480, height: 480, alignment: .top)
+        .frame(width: 480, height: 420, alignment: .top)
     }
 }
 
