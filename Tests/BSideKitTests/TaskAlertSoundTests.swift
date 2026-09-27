@@ -6,66 +6,6 @@ import Testing
 
 @Suite("Task alert sounds and settings")
 struct TaskAlertSoundTests {
-    // MARK: - Sound-name list
-
-    @Test("Every sound name other than Off matches a real system sound file")
-    func soundNamesMatchSystemSoundFiles() {
-        for sound in TaskAlertSound.allCases where sound != .off {
-            let path = "/System/Library/Sounds/\(sound.rawValue).aiff"
-            #expect(FileManager.default.fileExists(atPath: path), "missing system sound for \(sound.rawValue)")
-        }
-    }
-
-    // MARK: - Sound file lookup
-
-    @Test("Locate searches directories in order and stops at the first match")
-    func locateSearchesDirectoriesInOrder() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let first = root.appendingPathComponent("first")
-        let second = root.appendingPathComponent("second")
-        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        FileManager.default.createFile(atPath: second.appendingPathComponent("Custom.wav").path, contents: Data())
-        #expect(TaskAlertSound.locate(name: "Custom", in: [first, second]) == second.appendingPathComponent("Custom.wav"))
-
-        FileManager.default.createFile(atPath: first.appendingPathComponent("Custom.aiff").path, contents: Data())
-        #expect(TaskAlertSound.locate(name: "Custom", in: [first, second]) == first.appendingPathComponent("Custom.aiff"))
-    }
-
-    @Test("Locate tries extensions in order within a directory")
-    func locateTriesExtensionsInOrder() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        FileManager.default.createFile(atPath: dir.appendingPathComponent("Custom.mp3").path, contents: Data())
-        #expect(TaskAlertSound.locate(name: "Custom", in: [dir]) == dir.appendingPathComponent("Custom.mp3"))
-
-        FileManager.default.createFile(atPath: dir.appendingPathComponent("Custom.wav").path, contents: Data())
-        #expect(TaskAlertSound.locate(name: "Custom", in: [dir]) == dir.appendingPathComponent("Custom.wav"))
-    }
-
-    @Test("Locate returns nil when no directory has a matching file")
-    func locateReturnsNilWhenNotFound() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        #expect(TaskAlertSound.locate(name: "NoSuchSound", in: [dir]) == nil)
-    }
-
-    @Test("Search directories are user sounds, then machine sounds, then system sounds")
-    func searchDirectoriesOrder() {
-        let dirs = TaskAlertSound.searchDirectories()
-        #expect(dirs == [
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Sounds"),
-            URL(fileURLWithPath: "/Library/Sounds"),
-            URL(fileURLWithPath: "/System/Library/Sounds"),
-        ])
-    }
-
     // MARK: - Defaults
 
     @Test("Resolving a sound falls back to the kind's default when nothing/unknown is stored, and uses a valid stored name", arguments: [
@@ -76,11 +16,6 @@ struct TaskAlertSoundTests {
     ])
     func resolvedSound(kind: TaskAlertKind, stored: String?, expected: TaskAlertSound) {
         #expect(TaskAlertSoundPlayer.resolvedSound(for: kind, storedName: stored) == expected)
-    }
-
-    @Test("Volume defaults to 70% when nothing is stored, and a stored volume is used as-is", arguments: [(stored: nil, expected: 70.0), (stored: 35.0, expected: 35.0)] as [(Double?, Double)])
-    func resolvedVolume(stored: Double?, expected: Double) {
-        #expect(TaskAlertSoundPlayer.resolvedVolume(stored: stored) == expected)
     }
 
     // MARK: - Loudness

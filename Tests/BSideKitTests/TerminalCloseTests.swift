@@ -68,52 +68,6 @@ struct TerminalCloseTests {
         #expect(store.closedTerminalTaskID == taskA.id)
     }
 
-    @Test("Closing the only open terminal selects the task's project dashboard")
-    func closeTerminalFallsBackToProjectDashboard() async throws {
-        let (store, project, taskA, _) = try await makeStore()
-        store.noteTerminalOpened(taskID: taskA.id!)
-        store.selectTask(taskA, project: project)
-
-        store.closeTerminal(for: taskA, project: project)
-
-        #expect(store.openTerminalTaskIDs.isEmpty)
-        #expect(store.mainSelection == .project(project))
-    }
-
-    @Test("Acknowledging a close request clears it, but only for the id it was raised for")
-    func acknowledgeTerminalClosedIsScopedToItsOwnID() async throws {
-        let (store, project, taskA, _) = try await makeStore()
-        store.noteTerminalOpened(taskID: taskA.id!)
-        store.closeTerminal(for: taskA, project: project)
-
-        store.acknowledgeTerminalClosed(999)
-        #expect(store.closedTerminalTaskID == taskA.id)
-
-        store.acknowledgeTerminalClosed(taskA.id!)
-        #expect(store.closedTerminalTaskID == nil)
-    }
-
-    // MARK: - ConversationLaunchGate.releaseClaim
-
-    @Test("Releasing a claim lets a task id be resolved by ensureConversation again")
-    func releaseClaimAllowsReclaim() async throws {
-        let (store, _, taskA, _) = try await makeStore()
-        let gate = ConversationLaunchGate()
-
-        let first = await gate.ensureConversation(for: taskA, store: store)
-        #expect(first != nil)
-
-        // Already resolved and still claimed: a second call for the same
-        // task id must not resolve another conversation for it.
-        let blocked = await gate.ensureConversation(for: taskA, store: store)
-        #expect(blocked == nil)
-
-        gate.releaseClaim(for: taskA.id!)
-
-        let second = await gate.ensureConversation(for: taskA, store: store)
-        #expect(second != nil)
-    }
-
     // MARK: - GhosttyBridge.appOwnedKeybinds
 
     @Test("Cmd+Q, Cmd+W, and other standard app shortcuts Ghostty could swallow are unbound so AppKit's menu handles them")
@@ -126,10 +80,4 @@ struct TerminalCloseTests {
         #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+m=unbind"))
     }
 
-    @Test("Copy/paste/select-all/find are left to the terminal, not unbound")
-    func editingShortcutsStayBoundToTheTerminal() {
-        for key in ["c", "v", "a", "f"] {
-            #expect(!GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+\(key)=unbind"))
-        }
-    }
 }

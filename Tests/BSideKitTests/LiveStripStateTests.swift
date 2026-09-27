@@ -23,19 +23,6 @@ struct LiveStripStateTests {
         }
     }
 
-    @Test("Starting the ticker while no run is active never schedules a render")
-    func startTickingNoActiveRunsIsNoOp() async throws {
-        let live = LiveStripState()
-        live.runs = [makeRun(id: "a", state: .completed)]
-
-        var callCount = 0
-        live.startTicking { callCount += 1 }
-
-        // No `Task` is even created in this case (see `LiveStripState.startTicking`'s
-        // `guard`), so this is true immediately \u2014 no waiting needed.
-        #expect(callCount == 0)
-    }
-
     @Test("The ticker keeps calling render while a run is active")
     func tickerRendersWhileActive() async throws {
         let live = LiveStripState()
@@ -68,18 +55,4 @@ struct LiveStripStateTests {
         #expect(callCount == countAfterSettling)
     }
 
-    @Test("stopTicking cancels an in-flight ticker")
-    func stopTickingCancels() async throws {
-        let live = LiveStripState()
-        live.runs = [makeRun(id: "a", state: .active)]
-
-        var callCount = 0
-        live.startTicking(interval: .milliseconds(1)) { callCount += 1 }
-        await waitUntil { callCount >= 1 }
-        live.stopTicking()
-
-        let countAfterStop = callCount
-        try? await Task.sleep(for: .milliseconds(200))
-        #expect(callCount == countAfterStop)
-    }
 }

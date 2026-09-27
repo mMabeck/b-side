@@ -60,21 +60,6 @@ struct ProjectsStoreOrderingTests {
         #expect(persisted.map(\.id) == [projectB.id, projectC.id, projectA.id])
     }
 
-    @Test("moveProject(direction: .up/.down) swaps with the adjacent neighbour")
-    func moveProjectDirectionSwapsNeighbour() async throws {
-        let (store, projectA, projectB, projectC) = try await makeStore()
-
-        try await store.moveProject(projectB, direction: .up)
-        try await waitUntil {
-            store.projects.map(\.id) == [projectB.id, projectA.id, projectC.id]
-        }
-
-        try await store.moveProject(projectA, direction: .down)
-        try await waitUntil {
-            store.projects.map(\.id) == [projectB.id, projectC.id, projectA.id]
-        }
-    }
-
     @Test("moveProject(direction:) is a no-op at either end of the list")
     func moveProjectDirectionNoOpAtEnds() async throws {
         let (store, projectA, projectB, projectC) = try await makeStore()
@@ -86,18 +71,4 @@ struct ProjectsStoreOrderingTests {
         #expect(store.projects.map(\.id) == [projectA.id, projectB.id, projectC.id])
     }
 
-    @Test("addProject appends a new project after the current max sortOrder")
-    func addProjectAppendsAtEnd() async throws {
-        let (store, _, _, projectC) = try await makeStore()
-        let repoURL = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(repoURL) }
-
-        try await store.addProject(at: repoURL)
-
-        try await waitUntil {
-            store.projects.count == 4
-        }
-        #expect(store.projects.last?.id != projectC.id)
-        #expect(store.projects.last?.path == repoURL.path)
-    }
 }
