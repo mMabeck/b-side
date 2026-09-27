@@ -161,7 +161,6 @@ struct ChangesOverlaySheet: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .background(theme.palette.surfaceBackground)
         .controlSize(.small)
     }
 

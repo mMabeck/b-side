@@ -6,16 +6,17 @@ import Testing
 
 @testable import BSideKit
 
-/// Renders the *whole* app window offscreen — title bar, both sidebars, main
-/// area — and samples real pixel values to prove the resolved Ghostty theme
-/// reaches every region, not just the terminal grid. Uses a real, never-
-/// key, never-onscreen `NSWindow` driven only by programmatic APIs (see
-/// `SubagentCardSnapshotTests`/`TerminalSurfaceHostTests` for the same
-/// pattern): no synthetic clicks or keystrokes are used anywhere here.
+/// Renders the app window offscreen and samples real pixel values to prove
+/// the resolved Ghostty theme reaches the main area. The title bar and both
+/// sidebars are Liquid Glass system chrome (`ThemedWindowModifier`) and
+/// deliberately sample the desktop behind the window, so only the opaque
+/// main content area is checked here. Uses a real, never-key, never-onscreen
+/// `NSWindow` driven only by programmatic APIs (see `TerminalSurfaceHostTests`
+/// for the same pattern): no synthetic clicks or keystrokes are used anywhere here.
 @MainActor
 struct ContentViewThemeSnapshotTests {
-    @Test("The whole window — title bar, both sidebars, main area — picks up the resolved theme")
-    func wholeWindowMatchesResolvedTheme() async throws {
+    @Test("The main area picks up the resolved theme")
+    func mainAreaMatchesResolvedTheme() async throws {
         let configHome = FileManager.default.temporaryDirectory
             .appendingPathComponent("bside-window-theme-test-\(UUID().uuidString)")
         let ghosttyConfigDir = configHome.appendingPathComponent("ghostty")
@@ -71,26 +72,18 @@ struct ContentViewThemeSnapshotTests {
         frameView.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
-        // Captured via `CGWindowListCreateImage`, not a manual `NSView` draw
-        // pass: a manual `bitmapImageRepForCachingDisplay` +
-        // `displayIgnoringOpacity` capture only walks the `drawRect`-based
-        // rendering path and silently produces a blank image for content
-        // whose real painting happens only through WindowServer's
-        // compositor (confirmed separately for `List`'s per-row
-        // `NSHostingView`s in `SidebarSnapshotTests`). Asking WindowServer
-        // directly for this window's own composited pixels is the only
-        // capture path that reflects what real rendering actually produced.
-        // The window is still positioned off any physical display and never
-        // key/frontmost, so nothing is shown to the user; no layers are
-        // hidden before sampling.
-        let windowID = CGWindowID(window.windowNumber)
-        guard let cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.bestResolution, .boundsIgnoreFraming]) else {
-            Issue.record("Failed to capture window image")
+        // Captured via a manual `NSView` draw pass, not WindowServer: the
+        // main content area is a plain SwiftUI-hosted `NSHostingView`
+        // (unlike a `List`'s per-row hosting views, which only ever paint
+        // through WindowServer's real compositor), so `cacheDisplay` faithfully
+        // reproduces it without needing Screen Recording permission for a headless test run.
+        guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) else {
+            Issue.record("Failed to create bitmap for content view")
             window.orderOut(nil)
             return
         }
+        contentView.cacheDisplay(in: contentView.bounds, to: bitmap)
         window.orderOut(nil)
-        let bitmap = NSBitmapImageRep(cgImage: cgImage)
 
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
             Issue.record("Failed to encode PNG")
@@ -100,8 +93,8 @@ struct ContentViewThemeSnapshotTests {
 
         // Map AppKit points (origin bottom-left) to bitmap pixels (origin
         // top-left), accounting for the backing scale factor.
-        let scaleX = CGFloat(bitmap.pixelsWide) / frameView.bounds.width
-        let scaleY = CGFloat(bitmap.pixelsHigh) / frameView.bounds.height
+        let scaleX = CGFloat(bitmap.pixelsWide) / contentView.bounds.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / contentView.bounds.height
         func sample(atPointX x: CGFloat, appKitY y: CGFloat) -> NSColor? {
             let pixelX = Int(x * scaleX)
             let pixelY = bitmap.pixelsHigh - Int(y * scaleY) - 1
@@ -109,40 +102,24 @@ struct ContentViewThemeSnapshotTests {
             return bitmap.colorAt(x: pixelX, y: pixelY)
         }
 
-        let contentFrame = contentView.frame // in frameView's coordinate space
-        let titleBarSampleY = frameView.bounds.height - 10 // a few points below the very top edge
-        let titleBarSampleX = frameView.bounds.width * 0.5 // clear of the traffic lights
-
-        let leftSidebarSampleX = contentFrame.minX + 40
+        let contentFrame = contentView.bounds
         let mainAreaSampleX = contentFrame.minX + contentFrame.width * 0.45
-        let rightSidebarSampleX = contentFrame.maxX - 40
         let midY = contentFrame.midY
 
-        let titleBarColor = try #require(sample(atPointX: titleBarSampleX, appKitY: titleBarSampleY))
-        let leftSidebarColor = try #require(sample(atPointX: leftSidebarSampleX, appKitY: midY))
         let mainAreaColor = try #require(sample(atPointX: mainAreaSampleX, appKitY: midY))
-        let rightSidebarColor = try #require(sample(atPointX: rightSidebarSampleX, appKitY: midY))
 
         func report(_ label: String, _ color: NSColor) -> String {
             let c = color.usingColorSpace(.deviceRGB) ?? color
             return "\(label): r=\(c.redComponent) g=\(c.greenComponent) b=\(c.blueComponent)"
         }
         print([
-            report("titleBar", titleBarColor),
-            report("leftSidebar", leftSidebarColor),
             report("mainArea", mainAreaColor),
-            report("rightSidebar", rightSidebarColor),
             report("expectedBackground", expectedBackground),
         ].joined(separator: " | "))
 
-        // None of the sampled regions should be plain white/light-system
-        // default — every one should read close to the theme's dark
-        // background family (window background, or a nearby elevated
-        // surface tone), proving the whole window followed the theme.
-        #expect(isCloseToDarkThemeFamily(titleBarColor, background: expectedBackground))
-        #expect(isCloseToDarkThemeFamily(leftSidebarColor, background: expectedBackground))
+        // Shouldn't read as plain white/light-system default — the main
+        // area should be close to the theme's dark background family.
         #expect(isCloseToDarkThemeFamily(mainAreaColor, background: expectedBackground))
-        #expect(isCloseToDarkThemeFamily(rightSidebarColor, background: expectedBackground))
     }
 }
 

@@ -17,10 +17,8 @@ private extension UTType {
 
 /// Left sidebar: projects with tasks nested beneath.
 ///
-/// Uses a themed SwiftUI `List`, not `NSOutlineView`. The blocker that did
-/// matter, translucent "Liquid Glass" chrome, turned out fixable at the
-/// window level (`ThemedWindow.neutralizeVibrancy`) regardless of list
-/// technology. Revisit if this grows large.
+/// Uses a themed SwiftUI `List`, not `NSOutlineView`, over the system's
+/// Liquid Glass sidebar chrome. Revisit if this grows large.
 struct SidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
@@ -80,7 +78,6 @@ struct SidebarView: View {
                                     .padding(.vertical, 6)
                                     .listRowInsets(Self.rowInsets)
                                     .listRowSeparator(.hidden)
-                                    .listRowBackground(theme.palette.surfaceBackground)
                             } else {
                                 ForEach(tasks) { task in
                                     taskRow(task, project: project)
@@ -108,7 +105,6 @@ struct SidebarView: View {
             Rectangle().fill(theme.palette.separator).frame(height: 1)
             addProjectFooter
         }
-        .background(theme.palette.surfaceBackground)
         .background(SidebarFocusGuard(store: store))
         .toolbar {
             ToolbarItem(placement: .navigation) {

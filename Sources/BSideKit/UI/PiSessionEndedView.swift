@@ -31,15 +31,10 @@ struct PiSessionEndedView: View {
             Button(action: onResume) {
                 Text("Resume Session")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(theme.palette.selectionForeground)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(theme.palette.accent)
-                    )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glassProminent)
+            .tint(theme.palette.accent)
+            .controlSize(.large)
             // Return works before explicit first-responder focus; `.focused`
             // below still gives it real focus once `syncFocus()` sets `focusedTaskID`.
             .keyboardShortcut(.defaultAction)
