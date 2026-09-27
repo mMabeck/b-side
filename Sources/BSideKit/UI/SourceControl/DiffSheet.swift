@@ -24,24 +24,27 @@ struct DiffSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-
-            if isTruncated {
-                truncationBanner
-            }
-
+        NavigationStack {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Rectangle()
-                .fill(theme.palette.separator)
-                .frame(height: 1)
-
-            footer
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if isTruncated {
+                        truncationBanner
+                    }
+                }
+                .navigationTitle(title)
+                .navigationSubtitle(subtitle)
+                .toolbar {
+                    ToolbarItemGroup(placement: .confirmationAction) {
+                        if let onOpenInEditor {
+                            Button("Open in Editor", action: onOpenInEditor)
+                        }
+                        Button("Done") { dismiss() }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
         }
         .frame(minWidth: 640, minHeight: 480)
-        .background(theme.palette.windowBackground)
         // Its own `NSWindow` needs the palette applied directly, or system-drawn text renders in light `aqua`.
         .themedWindow(theme.palette)
         .onExitCommand { dismiss() }
@@ -51,27 +54,6 @@ struct DiffSheet: View {
     private var renderedDiff: NSAttributedString {
         guard !isBinary, !diffText.isEmpty else { return NSAttributedString() }
         return UnifiedDiffRenderer.render(diffText, palette: theme.palette)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundStyle(theme.palette.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(subtitle)")
     }
 
     // MARK: - Content
@@ -97,27 +79,4 @@ struct DiffSheet: View {
         SheetTruncationBanner(palette: theme.palette)
     }
 
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: 8) {
-            Spacer()
-
-            if let onOpenInEditor {
-                themedButton("Open in Editor", isPrimary: false, action: onOpenInEditor)
-            }
-            themedButton("Done", isPrimary: true, isDefaultAction: true) { dismiss() }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private func themedButton(
-        _ title: String,
-        isPrimary: Bool,
-        isDefaultAction: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        ThemedSheetButton(title: title, palette: theme.palette, isPrimary: isPrimary, isDefaultAction: isDefaultAction, action: action)
-    }
 }

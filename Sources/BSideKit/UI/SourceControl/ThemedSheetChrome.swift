@@ -47,7 +47,6 @@ struct SheetCenteredMessage: View {
             .font(.system(size: 13))
             .foregroundStyle(palette.textSecondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(palette.windowBackground)
     }
 }
 
