@@ -3,80 +3,54 @@ import GhosttyTheme
 import SwiftUI
 
 /// The whole app's semantic colour palette, derived from the user's resolved
-/// Ghostty theme (``GhosttyResolvedTheme/palette``). Every region outside the
-/// terminal grid — window chrome, sidebars, drawer, settings — reads colours
-/// from here instead of hardcoding greys or leaning on system blue, so a
-/// different Ghostty theme restyles the whole app for free.
+/// Ghostty theme. Every region outside the terminal grid reads colours from
+/// here instead of hardcoding greys, so a different theme restyles the whole app for free.
 ///
-/// Elevated surfaces, separators, and disabled text are never hardcoded
-/// greys: they are the theme's own background blended a small amount toward
-/// its own foreground, so they stay correctly related to *this* theme's
-/// contrast rather than assuming any particular background lightness.
+/// Elevated surfaces, separators, and disabled text are the theme's own
+/// background blended toward its own foreground, so they stay correctly related to this theme's contrast.
 public struct BSidePalette: Equatable, Sendable {
-    /// The hue band (in degrees) `statusSuccess` is pulled into so it reads
-    /// as unambiguously green rather than a theme's own often yellowish-lime
-    /// ANSI green (see `RGBColor.huePulled(intoRange:)`).
+    /// Pulls `statusSuccess` unambiguously green rather than a theme's often yellowish-lime ANSI green.
     static let successHueRange: ClosedRange<Double> = 120...135
 
-    /// Whether this palette's background reads as dark, per WCAG relative
-    /// luminance. Drives ``preferredAppearance``.
+    /// Per WCAG relative luminance. Drives ``preferredAppearance``.
     public let isDark: Bool
 
-    /// Whether this palette should force a specific `NSAppearance` at all.
-    /// `false` for ``fallback``, meaning "no opinion — let macOS apply the
-    /// user's system appearance."
+    /// `false` for ``fallback``: no opinion, let macOS apply the system appearance.
     private let forcesAppearance: Bool
 
-    /// The `NSAppearance` the window should adopt so system-drawn chrome
-    /// (scrollbars, menus, text-field carets, focus rings, traffic lights)
-    /// matches instead of staying light. `nil` for ``fallback``, meaning
-    /// "no opinion — let macOS apply the user's system appearance." Computed
-    /// rather than stored: `NSAppearance` isn't `Sendable`.
+    /// `nil` for ``fallback``. Computed rather than stored: `NSAppearance` isn't `Sendable`.
     public var preferredAppearance: NSAppearance? {
         guard forcesAppearance else { return nil }
         return NSAppearance(named: isDark ? .darkAqua : .aqua)
     }
 
-    /// Window/base background.
     public let windowBackground: Color
-    /// First elevation step above the window background: sidebars, the
-    /// terminal drawer.
+    /// First elevation step above the window background: sidebars, the drawer.
     public let surfaceBackground: Color
-    /// Second elevation step: cards and other content that should read as
-    /// sitting above a surface.
+    /// Second elevation step: cards and content sitting above a surface.
     public let elevatedSurfaceBackground: Color
-    /// Borders and separator lines.
     public let separator: Color
 
     public let textPrimary: Color
     public let textSecondary: Color
     public let textDisabled: Color
 
-    /// Prefers the theme's own `selectionBackground`/`selectionForeground`
-    /// where defined, falling back to the accent (background) and window
-    /// background (foreground) otherwise.
+    /// Prefers the theme's own selection colours, falling back to accent/window background.
     public let selectionBackground: Color
     public let selectionForeground: Color
 
     public let accent: Color
 
-    /// A task that's busy (a live subagent child or a busy parent Pi loop).
-    /// Amber/yellow so the sidebar's blinking "running" dot reads distinctly
-    /// from the blue "unread" and green "read" dots either side of it.
+    /// Amber/yellow, distinct from the blue "unread" and green "read" dots either side of it.
     public let statusRunning: Color
-    /// A task whose terminal raised a question, or whose worktree is blocked
-    /// or vanished. An orange-red, the palette's most attention-grabbing
-    /// status colour.
+    /// A question, blocked, or vanished worktree; the most attention-grabbing colour.
     public let statusNeedsAttention: Color
     public let statusError: Color
     public let statusSuccess: Color
-    /// An open task with output since it was last viewed.
     public let statusUnread: Color
 
-    /// Standard system colours, all of which already adapt to the user's
-    /// macOS light/dark appearance on their own. Used whenever no Ghostty
-    /// theme has resolved, so the app never gets stuck looking broken just
-    /// because `~/.config/ghostty/config` has no `theme` directive.
+    /// Standard system colours, adapting to macOS light/dark on their own.
+    /// Used whenever no Ghostty theme has resolved.
     public static let fallback = BSidePalette(
         isDark: false,
         forcesAppearance: false,
@@ -97,7 +71,6 @@ public struct BSidePalette: Equatable, Sendable {
         statusUnread: .blue
     )
 
-    /// Derives the full palette from a resolved Ghostty theme definition.
     public static func themed(from definition: GhosttyThemeDefinition) -> BSidePalette {
         let background = RGBColor(hex: definition.background)
         let foreground = RGBColor(hex: definition.foreground)
@@ -110,12 +83,8 @@ public struct BSidePalette: Equatable, Sendable {
         let selectionBg = definition.selectionBackground.map(RGBColor.init(hex:)) ?? accentColor
         let selectionFg = definition.selectionForeground.map(RGBColor.init(hex:)) ?? background
 
-        // Derived from the theme's own foreground/background, never from a
-        // raw palette slot (ANSI "bright black", palette[8], is meant for
-        // terminal text on the terminal's own background and is sometimes
-        // barely distinguishable from it — see native-rewrite.md's chrome
-        // audit). `ensuringContrast` then guarantees legibility even if this
-        // theme's foreground/background pair is itself unusually close.
+        // Derived from foreground/background, never a raw palette slot (ANSI
+        // "bright black" is sometimes barely distinguishable from the terminal's own background).
         let secondaryText = foreground
             .blended(toward: background, amount: 0.15)
             .ensuringContrast(against: background, pulledToward: foreground, minimumRatio: 4.5)
@@ -142,35 +111,26 @@ public struct BSidePalette: Equatable, Sendable {
             selectionForeground: selectionFg.color,
             accent: accentColor.color,
             statusRunning: status(base: 3, bright: 11).color,
-            // A blend of the theme's own red toward its own yellow, rather
-            // than pure red, so "question" reads as orange-red and stays
-            // visually distinct from "running"'s pure amber/yellow.
+            // Blended toward the theme's own yellow so "question" reads orange-red, distinct from "running"'s amber.
             statusNeedsAttention: status(base: 1, bright: 9)
                 .blended(toward: status(base: 3, bright: 11), amount: 0.35)
                 .color,
             statusError: status(base: 1, bright: 9).color,
-            // The theme's own ANSI green is often a yellowish lime (Ayu
-            // Mirage's bright green, d5ff80, reads closer to lime than
-            // green — hue ~80°), too far from "green" to read as a success
-            // colour at a glance. Nudged into a true-green hue band while
-            // keeping its own saturation/lightness, so it still varies by
-            // theme instead of becoming one hardcoded green.
+            // The theme's own ANSI green is often a yellowish lime (e.g. hue
+            // ~80°), too far from "green" to read as success; nudged into a true-green hue band.
             statusSuccess: status(base: 2, bright: 10).huePulled(intoRange: BSidePalette.successHueRange).color,
             statusUnread: status(base: 4, bright: 12).color
         )
     }
 }
 
-/// Plain sRGB triple used only to compute blends and luminance before
-/// converting to a SwiftUI `Color`. Kept private: nothing outside this file
-/// should reason about theme colour in raw components.
+/// Plain sRGB triple for blends/luminance before converting to `Color`.
 struct RGBColor: Equatable {
     var r: Double
     var g: Double
     var b: Double
 
-    /// Ghostty theme hex strings have no leading `#` (e.g. `"1f2430"`), but
-    /// a leading `#` is tolerated too.
+    /// Ghostty hex strings have no leading `#`, but one is tolerated.
     init(hex: String) {
         let cleaned = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         var value: UInt64 = 0
@@ -188,9 +148,7 @@ struct RGBColor: Equatable {
 
     var color: Color { Color(red: r, green: g, blue: b) }
 
-    /// WCAG relative luminance (sRGB-gamma-corrected), 0 (black) to 1
-    /// (white). Threshold at 0.5 decides light vs dark for
-    /// ``BSidePalette/isDark``.
+    /// WCAG relative luminance, 0 (black) to 1 (white). Threshold at 0.5 decides ``BSidePalette/isDark``.
     var relativeLuminance: Double {
         func linear(_ c: Double) -> Double {
             c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
@@ -206,8 +164,7 @@ struct RGBColor: Equatable {
         )
     }
 
-    /// HSL hue (0..<360), saturation, and lightness (both 0...1). Achromatic
-    /// colours (r == g == b) have an undefined hue, reported as 0.
+    /// Achromatic colours (r == g == b) have an undefined hue, reported as 0.
     var hsl: (hue: Double, saturation: Double, lightness: Double) {
         let maxComponent = max(r, g, b)
         let minComponent = min(r, g, b)
@@ -227,8 +184,6 @@ struct RGBColor: Equatable {
         return (hue, saturation, lightness)
     }
 
-    /// Builds a colour from HSL components (`hue` in degrees, `saturation`/
-    /// `lightness` 0...1).
     init(hue: Double, saturation: Double, lightness: Double) {
         guard saturation > 0 else {
             self.init(r: lightness, g: lightness, b: lightness)
@@ -250,12 +205,8 @@ struct RGBColor: Equatable {
         self.init(r: r0 + m, g: g0 + m, b: b0 + m)
     }
 
-    /// Rotates this colour's hue into `range` (degrees) if it currently sits
-    /// outside it, nudging to whichever edge is nearer while leaving
-    /// saturation and lightness untouched — the colour stays visibly "this
-    /// theme's own tone", just no longer off in an adjacent hue family.
-    /// Colours with negligible saturation (greys) are left alone: hue is
-    /// meaningless on them, and rotating it would do nothing perceptible.
+    /// Nudges hue to the nearer edge of `range`, leaving saturation/lightness
+    /// untouched. Greys (negligible saturation) are left alone.
     func huePulled(intoRange range: ClosedRange<Double>, minimumSaturation: Double = 0.15) -> RGBColor {
         let (hue, saturation, lightness) = hsl
         guard saturation >= minimumSaturation, !range.contains(hue) else { return self }
@@ -265,9 +216,7 @@ struct RGBColor: Equatable {
         return RGBColor(hue: target, saturation: saturation, lightness: lightness)
     }
 
-    /// WCAG contrast ratio between two colours: `(lighter + 0.05) / (darker + 0.05)`,
-    /// always ≥ 1. 4.5:1 is the WCAG AA floor for normal text, 3:1 for large or
-    /// de-emphasised text.
+    /// `(lighter + 0.05) / (darker + 0.05)`, always ≥ 1. 4.5:1 is the WCAG AA floor for normal text, 3:1 for large text.
     func contrastRatio(with other: RGBColor) -> Double {
         let (lighter, darker) = relativeLuminance >= other.relativeLuminance
             ? (relativeLuminance, other.relativeLuminance)
@@ -275,13 +224,8 @@ struct RGBColor: Equatable {
         return (lighter + 0.05) / (darker + 0.05)
     }
 
-    /// Nudges `self` toward `foreground` until its contrast ratio against
-    /// `background` reaches `minimumRatio`, or until it has all but reached
-    /// `foreground` itself. This is the contrast guarantee for derived chrome
-    /// text: no matter how close together a theme's foreground and background
-    /// are, the text tones this app derives from them cannot land below a
-    /// readable floor — the worst case is that they converge on the theme's
-    /// own foreground colour instead of vanishing into the background.
+    /// Nudges toward `foreground` until contrast against `background` reaches
+    /// `minimumRatio`; worst case converges on `foreground` rather than vanishing into the background.
     func ensuringContrast(against background: RGBColor, pulledToward foreground: RGBColor, minimumRatio: Double) -> RGBColor {
         var candidate = self
         for _ in 0..<24 {
