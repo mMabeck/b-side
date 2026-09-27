@@ -8,23 +8,6 @@ import Testing
 /// wait for `ValueObservation` to populate `projects`/`tasksByProject`
 /// before asserting.
 
-/// Polls until `condition` holds or `timeout` elapses. This suite (and
-/// `MainAreaLogicTests`) run alongside heavy offscreen snapshot suites that
-/// render real windows through WindowServer, which can load the machine
-/// enough to delay GRDB's `ValueObservation` past any fixed sleep duration a
-/// test could pick. Polling for the specific state the following assertions
-/// depend on avoids that without masking a genuine failure: if `condition`
-/// never becomes true, this simply returns at `timeout` and the assertions
-/// below fail on their own with their real messages.
-@MainActor
-func waitUntil(_ timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async throws {
-    let deadline = ContinuousClock.now + timeout
-    while ContinuousClock.now < deadline {
-        if condition() { return }
-        try await Task.sleep(for: .milliseconds(20))
-    }
-}
-
 @MainActor
 @Suite("ProjectsStore selection")
 struct ProjectsStoreSelectionTests {

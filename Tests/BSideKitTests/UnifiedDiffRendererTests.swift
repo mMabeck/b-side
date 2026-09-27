@@ -83,10 +83,6 @@ struct UnifiedDiffRendererTests {
     }
 }
 
-/// Regression test for `DiffTextView`: it must host a real, laid-out
-/// `NSTextView` inside its `NSScrollView`, not a zero-frame view that never
-/// receives layout. Hosts the representable in a real, never-ordered-front
-/// `NSWindow`, matching the pattern in `TerminalSurfaceHostTests`.
 @MainActor
 struct DiffTextViewLayoutTests {
     private func makeHostedWindow(diff: String) -> NSWindow {
@@ -112,16 +108,6 @@ struct DiffTextViewLayoutTests {
         return nil
     }
 
-    /// Polls rather than sleeping a fixed duration: layout happens on the
-    /// next run-loop pass after the window is ordered in.
-    private func pollUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            if Date() >= deadline { return }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-    }
-
     @Test func diffTextViewLaysOutNonEmptyGlyphsAtARealSize() async throws {
         let diff = """
         diff --git a/foo.swift b/foo.swift
@@ -135,12 +121,12 @@ struct DiffTextViewLayoutTests {
         defer { window.orderOut(nil) }
 
         var scrollView: NSScrollView?
-        await pollUntil {
+        try await waitUntil {
             scrollView = window.contentView.flatMap { self.firstScrollView(in: $0) }
             return scrollView != nil
         }
         let textView = try #require(scrollView?.documentView as? NSTextView)
-        await pollUntil { textView.frame.width > 0 && textView.frame.height > 0 }
+        try await waitUntil { textView.frame.width > 0 && textView.frame.height > 0 }
 
         #expect(textView.frame.width > 0)
         #expect(textView.frame.height > 0)

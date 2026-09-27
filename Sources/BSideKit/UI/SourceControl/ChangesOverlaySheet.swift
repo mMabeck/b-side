@@ -164,24 +164,30 @@ struct ChangesOverlaySheet: View {
     }
 
     /// A plain `Divider()` with a drag gesture, not `HSplitView` (AppKit
-    /// `updateConstraints` crash risk — see `TaskTerminalAreaView`).
+    /// `updateConstraints` crash risk — see `TaskTerminalAreaView`). Global
+    /// coordinate space keeps the gesture in sync with the moving divider.
     private var treeWidthDivider: some View {
         Divider()
+            .frame(width: 8)
+            .contentShape(Rectangle())
             .onHover { hovering in
                 if hovering {
                     NSCursor.resizeLeftRight.push()
-                } else {
+                } else if treeWidthDragStart == nil {
                     NSCursor.pop()
                 }
             }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let startWidth = treeWidthDragStart ?? treeWidth
                         treeWidthDragStart = startWidth
                         treeWidth = min(max(startWidth + value.translation.width, Self.treeWidthRange.lowerBound), Self.treeWidthRange.upperBound)
                     }
-                    .onEnded { _ in treeWidthDragStart = nil }
+                    .onEnded { _ in
+                        treeWidthDragStart = nil
+                        NSCursor.pop()
+                    }
             )
     }
 

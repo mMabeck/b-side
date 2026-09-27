@@ -2,6 +2,17 @@ import Foundation
 
 @testable import BSideKit
 
+/// Polls until `condition` holds or `timeout` elapses, rather than a fixed
+/// sleep, since GRDB observation and window layout can lag under load.
+@MainActor
+func waitUntil(_ timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+}
+
 /// Helpers for building real, throwaway git repositories for the git-layer and
 /// task/worktree tests. Every test that uses these owns cleaning its temp
 /// directory up in a `defer`.
