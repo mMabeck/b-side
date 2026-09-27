@@ -5,16 +5,10 @@ import Foundation
 /// caller can either check a single candidate or order a whole collection.
 /// Pure and SwiftUI-free.
 enum FuzzyMatcher {
-    /// Scores how well `candidate` matches `query` as a case-insensitive
-    /// subsequence: every character of `query`, in order, must appear
-    /// somewhere in `candidate`. Returns `nil` when it doesn't match at all.
-    /// Higher scores are better matches; a blank query matches everything
-    /// with a score of `0`.
-    ///
-    /// Prefix and contiguous-substring matches score above scattered ones,
-    /// and characters starting at a word boundary (start of string, or just
-    /// after a space/`-`/`_`/`/`/`.`) earn a bonus, so "bs" ranks "B-Side"
-    /// above a project whose name merely contains a scattered "b...s".
+    /// Every character of `query`, in order, must appear in `candidate`;
+    /// `nil` if it doesn't match. Prefix and contiguous-substring matches
+    /// score above scattered ones, and word-boundary starts earn a bonus, so
+    /// "bs" ranks "B-Side" above a scattered "b...s" match.
     static func score(query: String, candidate: String) -> Int? {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return 0 }
@@ -61,16 +55,9 @@ enum FuzzyMatcher {
         return score
     }
 
-    /// Ranks `items` by the best score any of `text(item)`'s strings earns
-    /// against `query`, dropping items that don't match at all. A blank
-    /// query returns `items` unchanged, so an empty search field browses the
-    /// full list in its original order.
-    ///
-    /// `secondaryText` strings (e.g. long paths) only match when they contain
-    /// the query as a contiguous substring, and always rank below every
-    /// `text` match: a scattered subsequence through a long path like
-    /// `/Users/…/project` matches almost any short query, which would make
-    /// filtering useless.
+    /// A blank query returns `items` unchanged. `secondaryText` (e.g. long
+    /// paths) only matches as a contiguous substring and always ranks below
+    /// a `text` match, since a scattered subsequence through a long path would match almost anything.
     static func rank<Item>(
         query: String,
         items: [Item],
