@@ -2,13 +2,9 @@ import AppKit
 import ObjectiveC
 import SwiftUI
 
-/// Applies a ``BSidePalette`` to the `NSWindow` hosting a SwiftUI scene: real
-/// `NSAppearance` (so system-drawn chrome — scrollbars, menus, text-field
-/// carets, focus rings, the traffic-light area — matches instead of staying
-/// light), window background colour, and a transparent title bar that blends
-/// into the themed content instead of sitting as a separate white strip.
-/// Traffic lights and standard window behaviour are untouched — this only
-/// recolours the window macOS already draws.
+/// Applies a ``BSidePalette`` to the hosting `NSWindow`: real `NSAppearance`
+/// (so system-drawn chrome matches), window background, and a transparent
+/// title bar. Traffic lights and standard window behaviour are untouched.
 struct ThemedWindowModifier: ViewModifier {
     let palette: BSidePalette
 
@@ -17,11 +13,8 @@ struct ThemedWindowModifier: ViewModifier {
     }
 
     private func apply(_ window: NSWindow) {
-        // Applied at the `NSApp` level, not just this window: menus, popovers,
-        // and sheets/alerts spawned from *any* window (including ones this
-        // modifier is never attached to) resolve their own appearance from
-        // `NSApp.effectiveAppearance` when they have none of their own, so
-        // this is what keeps them from staying stuck in light `aqua`.
+        // At the `NSApp` level too: menus/popovers/sheets from any window
+        // resolve their own appearance from `NSApp.effectiveAppearance` when they have none of their own.
         NSApplication.shared.appearance = palette.preferredAppearance
         window.appearance = palette.preferredAppearance
         window.backgroundColor = NSColor(palette.windowBackground)
@@ -29,42 +22,23 @@ struct ThemedWindowModifier: ViewModifier {
         window.titlebarSeparatorStyle = .none
 
         // `NavigationSplitView`'s sidebar columns are backed by translucent
-        // system chrome: on older AppKit this is an `NSVisualEffectView`
-        // (macOS's "sidebar" vibrancy material), on the newer "Liquid Glass"
-        // AppKit it's a private `BackdropView` sibling instead. Both follow
-        // the window's key/active state and sample what's behind the window,
-        // blending toward a near-white tint regardless of the window's
-        // appearance or any SwiftUI colour drawn on top — the exact "dark
-        // terminal in a white app" seam this change exists to close.
-        // `neutralizeVibrancy` handles both: the `NSVisualEffectView` case is
-        // forced to an opaque, always-"active" content material; `BackdropView`,
-        // which has no such material to switch to, is hidden outright.
-        // `NSContainerConcentricGlassEffectView` looks like the same family
-        // by name but is not touched: on this SDK it's the container that
-        // actually hosts the sidebar's real SwiftUI content, not a
-        // decorative overlay, so hiding it would hide the content with it.
+        // system chrome (`NSVisualEffectView` on older AppKit, a private
+        // `BackdropView` on "Liquid Glass"), sampling behind the window into a
+        // near-white tint regardless of this app's own colours — the "dark
+        // terminal in a white app" seam `neutralizeVibrancy` closes.
         if let contentView = window.contentView {
             neutralizeVibrancy(in: contentView)
         }
-        // AppKit can create or recreate the sidebar's vibrancy/backdrop layers
-        // at any point after this window is set up (confirmed under load: it
-        // is not bounded to a short window after creation), so a fixed
-        // schedule of retries races the view hierarchy instead of tracking
-        // it. `VibrancyGuardian` KVO-observes the subview tree so every
-        // insertion — whenever it happens — gets neutralized immediately,
-        // and also re-scans on the window notifications that tend to
-        // accompany chrome changes, as a cheap belt-and-suspenders measure.
+        // AppKit can (re)create these layers at any point after setup, not
+        // just briefly after — `VibrancyGuardian` KVO-observes the subview
+        // tree so every insertion gets neutralized immediately.
         VibrancyGuardian.install(on: window)
     }
 }
 
-/// Watches a window's view hierarchy for newly inserted subviews (via KVO on
-/// `subviews`) and neutralizes vibrancy on each one as it appears, instead of
-/// guessing when AppKit might have finished creating the sidebar's chrome.
-/// One guardian is installed per window (idempotent — re-`apply`ing on the
-/// same window is a no-op beyond a single immediate re-neutralize pass) and
-/// tears itself down, removing all KVO and notification observers, when the
-/// window closes.
+/// Watches a window's view hierarchy for newly inserted subviews via KVO,
+/// instead of guessing when AppKit finished creating the sidebar's chrome.
+/// One guardian per window (idempotent); tears itself down on window close.
 @MainActor
 private final class VibrancyGuardian: NSObject {
     private static var associatedKey: UInt8 = 0
@@ -94,12 +68,9 @@ private final class VibrancyGuardian: NSObject {
             NSWindow.didBecomeKeyNotification,
             NSWindow.didResizeNotification,
             NSWindow.didChangeScreenNotification,
-            // Deliberately not `didUpdateNotification`: it fires about once
-            // per event-loop cycle for the window, and each rescan walks the
-            // whole view tree and re-registers KVO — continuous overhead in
-            // an app whose main content is a constantly redrawing terminal.
-            // The `subviews` KVO below already catches every insertion,
-            // which is the event that actually matters here.
+            // Deliberately not `didUpdateNotification`: it fires every event-loop
+            // cycle, and each rescan walks the whole tree — continuous overhead
+            // against a constantly redrawing terminal. `subviews` KVO already catches every insertion.
         ] {
             notificationTokens.append(
                 center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
@@ -131,9 +102,7 @@ private final class VibrancyGuardian: NSObject {
         }
     }
 
-    // KVO delivers this synchronously on whatever thread mutated `subviews`,
-    // which for this app's own window/view hierarchy is always the main
-    // thread — `assumeIsolated` documents that instead of hopping queues.
+    // KVO delivers synchronously on whatever thread mutated `subviews`, always the main thread here.
     override nonisolated func observeValue(
         forKeyPath keyPath: String?,
         of object: Any?,
@@ -142,8 +111,6 @@ private final class VibrancyGuardian: NSObject {
     ) {
         guard keyPath == "subviews", let view = object as? NSView else { return }
         MainActor.assumeIsolated {
-            // The `NSVisualEffectView` and private `BackdropView` chrome
-            // both arrive as newly inserted subviews.
             neutralizeVibrancy(in: view)
             observeSubtree(view)
         }
@@ -169,14 +136,9 @@ private final class VibrancyGuardian: NSObject {
         notificationTokens.removeAll()
     }
 
-    // Not every caller runs a window through a full `close()` (offscreen
-    // test windows in particular are often just released), so
-    // `willCloseNotification` is not a guarantee. KVO requires every
-    // observer to be removed before its observed object deallocates, or the
-    // observed object's own deinit crashes — so this is a hard safety net,
-    // not just tidiness. `deinit` on a `@MainActor` class runs nonisolated,
-    // but the object is uniquely referenced by this point (nothing else can
-    // race a mutation), so touching its stored state directly here is safe.
+    // Not every window gets a full `close()` (offscreen test windows are
+    // often just released), so `willCloseNotification` isn't guaranteed. KVO
+    // requires every observer removed before the observed object deallocates, or its deinit crashes.
     deinit {
         MainActor.assumeIsolated { removeAllObservers() }
     }
@@ -189,18 +151,11 @@ private func neutralizeVibrancy(in view: NSView) {
         effectView.material = .contentBackground
     }
 
-    // On the newer "Liquid Glass" AppKit chrome, the sidebar column's
-    // translucent backing is a private `BackdropView` that samples whatever
-    // is behind the window to render its blur. There is no public API to
-    // retint it, and unlike `NSVisualEffectView` it has no "opaque content
-    // material" to switch to. It is a purely decorative leaf — a sibling of
-    // this app's own SwiftUI-drawn content, never an ancestor of it — so
-    // hiding it removes only the vibrancy layer and leaves this app's themed
-    // background exactly where it was drawn. `NSContainerConcentricGlassEffectView`
-    // is deliberately *not* matched here even though its name suggests the
-    // same family: on this SDK it is the actual container that hosts the
-    // sidebar's real SwiftUI content (confirmed by walking the live view
-    // hierarchy), so hiding it would hide the content along with the glass.
+    // The "Liquid Glass" sidebar's translucent backing is a private
+    // `BackdropView` with no public retint API and no opaque material to
+    // switch to — a purely decorative leaf, sibling to this app's SwiftUI
+    // content, so hiding it is safe. `NSContainerConcentricGlassEffectView`
+    // is deliberately not matched: it's the actual container hosting the sidebar's real content.
     let className = NSStringFromClass(type(of: view))
     if className.hasSuffix("BackdropView") {
         view.isHidden = true
@@ -212,17 +167,13 @@ private func neutralizeVibrancy(in view: NSView) {
 }
 
 extension View {
-    /// Themes the window hosting this view. Re-applies on every body update,
-    /// so a theme change (e.g. the user edits their Ghostty config) takes
-    /// effect without restarting the app.
+    /// Re-applies on every body update, so a theme change takes effect without restarting the app.
     func themedWindow(_ palette: BSidePalette) -> some View {
         modifier(ThemedWindowModifier(palette: palette))
     }
 }
 
-/// Bridges to the hosting `NSWindow`. SwiftUI has no direct window accessor,
-/// so this places an invisible `NSView` and reads `.window` once it is
-/// attached to the view hierarchy.
+/// SwiftUI has no direct window accessor; places an invisible `NSView` and reads `.window` once attached.
 private struct WindowAccessor: NSViewRepresentable {
     let configure: (NSWindow) -> Void
 
