@@ -345,7 +345,7 @@ struct TaskTitleGeneratorProcessTests {
             .appendingPathComponent("title-gen-grandchild-pid-\(UUID().uuidString)")
         let script = try makeScript(
             """
-            sleep 30 &
+            (trap '' TERM; exec sleep 30) &
             echo $! > "\(childPidFile.path)"
             trap '' TERM
             wait
@@ -353,6 +353,16 @@ struct TaskTitleGeneratorProcessTests {
         )
         defer {
             try? FileManager.default.removeItem(at: script)
+            // The leaked grandchild is reparented and outside the runner's
+            // reach (it only signals the process it launched); clean it up
+            // here so the suite doesn't leave it running. Runs even if a
+            // `guard`/`#require` above exits the test early.
+            if let pidText = try? String(contentsOf: childPidFile, encoding: .utf8),
+                let grandchildPid = pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines))
+            {
+                kill(grandchildPid, SIGKILL)
+            }
+            try? FileManager.default.removeItem(at: childPidFile)
         }
 
         let pidBox = PidBox()
@@ -376,16 +386,6 @@ struct TaskTitleGeneratorProcessTests {
 
         let pid = try #require(pidBox.get())
         #expect(kill(pid, 0) != 0, "parent shell should have been killed")
-
-        // The leaked `sleep 30` grandchild is reparented and outside the
-        // runner's reach (it only signals the process it launched); clean
-        // it up here so the suite doesn't leave it running.
-        if let pidText = try? String(contentsOf: childPidFile, encoding: .utf8),
-            let grandchildPid = pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines))
-        {
-            kill(grandchildPid, SIGKILL)
-        }
-        try? FileManager.default.removeItem(at: childPidFile)
     }
 }
 
