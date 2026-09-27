@@ -1,18 +1,12 @@
 import CoreServices
 import Foundation
 
-/// Watches a project's git refs — `HEAD`, `refs/**`, and `packed-refs` —
-/// without watching its working tree. Powers `ProjectsStore`'s live re-check
-/// of every task's ahead/behind/merged status when a task branch gains
-/// commits or the base branch moves, from anywhere: a terminal commit in a
-/// task's worktree, a fetch, a merge run from outside the app entirely.
+/// Watches a project's git refs (`HEAD`, `refs/**`, `packed-refs`), not its
+/// working tree, powering `ProjectsStore`'s live ahead/behind/merged re-check
+/// from anywhere a branch or base ref moves.
 ///
-/// Deliberately narrower than `WorktreeWatcher`: a task row's sync status
-/// doesn't need to react to working-tree file edits (`WorktreeWatcher`
-/// already covers those, per-task, for the Source Control sidebar), only to
-/// ref changes — so this never fires on the high-frequency file churn a
-/// running agent produces, and one instance per *project* is enough rather
-/// than one per task.
+/// Narrower than `WorktreeWatcher`: no working-tree file edits, only ref
+/// changes, so it never fires on high-frequency agent file churn, and one instance per project suffices.
 @MainActor
 final class ProjectRefsWatcher {
     private let projectURL: URL
@@ -46,10 +40,8 @@ final class ProjectRefsWatcher {
         stop()
         guard let gitDir = WorktreeWatcher.resolveGitDir(forWorktree: projectURL) else { return }
 
-        // `HEAD` in the project's own (possibly private, for a linked
-        // worktree) git dir — not relevant to ahead/behind against a named
-        // base ref, but cheap to include and correct for the rarer case of a
-        // detached-HEAD base.
+        // `HEAD` in the project's own (possibly private) git dir — cheap to
+        // include and correct for the rarer detached-HEAD base case.
         gitDirStream = WorktreeWatcher.makeStream(paths: [gitDir.standardizedFileURL.path], latency: 0.3) { [weak self] paths in
             MainActor.assumeIsolated {
                 let relevant = paths.contains { (($0 as NSString).lastPathComponent) == "HEAD" }
@@ -58,11 +50,7 @@ final class ProjectRefsWatcher {
             }
         }
 
-        // `refs/heads`, `refs/remotes`, and `packed-refs` live in the
-        // *common* git dir shared by every worktree — the same distinction
-        // `WorktreeWatcher` draws — so a commit or merge made from any task's
-        // worktree, or from a terminal in the project root itself, is caught
-        // here regardless of which worktree it happened in.
+        // Shared refs live in the common git dir, so a commit/merge from any worktree is caught here.
         if let commonGitDir = WorktreeWatcher.resolveCommonGitDir(forGitDir: gitDir) {
             commonGitDirStream = WorktreeWatcher.makeStream(paths: [commonGitDir.standardizedFileURL.path], latency: 0.3) { [weak self] paths in
                 MainActor.assumeIsolated {
