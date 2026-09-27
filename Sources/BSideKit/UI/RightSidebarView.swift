@@ -55,7 +55,6 @@ struct RightSidebarView: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(theme.palette.surfaceBackground)
         .task(id: store.selectedTask) {
             scStore.setTask(store.selectedTask)
         }
@@ -221,7 +220,6 @@ struct RightSidebarView: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .background(theme.palette.surfaceBackground)
     }
 
     private func sectionHeader(_ title: String, actionTitle: String, action: @escaping () -> Void) -> some View {

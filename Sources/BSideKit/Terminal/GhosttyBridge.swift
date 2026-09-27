@@ -311,9 +311,8 @@ public final class TerminalSurfaceHost: ObservableObject {
     }
 
     deinit {
-        // `deinit` on a `@MainActor` class runs nonisolated (see `ThemedWindow.swift`'s
-        // `VibrancyGuardian`); safe here since the registry's dictionary is
-        // only ever touched from the main actor.
+        // `deinit` on a `@MainActor` class runs nonisolated; safe here since
+        // the registry's dictionary is only ever touched from the main actor.
         MainActor.assumeIsolated {
             TerminalSurfaceHostRegistry.shared.unregister(self)
         }

@@ -7,8 +7,8 @@ visual identity is in [`docs/brand.md`](docs/brand.md). Formerly "Dash Native".
 
 ## Stack
 
-- Swift 6 (tools 6.0), SwiftPM, macOS 14+, **arm64 only** (the libghostty
-  XCFramework is arm64).
+- Swift 6 (tools 6.2), SwiftPM, macOS 26+ (Liquid Glass), **arm64 only** (the
+  libghostty XCFramework is arm64).
 - SwiftUI + AppKit; structured concurrency, not Combine.
 - GRDB (SQLite) with explicit migrations and foreign-key cascades.
 - libghostty via `Lakr233/libghostty-spm`, pinned `exact:` in `Package.swift`.
@@ -101,7 +101,10 @@ swift test --filter GitCLITests
   against a real host's `lastConfigurationIssue`, not the generated text. Pass
   colours via `theme:`; `terminalConfiguration:` colours can be overwritten.
 - **Appearance follows the chosen theme, never macOS light/dark.** Theme each
-  separate window and sheet explicitly.
+  separate window and sheet explicitly. Sidebars and the title bar are
+  Liquid Glass system chrome, so they sample the desktop behind the window on
+  top of that appearance; only content surfaces (main area, sheets, the
+  terminal) render fully opaque in the theme's own colours.
 - **Keep `.commands` on the `WindowGroup`**, not `Settings`, or menu entries
   duplicate and shortcuts go dead.
 - **Keep `SubagentPaneStore.maxPanesPerTask = 4`.** Higher counts crashed

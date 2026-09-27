@@ -1,11 +1,11 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 // Apple Silicon (arm64) only — the app is built and run locally, no Intel support intended.
 let package = Package(
     name: "BSide",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v26)
     ],
     products: [
         .executable(name: "BSide", targets: ["BSide"]),
