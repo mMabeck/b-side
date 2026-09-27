@@ -1,13 +1,17 @@
 import Foundation
 import OSLog
 
-/// Generates a short task title from a user's first pi prompt by running a
-/// fine-tuned local title model (llama.cpp's `llama-completion` binary over
-/// a small Qwen3 gguf), for `ProjectsStore.applyAutoRename` to prefer over
-/// `TaskAutoRenameService.deriveTitle`'s heuristic. Every failure mode —
-/// missing binary, missing model file, a slow or crashed process, or output
-/// that doesn't look like a title — reports `nil` rather than throwing, so
-/// the caller can fall back unconditionally.
+/// Generates a short task title from a user's first pi prompt against a
+/// fine-tuned local title model (a small Qwen3 gguf), for
+/// `ProjectsStore.applyAutoRename` to prefer over
+/// `TaskAutoRenameService.deriveTitle`'s heuristic. Tries the resident
+/// `TitleModelServer` first (prewarmed by `MainAreaView` as soon as a task
+/// starts waiting for its rename, so the model is usually already loaded)
+/// and falls back to a cold-started `llama-completion` process if the
+/// server is unavailable. Every failure mode on either path — missing
+/// binary, missing model file, a slow or crashed process, a request
+/// timeout, or output that doesn't look like a title — reports `nil`
+/// rather than throwing, so the caller can fall back unconditionally.
 public enum TaskTitleGenerator {
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-title-generator")
 
@@ -30,33 +34,54 @@ public enum TaskTitleGenerator {
     private static let endOfTextMarker = "[end of text]"
     private static let maxQuestionLength = 1000
 
-    /// Runs the title model on the first 1000 characters of `prompt` and
-    /// returns a cleaned single-line title, or `nil` if the binary or model
-    /// file isn't present, the process times out or fails to launch, or its
-    /// output fails validation. Runs off the main actor.
+    /// Runs the title model on the first 1000 characters of `prompt`,
+    /// preferring the resident `TitleModelServer` and falling back to a
+    /// cold `llama-completion` process, and returns a cleaned single-line
+    /// title or `nil` if both paths are unavailable, time out, or produce
+    /// output that fails validation. Runs off the main actor.
     public static func generate(fromPrompt prompt: String) async -> String? {
+        let question = String(prompt.prefix(maxQuestionLength))
+        let fullPrompt = buildFullPrompt(question: question)
+
+        if let title = await TitleModelServer.shared.generate(prompt: fullPrompt) {
+            logger.notice("title model: generated via resident llama-server")
+            return title
+        }
+
+        guard let title = await generateColdStart(fullPrompt: fullPrompt) else {
+            return nil
+        }
+        logger.notice("title model: generated via cold llama-completion")
+        return title
+    }
+
+    private static func buildFullPrompt(question: String) -> String {
+        """
+        <|im_start|>user
+        Write a short English title (2-5 words) for the question below. The question may be in Danish; the title is always in English. Reply with the title only.
+
+        Question: \(question)<|im_end|>
+        <|im_start|>assistant
+        <think>
+
+        </think>
+
+
+        """
+    }
+
+    /// Cold-start fallback: launches `llama-completion` fresh for this one
+    /// title, paying llama.cpp's full model-load cost every call. Only
+    /// reached when `TitleModelServer.generate` returns `nil`.
+    private static func generateColdStart(fullPrompt: String) async -> String? {
         guard let binaryPath = resolveBinaryPath() else {
-            logger.notice("title model skipped: llama-completion binary not found")
+            logger.notice("title model: cold start skipped, llama-completion binary not found")
             return nil
         }
         guard let modelPath = resolveModelPath() else {
-            logger.notice("title model skipped: model file not found")
+            logger.notice("title model: cold start skipped, model file not found")
             return nil
         }
-
-        let question = String(prompt.prefix(maxQuestionLength))
-        let fullPrompt = """
-            <|im_start|>user
-            Write a short English title (2-5 words) for the question below. The question may be in Danish; the title is always in English. Reply with the title only.
-
-            Question: \(question)<|im_end|>
-            <|im_start|>assistant
-            <think>
-
-            </think>
-
-
-            """
 
         let arguments = [
             "-m", modelPath,
@@ -72,12 +97,12 @@ public enum TaskTitleGenerator {
         ]
 
         guard let rawOutput = await runProcess(binaryPath: binaryPath, arguments: arguments, timeout: timeout) else {
-            logger.notice("title model skipped: process timed out or failed to launch")
+            logger.notice("title model: cold start skipped, process timed out or failed to launch")
             return nil
         }
 
         guard let title = cleanTitle(fromRawOutput: rawOutput) else {
-            logger.notice("title model skipped: output failed validation")
+            logger.notice("title model: cold start skipped, output failed validation")
             return nil
         }
 
@@ -100,7 +125,10 @@ public enum TaskTitleGenerator {
         return nil
     }
 
-    private static func resolveModelPath() -> String? {
+    /// Also used by `TitleModelServer` for the resident server's `-m`
+    /// argument, so both paths resolve the same model file and honour the
+    /// same UserDefaults override.
+    static func resolveModelPath() -> String? {
         let configured = UserDefaults.standard.string(forKey: modelPathDefaultsKey)
         let expanded = ((configured ?? defaultModelPath) as NSString).expandingTildeInPath
         guard FileManager.default.fileExists(atPath: expanded) else { return nil }

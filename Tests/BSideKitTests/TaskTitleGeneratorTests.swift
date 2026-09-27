@@ -54,6 +54,11 @@ struct TaskTitleGeneratorRealModelTests {
     @Test("generates a short usable title from a real prompt")
     func generatesATitleFromARealPrompt() async throws {
         let title = await TaskTitleGenerator.generate(fromPrompt: "the login page throws a 500 error, please fix it")
+        // This may have gone through the resident `TitleModelServer` (if
+        // `llama-server` is also installed) or the cold `llama-completion`
+        // fallback; either way, tear the shared server down afterward so it
+        // doesn't outlive this test process.
+        await TitleModelServer.shared.shutdown()
         let unwrapped = try #require(title)
         #expect(!unwrapped.isEmpty)
         #expect(unwrapped.split(separator: " ").count <= 8)
