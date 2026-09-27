@@ -290,7 +290,6 @@ private final class ProcessRunner: @unchecked Sendable {
     private var abandoned = false
     private var cancelRequested = false
     private var terminatedEarly = false
-    private var terminating = false
     private var reaped = false
     private var drainScheduled = false
     private var stdoutLeft = false
@@ -371,10 +370,10 @@ private final class ProcessRunner: @unchecked Sendable {
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
 
             // Checked again right before actually spawning: `cancel()` may
-            // have run concurrently with the setup above. If it fired, the
-            // group is still balanced (never entered by any of the natural
-            // triggers below, since the process never runs) only once we
-            // explicitly leave it ourselves here.
+            // have run concurrently with the setup above. If so, the
+            // process never launches, so none of stdout EOF, stderr EOF or
+            // termination will ever leave the group; `abandonUnlaunchedProcess`
+            // balances it.
             lock.lock()
             let cancelledBeforeRun = cancelRequested
             lock.unlock()
@@ -441,11 +440,10 @@ private final class ProcessRunner: @unchecked Sendable {
 
     private func handleEarlyTermination(gracePeriod: TimeInterval, reason: String) {
         lock.lock()
-        guard hasLaunched, process.isRunning, !terminating else {
+        guard hasLaunched, process.isRunning, !terminatedEarly else {
             lock.unlock()
             return
         }
-        terminating = true
         terminatedEarly = true
         lock.unlock()
 
@@ -561,7 +559,7 @@ private final class ProcessRunner: @unchecked Sendable {
 
         // The process was never actually run (cancelled before launch, or
         // failed to launch): `abandonUnlaunchedProcess` already tore things
-        // down and resumed with the right failure. `terminationReason`/
+        // down; `run()` resumes with the right failure itself. `terminationReason`/
         // `terminationStatus` are undefined on a `Process` that never ran.
         // Guarding on `abandoned` (set synchronously before `run()` even
         // leaves the group) rather than `hasLaunched` (set only after
