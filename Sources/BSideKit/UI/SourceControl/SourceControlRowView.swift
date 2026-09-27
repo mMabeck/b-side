@@ -6,6 +6,8 @@ import SwiftUI
 struct SourceControlRowView: View {
     let row: SourceControlStore.Row
     let palette: BSidePalette
+    /// Hidden inside a folder tree row, where the folder path already conveys it.
+    var showsDirectory: Bool = true
     var onStage: (() -> Void)?
     var onUnstage: (() -> Void)?
     var onDiscard: (() -> Void)?
@@ -26,7 +28,7 @@ struct SourceControlRowView: View {
                     .foregroundStyle(palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if !row.directory.isEmpty {
+                if showsDirectory, !row.directory.isEmpty {
                     Text(row.directory)
                         .font(.system(size: 10))
                         .foregroundStyle(palette.textDisabled)
