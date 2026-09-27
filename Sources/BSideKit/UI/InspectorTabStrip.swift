@@ -21,8 +21,8 @@ struct InspectorTabStrip<Tab: Hashable>: NSViewRepresentable {
         makeControl(target: context.coordinator, action: #selector(Coordinator.selectionChanged(_:)))
     }
 
-    /// Split out of ``makeNSView(context:)`` so tests can assert on a real,
-    /// configured control without an `NSViewRepresentableContext`, which can't be constructed outside SwiftUI.
+    /// Split out of ``makeNSView(context:)``: it can be built without an
+    /// `NSViewRepresentableContext`, which can't be constructed outside SwiftUI.
     func makeControl(target: AnyObject?, action: Selector?) -> NSSegmentedControl {
         let control = NSSegmentedControl()
         control.segmentStyle = .automatic

@@ -17,11 +17,10 @@ private extension UTType {
 
 /// Left sidebar: projects with tasks nested beneath.
 ///
-/// Uses a themed SwiftUI `List`, not `NSOutlineView` (native-rewrite.md §8's
-/// stated reason for preferring it — large, drag-reorderable lists — doesn't
-/// apply yet). The blocker that did matter, translucent "Liquid Glass"
-/// chrome, turned out fixable at the window level (`ThemedWindow.neutralizeVibrancy`)
-/// regardless of list technology. Revisit if this needs drag-to-reorder or grows large.
+/// Uses a themed SwiftUI `List`, not `NSOutlineView`. The blocker that did
+/// matter, translucent "Liquid Glass" chrome, turned out fixable at the
+/// window level (`ThemedWindow.neutralizeVibrancy`) regardless of list
+/// technology. Revisit if this grows large.
 struct SidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
@@ -355,8 +354,8 @@ struct SidebarView: View {
 
     private static let selectionBleed: CGFloat = 17
 
-    /// Measured against a snapshot (`SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`):
-    /// `projectRow`'s collapsible header gets extra leading indent from `.sidebar`'s disclosure chevron.
+    /// Measured against an offscreen snapshot: `projectRow`'s collapsible header
+    /// gets extra leading indent from `.sidebar`'s disclosure chevron.
     private static let taskLeadingIndent: CGFloat = 3
 
     /// Measured the same way: the plain "Active" `Section` header has its own built-in inset, differing from `taskLeadingIndent`.
