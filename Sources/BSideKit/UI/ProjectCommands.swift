@@ -33,12 +33,17 @@ public struct ProjectCommands: Commands {
                     store.pendingTaskCreationProject = project
                 }
             }
-            .keyboardShortcut("n", modifiers: [.command])
+            .keyboardShortcut(ProjectCommandShortcut.newTask)
 
             Button("Add Project…") {
                 ProjectCreation.addProject(store: store)
             }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .keyboardShortcut(ProjectCommandShortcut.addProject)
         }
     }
+}
+
+public enum ProjectCommandShortcut {
+    public static let newTask = KeyboardShortcut("n", modifiers: [.command])
+    public static let addProject = KeyboardShortcut("n", modifiers: [.command, .shift])
 }
