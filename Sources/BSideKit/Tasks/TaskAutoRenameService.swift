@@ -6,6 +6,8 @@ import OSLog
 /// renamed to match. The worktree directory is never moved — moving it out
 /// from under a live pi process breaks pi's tools (stale cwd) and transcript
 /// lookup — so it stays put for the task's lifetime, like Claude Desktop/Codex.
+/// `deriveTitle` is the heuristic fallback when `TaskTitleGenerator` returns nil.
+
 public enum TaskAutoRenameService {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-auto-rename")
 

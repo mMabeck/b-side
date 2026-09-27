@@ -810,10 +810,23 @@ public final class ProjectsStore {
         tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == id }
     }
 
-    /// Clears `awaitingAutoRename` even on a failed derivation, so this never re-fires for the same task.
+    /// Injectable so tests can stub the local title model.
+    public var titleGenerator: (String) async -> String? = TaskTitleGenerator.generate
+
+    /// Tries the local title model, then the heuristic. Clears `awaitingAutoRename`
+    /// even when neither yields a title, so this never re-fires for the same task.
     public func applyAutoRename(task: TaskRecord, project: Project, prompt: String) async {
         guard task.awaitingAutoRename else { return }
-        guard let title = TaskAutoRenameService.deriveTitle(fromPrompt: prompt) else {
+
+        let title: String
+        if let modelTitle = await titleGenerator(prompt) {
+            title = modelTitle
+        } else if let heuristicTitle = TaskAutoRenameService.deriveTitle(fromPrompt: prompt) {
+            Self.logger.notice(
+                "auto-rename falling back to heuristic title for task \(task.id ?? -1, privacy: .public)"
+            )
+            title = heuristicTitle
+        } else {
             await clearAwaitingAutoRename(task)
             return
         }
