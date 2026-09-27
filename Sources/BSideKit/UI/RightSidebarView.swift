@@ -103,6 +103,7 @@ struct RightSidebarView: View {
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(theme.palette.accent)
+            .help("Show All Changes (\u{2318}\u{21e7}D)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -162,8 +163,13 @@ struct RightSidebarView: View {
         List(selection: $selection) {
             if !scStore.staged.isEmpty {
                 Section {
-                    ForEach(scStore.staged) { row in
-                        rowView(row, onUnstage: { Task { await scStore.unstage([row]) } })
+                    ForEach(ChangesTreeBuilder.build(scStore.staged)) { node in
+                        SourceControlTreeRow(
+                            node: node,
+                            palette: theme.palette,
+                            onUnstageFolder: { rows in Task { await scStore.unstage(rows) } },
+                            rowContent: { row in rowView(row, onUnstage: { Task { await scStore.unstage([row]) } }) }
+                        )
                     }
                 } header: {
                     sectionHeader(
@@ -176,8 +182,13 @@ struct RightSidebarView: View {
 
             if !scStore.unstaged.isEmpty {
                 Section {
-                    ForEach(scStore.unstaged) { row in
-                        rowView(row, onStage: { Task { await scStore.stage([row]) } })
+                    ForEach(ChangesTreeBuilder.build(scStore.unstaged)) { node in
+                        SourceControlTreeRow(
+                            node: node,
+                            palette: theme.palette,
+                            onStageFolder: { rows in Task { await scStore.stage(rows) } },
+                            rowContent: { row in rowView(row, onStage: { Task { await scStore.stage([row]) } }) }
+                        )
                     }
                 } header: {
                     sectionHeader(
@@ -190,8 +201,8 @@ struct RightSidebarView: View {
 
             if !scStore.branchChanges.isEmpty {
                 Section("Committed on this branch") {
-                    ForEach(scStore.branchChanges) { row in
-                        rowView(row)
+                    ForEach(ChangesTreeBuilder.build(scStore.branchChanges)) { node in
+                        SourceControlTreeRow(node: node, palette: theme.palette, rowContent: { row in rowView(row) })
                     }
                 }
             }
@@ -234,7 +245,7 @@ struct RightSidebarView: View {
             requestDiscard(for: selectedRowsOrThis(row))
         } : nil
 
-        return SourceControlRowView(row: row, palette: theme.palette, onStage: onStage, onUnstage: onUnstage, onDiscard: onDiscard)
+        return SourceControlRowView(row: row, palette: theme.palette, showsDirectory: false, onStage: onStage, onUnstage: onUnstage, onDiscard: onDiscard)
             .tag(row.id)
             .contentShape(Rectangle())
             .onTapGesture { openDiff(for: row) }
@@ -415,4 +426,96 @@ private struct DiscardConfirmation: Identifiable {
     let rows: [SourceControlStore.Row]
     let title: String
     var id: String { rows.map(\.id).joined(separator: ",") }
+}
+
+/// Renders a `ChangesTreeRowNode`: folders as expanded-by-default `DisclosureGroup`s
+/// with combined +/− counts (and, if given, whole-folder stage/unstage on hover), files via `rowContent`.
+private struct SourceControlTreeRow<RowContent: View>: View {
+    let node: ChangesTreeRowNode
+    let palette: BSidePalette
+    var onStageFolder: (([SourceControlStore.Row]) -> Void)?
+    var onUnstageFolder: (([SourceControlStore.Row]) -> Void)?
+    @ViewBuilder var rowContent: (SourceControlStore.Row) -> RowContent
+
+    @State private var isExpanded = true
+    @State private var isHovering = false
+
+    var body: some View {
+        switch node {
+        case .file(let row):
+            rowContent(row)
+        case .folder(let folder):
+            DisclosureGroup(isExpanded: $isExpanded) {
+                ForEach(folder.children) { child in
+                    SourceControlTreeRow(
+                        node: child,
+                        palette: palette,
+                        onStageFolder: onStageFolder,
+                        onUnstageFolder: onUnstageFolder,
+                        rowContent: rowContent
+                    )
+                }
+            } label: {
+                folderLabel(folder)
+            }
+        }
+    }
+
+    private func folderLabel(_ folder: ChangesTreeRowNode.Folder) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder")
+                .font(.system(size: 10))
+                .foregroundStyle(palette.textSecondary)
+            Text(folder.displayName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(palette.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if isHovering, onStageFolder != nil || onUnstageFolder != nil {
+                folderHoverButtons(folder)
+            } else {
+                folderCounts(folder)
+            }
+        }
+        .padding(.vertical, 1)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(folder.displayName), folder, \(folder.linesAdded) additions, \(folder.linesRemoved) deletions")
+    }
+
+    private func folderCounts(_ folder: ChangesTreeRowNode.Folder) -> some View {
+        HStack(spacing: 4) {
+            if folder.linesAdded > 0 {
+                Text("+\(folder.linesAdded)").foregroundStyle(palette.statusSuccess)
+            }
+            if folder.linesRemoved > 0 {
+                Text("\u{2212}\(folder.linesRemoved)").foregroundStyle(palette.statusError)
+            }
+        }
+        .font(.system(size: 9, design: .monospaced))
+    }
+
+    private func folderHoverButtons(_ folder: ChangesTreeRowNode.Folder) -> some View {
+        HStack(spacing: 4) {
+            if let onStageFolder {
+                folderIconButton("plus", label: "Stage \(folder.displayName)") { onStageFolder(folder.children.flatMap(\.leaves)) }
+            }
+            if let onUnstageFolder {
+                folderIconButton("minus", label: "Unstage \(folder.displayName)") { onUnstageFolder(folder.children.flatMap(\.leaves)) }
+            }
+        }
+    }
+
+    private func folderIconButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.textSecondary)
+        .accessibilityLabel(label)
+    }
 }

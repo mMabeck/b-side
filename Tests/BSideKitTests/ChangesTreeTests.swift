@@ -15,7 +15,7 @@ import Testing
     }
 
     @Test func emptyInputProducesNoNodes() {
-        #expect(ChangesTreeBuilder.build([]).isEmpty)
+        #expect(ChangesTreeBuilder.build([ChangesTreeFile]()).isEmpty)
     }
 
     @Test func rootLevelFilesAreLeaves() {
@@ -130,5 +130,47 @@ import Testing
         }
         #expect(renamedFile.path == "new/Name.swift")
         #expect(renamedFile.origPath == "old/Name.swift")
+    }
+
+    private func row(_ path: String, origin: SourceControlStore.Row.Origin, added: Int? = nil, removed: Int? = nil) -> SourceControlStore.Row {
+        if origin == .branch {
+            return SourceControlStore.Row(
+                branchChange: GitCLI.BranchFileChange(path: path, kind: .modified, linesAdded: added, linesRemoved: removed, isBinary: false)
+            )
+        }
+        return SourceControlStore.Row(
+            fileChange: GitCLI.FileChange(
+                path: path,
+                kind: .modified,
+                area: origin == .staged ? .staged : .unstaged,
+                linesAdded: added,
+                linesRemoved: removed
+            ),
+            origin: origin
+        )
+    }
+
+    @Test(arguments: [
+        SourceControlStore.Row.Origin.staged,
+        SourceControlStore.Row.Origin.unstaged,
+        SourceControlStore.Row.Origin.branch,
+    ])
+    func buildingFromRowsPreservesRowIdentityAndAggregatesCounts(origin: SourceControlStore.Row.Origin) {
+        let tree = ChangesTreeBuilder.build([
+            row("a/b/One.swift", origin: origin, added: 3, removed: 1),
+            row("a/b/Two.swift", origin: origin, added: 5, removed: 0),
+        ])
+        guard case .folder(let folder) = tree.first else {
+            Issue.record("expected a compressed folder node")
+            return
+        }
+        #expect(folder.displayName == "a/b")
+        #expect(folder.linesAdded == 8)
+        #expect(folder.linesRemoved == 1)
+        guard case .file(let firstRow) = folder.children.first else {
+            Issue.record("expected a file leaf carrying the original row")
+            return
+        }
+        #expect(firstRow.origin == origin)
     }
 }
