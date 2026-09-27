@@ -47,13 +47,6 @@ struct TaskCreationView: View {
 
     /// Changeable via `projectField`; dependent fields are re-seeded in `applyProjectDefaults(_:)`.
     @State private var selectedProject: Project
-    @State private var isProjectPickerOpen = false
-    @State private var projectQuery = ""
-    @State private var highlightedProjectIndex = 0
-    /// Set only by arrow keys so hovering a half-visible row doesn't make the list jump under the pointer.
-    @State private var projectScrollTarget: Int?
-    @State private var projectDropdownContentHeight: CGFloat = 0
-    @FocusState private var projectQueryFocused: Bool
 
     @State private var name = ""
     @State private var baseRef: String
@@ -85,27 +78,38 @@ struct TaskCreationView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-
+        NavigationStack {
             Group {
                 if isCreating || isFinished || errorMessage != nil {
                     creationProgressView
                 } else {
-                    formView
+                    Form {
+                        formSections
+                    }
+                    .formStyle(.grouped)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
-
-            Rectangle()
-                .fill(theme.palette.separator)
-                .frame(height: 1)
-
-            footer
+            .navigationTitle("New Task")
+            .navigationSubtitle(selectedProject.displayName)
+            .toolbar {
+                if isFinished || errorMessage != nil {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                            .keyboardShortcut(.defaultAction)
+                    }
+                } else if !isCreating {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Create") { create() }
+                            .disabled(!canCreate)
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
+            }
         }
-        .frame(width: 460)
-        .background(theme.palette.windowBackground)
+        .frame(width: 480)
         // The sheet gets its own `NSWindow`, so system-drawn text needs the palette applied to it directly too.
         .themedWindow(theme.palette)
         // The `guard` after both awaits drops a stale load if the project changed again before it finished.
@@ -122,248 +126,62 @@ struct TaskCreationView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("New Task")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(theme.palette.textPrimary)
-            Text("in \(selectedProject.displayName)")
-                .font(.system(size: 12))
-                .foregroundStyle(theme.palette.textSecondary)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .padding(.bottom, 16)
-    }
-
     // MARK: - Form
 
-    private var formView: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            formRow("Project") {
-                projectField
-            }
+    @ViewBuilder
+    private var formSections: some View {
+        Section {
+            projectField
+            TextField("Task Name (Optional)", text: $name, prompt: Text("New Task"))
+        }
 
-            formRow("Task name (optional)") {
-                themedTextField("New Task", text: $name)
+        Section {
+            Toggle("Use Worktree", isOn: $useWorktree)
+        } footer: {
+            if !useWorktree {
+                Text("Runs in the project folder on its current branch.")
             }
+        }
 
-            formRow("Use worktree") {
-                worktreeToggleRow
-            }
-
-            if useWorktree {
-                formRow("Start from") {
-                    modeToggle
+        if useWorktree {
+            Section {
+                Picker("Start From", selection: $mode) {
+                    ForEach(Mode.allCases) { candidate in
+                        Text(candidate.rawValue).tag(candidate)
+                    }
                 }
+                .pickerStyle(.segmented)
 
                 switch mode {
                 case .newBranch:
-                    formRow("Base ref") {
-                        if baseRefOptions.isEmpty {
-                            themedTextField("main", text: $baseRef)
-                        } else {
-                            baseRefPicker
-                        }
-                    }
+                    baseRefField
                 case .existingBranch:
-                    formRow("Branch") {
-                        if branches.isEmpty {
-                            Text("No local branches found.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(theme.palette.textDisabled)
-                        } else {
-                            branchPicker
-                        }
-                    }
+                    branchPicker
                 }
             }
         }
-    }
-
-    private func formRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(theme.palette.textSecondary)
-            content()
-        }
-    }
-
-    private func themedTextField(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField(placeholder, text: text)
-            .textFieldStyle(.plain)
-            .font(.system(size: 13))
-            .foregroundStyle(theme.palette.textPrimary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(theme.palette.elevatedSurfaceBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(theme.palette.separator, lineWidth: 1)
-            )
     }
 
     // MARK: - Project picker
 
-    private var projectMatches: [Project] {
-        FuzzyMatcher.rank(
-            query: projectQuery,
-            items: store.projects,
-            text: { [$0.displayName] },
-            secondaryText: { [$0.path] }
+    private var projectIDBinding: Binding<Int64?> {
+        Binding(
+            get: { selectedProject.id },
+            set: { newID in
+                guard let newID, let candidate = store.projects.first(where: { $0.id == newID }),
+                      candidate.id != selectedProject.id else { return }
+                selectedProject = candidate
+                applyProjectDefaults(candidate)
+            }
         )
     }
 
-    /// Closed only by choosing a project or Escape, not focus loss, so a click on a dropdown row is never raced against a focus-driven close.
     private var projectField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if isProjectPickerOpen {
-                themedTextField("Search projects…", text: $projectQuery)
-                    .focused($projectQueryFocused)
-                    .accessibilityLabel("Search projects")
-                    .onChange(of: projectQuery) { _, _ in highlightedProjectIndex = 0 }
-                    .onKeyPress(.downArrow) {
-                        guard !projectMatches.isEmpty else { return .ignored }
-                        highlightedProjectIndex = min(highlightedProjectIndex + 1, projectMatches.count - 1)
-                        projectScrollTarget = highlightedProjectIndex
-                        return .handled
-                    }
-                    .onKeyPress(.upArrow) {
-                        guard !projectMatches.isEmpty else { return .ignored }
-                        highlightedProjectIndex = max(highlightedProjectIndex - 1, 0)
-                        projectScrollTarget = highlightedProjectIndex
-                        return .handled
-                    }
-                    .onKeyPress(.return) {
-                        guard projectMatches.indices.contains(highlightedProjectIndex) else { return .ignored }
-                        chooseProject(projectMatches[highlightedProjectIndex])
-                        return .handled
-                    }
-                    .onKeyPress(.escape) {
-                        closeProjectPicker()
-                        return .handled
-                    }
-                    .task { projectQueryFocused = true }
-
-                projectDropdown
-            } else {
-                Button {
-                    projectQuery = ""
-                    highlightedProjectIndex = 0
-                    isProjectPickerOpen = true
-                } label: {
-                    themedMenuLabel(selectedProject.displayName, isPlaceholder: false)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Project")
-                .accessibilityValue(selectedProject.displayName)
-                .accessibilityHint("Change the project this task belongs to")
+        Picker("Project", selection: projectIDBinding) {
+            ForEach(store.projects) { project in
+                Text(project.displayName).tag(project.id)
             }
         }
-    }
-
-    /// Hugs its rows below `maxHeight` instead of letting the greedy `ScrollView` claim full height and overlap fields beneath it.
-    private var projectDropdown: some View {
-        let maxHeight: CGFloat = 220
-        return ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                projectDropdownRows
-                    .background(
-                        GeometryReader { geometry in
-                            Color.clear.preference(key: DropdownHeightKey.self, value: geometry.size.height)
-                        }
-                    )
-            }
-            .scrollIndicators(.automatic)
-            .onPreferenceChange(DropdownHeightKey.self) { projectDropdownContentHeight = $0 }
-            .onChange(of: projectScrollTarget) { _, target in
-                guard let target else { return }
-                proxy.scrollTo(target)
-                projectScrollTarget = nil
-            }
-            .onChange(of: projectQuery) { _, _ in proxy.scrollTo(0, anchor: .top) }
-        }
-        .frame(height: min(max(projectDropdownContentHeight, 1), maxHeight))
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(theme.palette.surfaceBackground)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(theme.palette.separator, lineWidth: 1)
-        )
-    }
-
-    private var projectDropdownRows: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if projectMatches.isEmpty {
-                Text("No matching projects")
-                    .font(.system(size: 12))
-                    .foregroundStyle(theme.palette.textDisabled)
-                    .padding(10)
-            } else {
-                ForEach(Array(projectMatches.enumerated()), id: \.element.id) { index, candidate in
-                    Button {
-                        chooseProject(candidate)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(candidate.displayName)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(theme.palette.textPrimary)
-                                Text(candidate.path)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(theme.palette.textSecondary)
-                            }
-                            Spacer()
-                            if candidate.id == selectedProject.id {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(theme.palette.accent)
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .background(
-                            index == highlightedProjectIndex
-                                ? theme.palette.elevatedSurfaceBackground
-                                : Color.clear
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .id(index)
-                    .onHover { hovering in
-                        if hovering { highlightedProjectIndex = index }
-                    }
-                    .accessibilityLabel(candidate.displayName)
-                    .accessibilityValue(candidate.id == selectedProject.id ? "Selected" : "")
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func chooseProject(_ candidate: Project) {
-        closeProjectPicker()
-        guard candidate.id != selectedProject.id else { return }
-        selectedProject = candidate
-        applyProjectDefaults(candidate)
-    }
-
-    private func closeProjectPicker() {
-        isProjectPickerOpen = false
-        projectQuery = ""
-        highlightedProjectIndex = 0
-        projectQueryFocused = false
     }
 
     /// Branches/base refs are reloaded by `body`'s `.task(id:)`, not here; clearing them just avoids showing stale options while that reload is in flight.
@@ -377,76 +195,40 @@ struct TaskCreationView: View {
         baseRefOptions = []
     }
 
-    private var modeToggle: some View {
-        Picker("Start from", selection: $mode) {
-            ForEach(Mode.allCases) { candidate in
-                Text(candidate.rawValue).tag(candidate)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-    }
+    // MARK: - Branch / base ref
 
-    private var worktreeToggleRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Use worktree", isOn: $useWorktree)
-                .toggleStyle(.switch)
-                .labelsHidden()
-            if !useWorktree {
-                Text("Runs in the project folder on its current branch.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.palette.textSecondary)
-            }
-        }
-    }
-
-    private var branchPicker: some View {
-        Menu {
-            ForEach(branches) { branch in
-                Button(TaskCreationValidation.displayName(for: branch)) {
-                    selectedBranch = branch.name
+    /// A free-text field rather than a closed picker, so typing a name that
+    /// isn't in `baseRefOptions` (yet, or ever) still works; the suggestions
+    /// popover offers fuzzy-ranked existing refs without constraining input.
+    private var baseRefField: some View {
+        TextField("Base Ref", text: $baseRef, prompt: Text("main"))
+            .textInputSuggestions {
+                ForEach(baseRefSuggestions, id: \.self) { ref in
+                    Text(ref).textInputCompletion(ref)
                 }
-                .disabled(branch.isCheckedOut)
             }
-        } label: {
-            themedMenuLabel(selectedBranch ?? "Choose…", isPlaceholder: selectedBranch == nil)
-        }
-        .themedMenuStyle()
     }
 
-    private var baseRefPicker: some View {
-        Menu {
-            ForEach(baseRefOptions, id: \.self) { ref in
-                Button(ref) { baseRef = ref }
-            }
-        } label: {
-            themedMenuLabel(baseRef.isEmpty ? "Choose…" : baseRef, isPlaceholder: baseRef.isEmpty)
-        }
-        .themedMenuStyle()
+    private var baseRefSuggestions: [String] {
+        guard !baseRefOptions.isEmpty else { return [] }
+        return FuzzyMatcher.rank(query: baseRef, items: baseRefOptions, text: { [$0] })
     }
 
-    private func themedMenuLabel(_ text: String, isPlaceholder: Bool) -> some View {
-        HStack {
-            Text(text)
-                .foregroundStyle(isPlaceholder ? theme.palette.textDisabled : theme.palette.textPrimary)
-            Spacer()
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 10))
-                .foregroundStyle(theme.palette.textSecondary)
+    @ViewBuilder
+    private var branchPicker: some View {
+        if branches.isEmpty {
+            Text("No local branches found.")
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("Branch", selection: $selectedBranch) {
+                Text("Choose…").tag(String?.none)
+                ForEach(branches) { branch in
+                    Text(TaskCreationValidation.displayName(for: branch))
+                        .tag(Optional(branch.name))
+                        .disabled(branch.isCheckedOut)
+                }
+            }
         }
-        .font(.system(size: 13))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(theme.palette.elevatedSurfaceBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(theme.palette.separator, lineWidth: 1)
-        )
     }
 
     private var canCreate: Bool {
@@ -463,6 +245,7 @@ struct TaskCreationView: View {
 
     private var creationProgressView: some View {
         VStack(alignment: .leading, spacing: 12) {
+            statusLine
             logPanel
 
             if let errorMessage {
@@ -471,83 +254,53 @@ struct TaskCreationView: View {
                     .foregroundStyle(theme.palette.statusError)
             }
         }
+        .padding(20)
     }
 
-    private var logPanel: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(logLines.enumerated()), id: \.offset) { index, line in
-                        Text(line)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(theme.palette.textSecondary)
-                            .id(index)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-            }
-            .frame(height: 220)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(theme.palette.surfaceBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(theme.palette.separator, lineWidth: 1)
-            )
-            .onChange(of: logLines.count) { _, newCount in
-                guard newCount > 0 else { return }
-                withAnimation {
-                    proxy.scrollTo(newCount - 1, anchor: .bottom)
-                }
-            }
-        }
-    }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: 8) {
-            if isCreating {
+    @ViewBuilder
+    private var statusLine: some View {
+        if isCreating {
+            HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
                 Text("Creating…")
                     .font(.system(size: 12))
                     .foregroundStyle(theme.palette.textSecondary)
-            } else if isFinished {
-                Label("Task created", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.statusSuccess)
-            } else if errorMessage != nil {
-                Label("Creation failed", systemImage: "xmark.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(theme.palette.statusError)
             }
+        } else if isFinished {
+            Label("Task created", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.palette.statusSuccess)
+        } else if errorMessage != nil {
+            Label("Creation failed", systemImage: "xmark.circle.fill")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.palette.statusError)
+        }
+    }
 
-            Spacer()
-
-            if isCreating || isFinished || errorMessage != nil {
-                ThemedSheetButton(
-                    title: isFinished || errorMessage != nil ? "Done" : "Cancel",
-                    palette: theme.palette,
-                    isPrimary: true,
-                    action: { dismiss() }
-                )
-            } else {
-                ThemedSheetButton(title: "Cancel", palette: theme.palette, action: { dismiss() })
-                ThemedSheetButton(
-                    title: "Create",
-                    palette: theme.palette,
-                    isPrimary: true,
-                    isEnabled: canCreate,
-                    isDefaultAction: true,
-                    action: { create() }
-                )
+    private var logPanel: some View {
+        GroupBox {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(logLines.enumerated()), id: \.offset) { index, line in
+                            Text(line)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(theme.palette.textSecondary)
+                                .id(index)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onChange(of: logLines.count) { _, newCount in
+                    guard newCount > 0 else { return }
+                    withAnimation {
+                        proxy.scrollTo(newCount - 1, anchor: .bottom)
+                    }
+                }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .frame(height: 220)
     }
 
     // MARK: - Create
@@ -581,25 +334,5 @@ struct TaskCreationView: View {
                 errorMessage = String(describing: error)
             }
         }
-    }
-}
-
-private extension View {
-    /// A `Menu` that renders its label exactly as built: `.borderlessButton`
-    /// on macOS discards the label's own background, padding and frame and
-    /// shows bare text, so the themed field box never appeared.
-    func themedMenuStyle() -> some View {
-        self
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct DropdownHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
