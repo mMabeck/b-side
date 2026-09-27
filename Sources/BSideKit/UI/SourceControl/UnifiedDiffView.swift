@@ -56,7 +56,13 @@ struct DiffTextView: NSViewRepresentable {
     let palette: BSidePalette
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
+        let scrollView = NSTextView.scrollableTextView()
+        // `scrollableTextView()` wires up autoresizing, vertical resizing, and
+        // a width-tracking text container; a bare `NSTextView()` stays at a
+        // zero frame and never lays out any glyphs.
+        guard let textView = scrollView.documentView as? NSTextView else {
+            preconditionFailure("NSTextView.scrollableTextView() must return an NSTextView document view")
+        }
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
@@ -67,12 +73,17 @@ struct DiffTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.setAccessibilityLabel("Diff")
 
-        let scrollView = NSScrollView()
-        scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
+
+        // scrollableTextView() wraps to the container width by default; a
+        // diff needs horizontal scrolling for long lines instead.
+        textView.isHorizontallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
         apply(palette: palette, to: textView, scrollView: scrollView)
         textView.textStorage?.setAttributedString(attributedText)

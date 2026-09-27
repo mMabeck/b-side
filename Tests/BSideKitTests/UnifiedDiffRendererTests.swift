@@ -82,3 +82,73 @@ struct UnifiedDiffRendererTests {
         #expect(elapsed < 2.0)
     }
 }
+
+/// Regression test for `DiffTextView`: it must host a real, laid-out
+/// `NSTextView` inside its `NSScrollView`, not a zero-frame view that never
+/// receives layout. Hosts the representable in a real, never-ordered-front
+/// `NSWindow`, matching the pattern in `TerminalSurfaceHostTests`.
+@MainActor
+struct DiffTextViewLayoutTests {
+    private func makeHostedWindow(diff: String) -> NSWindow {
+        let palette = BSidePalette.fallback
+        let attributed = UnifiedDiffRenderer.render(diff, palette: palette)
+        let representable = DiffTextView(attributedText: attributed, palette: palette)
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 600, height: 400),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: representable.frame(width: 600, height: 400))
+        window.setIsVisible(true)
+        return window
+    }
+
+    private func firstScrollView(in view: NSView) -> NSScrollView? {
+        if let scrollView = view as? NSScrollView { return scrollView }
+        for subview in view.subviews {
+            if let found = firstScrollView(in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// Polls rather than sleeping a fixed duration: layout happens on the
+    /// next run-loop pass after the window is ordered in.
+    private func pollUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline { return }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    @Test func diffTextViewLaysOutNonEmptyGlyphsAtARealSize() async throws {
+        let diff = """
+        diff --git a/foo.swift b/foo.swift
+        --- a/foo.swift
+        +++ b/foo.swift
+        @@ -1,1 +1,1 @@
+        -let removed = 2
+        +let added = 2
+        """
+        let window = makeHostedWindow(diff: diff)
+        defer { window.orderOut(nil) }
+
+        var scrollView: NSScrollView?
+        await pollUntil {
+            scrollView = window.contentView.flatMap { self.firstScrollView(in: $0) }
+            return scrollView != nil
+        }
+        let textView = try #require(scrollView?.documentView as? NSTextView)
+        await pollUntil { textView.frame.width > 0 && textView.frame.height > 0 }
+
+        #expect(textView.frame.width > 0)
+        #expect(textView.frame.height > 0)
+
+        let layoutManager = try #require(textView.layoutManager)
+        let textContainer = try #require(textView.textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        #expect(usedRect.width > 0)
+        #expect(usedRect.height > 0)
+    }
+}
