@@ -1,28 +1,12 @@
 import Foundation
 
 /// Pure terminal-native rendering of a task's subagent cards, drawn as text
-/// (box-drawing + SGR colour codes) rather than SwiftUI — mirrors
-/// `agentic/pi/extensions/_agent_cards/card.ts`'s look so the strip reads
-/// like the same terminal it lives above. No AppKit, no libghostty: the
-/// output is plain ANSI text a `SubagentStripHost` (see `GhosttyBridge.swift`)
-/// writes into an in-memory Ghostty surface.
-///
-///     subagents · 2 running · 1 done ────────────── click a card to view · ⌃⌘0 main
-///     ┌─ explorer · Map cache callers ┐ ╔═ builder · Add retry logic ══╗
-///     │ → search "cacheKey"           │ ║ → read src/net/client.ts     ║
-///     │ → read src/cache/store.ts     │ ║                              ║
-///     │                                │ ║                              ║
-///     │ ⠙ working  18s                 │ ║ ! waiting for you  4s        ║
-///     └────────────────────────────────┘ ╚══════════════════════════════╝
-///
-/// The viewed card (the one currently swapped into the main area, if any)
-/// draws with a double-line border instead of the accent single line, so
-/// which surface is live is legible from the strip alone.
+/// (box-drawing + SGR colour codes), not SwiftUI, so the strip reads like
+/// the terminal it lives above. Plain ANSI text a `SubagentStripHost` writes
+/// into an in-memory Ghostty surface. The viewed card draws with a
+/// double-line border instead of a single line, so which surface is live is legible from the strip alone.
 public enum SubagentStripRenderer {
-    /// Fixed body-row budget: 3 tool-call lines plus a status row, framed by
-    /// a top and bottom border — 6 rows per card, plus the label/rule row
-    /// below. `GhosttyBridge`'s strip host turns this into a point height
-    /// using the surface's own cell metrics.
+    /// 3 tool-call lines plus a status row, framed top/bottom — 6 rows per card, plus the label row below.
     public static let cardBodyRowCount = 4
     public static let cardRowCount = cardBodyRowCount + 2 // + top/bottom border
     public static let labelRowCount = 1
@@ -31,10 +15,7 @@ public enum SubagentStripRenderer {
     public static let minCardWidth = 30
     private static let columnGap = 1
 
-    /// One rendered card's column span within the strip, in 0-based
-    /// terminal columns — shared by rendering and by
-    /// `SubagentStripMouseParser.hitTest` so a click always resolves against
-    /// exactly the layout that was drawn.
+    /// Shared by rendering and `SubagentStripMouseParser.hitTest` so a click always resolves against the layout drawn.
     public struct CardSlot: Equatable {
         public let childId: String
         public let columnRange: Range<Int>
@@ -45,12 +26,10 @@ public enum SubagentStripRenderer {
     }
 
     public struct Result: Equatable {
-        /// Exactly `totalRowCount` lines, each `columns` visible characters
-        /// wide (ANSI escapes aside), or empty if `runs` is empty.
+        /// Exactly `totalRowCount` lines, each `columns` wide (ANSI aside), or empty if `runs` is empty.
         public let lines: [String]
         public let slots: [CardSlot]
-        /// Column range of the "main" hint in the label row, so clicking it
-        /// can be hit-tested the same way as a card.
+        /// The "main" hint's column range in the label row, hit-testable like a card.
         public let mainHintRange: Range<Int>?
 
         public init(lines: [String], slots: [CardSlot], mainHintRange: Range<Int>?) {
@@ -79,10 +58,7 @@ public enum SubagentStripRenderer {
             return Result(lines: [], slots: [], mainHintRange: nil)
         }
 
-        // Too narrow for even one card: cards need `minCardWidth` columns,
-        // and anything wider than the surface would wrap onto an extra row —
-        // clamp to just the label row instead, which already fits `columns`
-        // exactly via `fit()`.
+        // Too narrow for even one card: clamp to just the label row, which fits `columns` exactly via `fit()`.
         guard columns >= minCardWidth else {
             let (labelLine, mainHintRange) = renderLabelRow(runs: runs, columns: columns, hiddenCount: 0)
             let blankRow = String(repeating: " ", count: columns)
@@ -206,11 +182,8 @@ public enum SubagentStripRenderer {
         let label = " " + parts.joined(separator: " · ") + " "
 
         let hint = "click a card to view · ⌃⌘0 main"
-        // Clamped to `columns`: with several states in play (running,
-        // blocked, done, +N more) the label alone can exceed a narrow
-        // strip — `hintStart` must never land past the end of the line, or
-        // the range built below would have its lower bound past its upper
-        // one.
+        // Clamped: with several states in play the label alone can exceed a
+        // narrow strip, so `hintStart` must never land past the line's end.
         let hintStart = min(max(label.count, columns - hint.count - 1), columns)
         let ruleWidth = max(0, hintStart - label.count)
         let plain = label + String(repeating: "─", count: ruleWidth) + " " + hint
@@ -232,10 +205,7 @@ public enum SubagentStripRenderer {
         return "\(minutes)m \(String(format: "%02d", seconds))s"
     }
 
-    /// Pads `text` to exactly `width` visible columns, or clips it — the
-    /// same contract as `card.ts`'s `fit`, minus ANSI-awareness (callers
-    /// here only ever pass plain text into `fit`, colour is layered around
-    /// it afterwards).
+    /// Pads or clips to exactly `width`; callers only pass plain text, colour is layered around it afterwards.
     static func fit(_ text: String, width: Int) -> String {
         guard width > 0 else { return "" }
         if text.count > width {
