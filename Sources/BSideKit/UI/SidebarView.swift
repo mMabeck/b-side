@@ -2,9 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// A dragged project header's payload: just its id, since `SidebarView`
-/// resolves source/destination indexes from `store.projects` itself rather
-/// than round-tripping any project data through the drag session.
+/// Just the id; `SidebarView` resolves source/destination indexes from `store.projects` itself.
 private struct ProjectDragPayload: Codable, Transferable {
     let projectID: Int64
 
@@ -17,21 +15,13 @@ private extension UTType {
     static var bSideProjectID: UTType { UTType(exportedAs: "dev.mabeck.bside.project-id") }
 }
 
-/// Left sidebar: projects with tasks nested beneath, arranged like Dash's
-/// Electron task tree but styled after cmux's project list.
+/// Left sidebar: projects with tasks nested beneath.
 ///
-/// Uses a themed SwiftUI `List`, not `NSOutlineView`. The doc's stated reason
-/// for preferring `NSOutlineView` (native-rewrite.md §8) is large,
-/// frequently-updating, per-row-status lists with drag reordering; this list
-/// is neither large nor drag-reorderable yet, and `Section(isExpanded:)`
-/// gives collapsible project sections with a native disclosure chevron and
-/// free keyboard navigation. The blocker that actually mattered — the
-/// sidebar column rendering translucent, macOS-controlled "Liquid Glass"
-/// chrome instead of this app's own opaque themed colour — turned out to be
-/// fixable at the window level (see `ThemedWindow.neutralizeVibrancy`)
-/// regardless of which list technology sits inside it. Revisit `NSOutlineView`
-/// if/when this list needs drag-to-reorder or grows large enough that
-/// `List`'s diffing becomes a real cost.
+/// Uses a themed SwiftUI `List`, not `NSOutlineView` (native-rewrite.md §8's
+/// stated reason for preferring it — large, drag-reorderable lists — doesn't
+/// apply yet). The blocker that did matter, translucent "Liquid Glass"
+/// chrome, turned out fixable at the window level (`ThemedWindow.neutralizeVibrancy`)
+/// regardless of list technology. Revisit if this needs drag-to-reorder or grows large.
 struct SidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
@@ -115,11 +105,7 @@ struct SidebarView: View {
                 .scrollContentBackground(.hidden)
             }
 
-            // A persistent footer, not another `List` row: it must stay put
-            // while the list above it scrolls, and be reachable even when
-            // `store.projects` is empty (the empty state above already offers
-            // its own "Add Project" button, but keeping this one too means the
-            // affordance is always in the same place).
+            // Persistent footer, not a `List` row: stays put while the list scrolls, reachable even when empty.
             Rectangle().fill(theme.palette.separator).frame(height: 1)
             addProjectFooter
         }
@@ -158,43 +144,27 @@ struct SidebarView: View {
         }
     }
 
-    /// Open task terminals ordered by recent activity (opened last sorts
-    /// first once bumped by a real agent event), paired with the task and
-    /// owning project each id resolves to — the same order
-    /// `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes into, so a
-    /// row's position here always matches the ⌘-digit that selects it, even
-    /// as that position shifts with activity.
-    /// Entries whose task has since been archived/deleted resolve to `nil`
-    /// and are dropped rather than shown as a dead row; `MainAreaView`
-    /// prunes `openTerminalTaskIDs` on the same event, so that's normally
-    /// momentary at most.
+    /// Same order `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes
+    /// into, so a row's position always matches its ⌘-digit. An archived/deleted
+    /// task's entry resolves to `nil` and is dropped, normally momentary at most.
     private var activeTaskEntries: [(taskID: Int64, task: TaskRecord, project: Project)] {
         store.openTerminalTaskIDs.compactMap { id in
             store.taskAndProject(forID: id).map { (taskID: id, task: $0.task, project: $0.project) }
         }
     }
 
-    /// A task's derived status and the trailing-edge bits `taskRow` and
-    /// `activeTaskRow` both show alongside it — the single place that combines
-    /// `TaskStatus.derive`'s inputs (subagent summary, vanished-worktree,
-    /// branch sync, needs-attention) so the two rows can never derive a
-    /// task's status differently from one another.
+    /// The single place combining `TaskStatus.derive`'s inputs so `taskRow` and `activeTaskRow` never disagree.
     private struct TaskStatusInfo {
         let status: TaskStatus
         let summary: TaskChildSummary
         let isVanished: Bool
-        /// True only when the branch is merged into its base ref *and* has
-        /// no uncommitted changes sitting on top of it
-        /// (`BranchSyncSummary.isEffectivelyMerged`).
+        /// Merged into base ref *and* no uncommitted changes on top.
         let isMerged: Bool
-        /// Whether the task has commits or uncommitted edits the base ref
-        /// doesn't have yet — mutually exclusive with `isMerged`.
+        /// Mutually exclusive with `isMerged`.
         let hasPendingWork: Bool
         let pendingAhead: Int
         let hasUncommittedChanges: Bool
-        /// `nil` when `isMerged` — the merged pill already covers that case,
-        /// and this is reserved for the quiet behind-only caption so the two
-        /// never say the same thing twice.
+        /// `nil` when `isMerged`, so the two never say the same thing twice.
         let syncText: String?
     }
 
@@ -226,15 +196,7 @@ struct SidebarView: View {
         )
     }
 
-    /// A row in the "Active" section: the same status dot `taskRow` shows,
-    /// its name, and its project's name, since "Active" spans every project
-    /// rather than nesting under one. Selecting it behaves exactly like the
-    /// matching row under its project below. The ⌘-digit shortcut (only the
-    /// first 9 entries have one — `NavigationShortcuts` can't address past
-    /// index 8) is still discoverable, just not via a visible label: it stays
-    /// live in the "Go" menu (`NavigationCommands`) and surfaces here only as
-    /// a `.help` tooltip, so this row's leading column can show status
-    /// instead of a shortcut hint.
+    /// The ⌘-digit shortcut (only the first 9 entries have one) surfaces only as a `.help` tooltip, not a visible label.
     private func activeTaskRow(_ task: TaskRecord, project: Project, shortcutIndex: Int) -> some View {
         let isSelected = store.selectedTaskID == task.id
         let primary = theme.palette.textPrimary
@@ -294,12 +256,7 @@ struct SidebarView: View {
         }
     }
 
-    /// Moves the project with `draggedID` to the position `ontoID` currently
-    /// occupies, called from a project header's `.dropDestination`. Returns
-    /// whether the drop was accepted, as `dropDestination`'s closure expects.
-    /// Accepted without moving anything when the ids match; rejected
-    /// (`false`) when either id can't be resolved against `store.projects`,
-    /// e.g. a stale payload from a project since removed.
+    /// Accepted without moving when ids match; rejected if either id can't be resolved (e.g. a stale payload).
     private func reorderProject(draggedID: Int64, ontoID: Int64?) -> Bool {
         guard let ontoID, draggedID != ontoID else { return true }
         guard let fromIndex = store.projects.firstIndex(where: { $0.id == draggedID }),
@@ -309,9 +266,7 @@ struct SidebarView: View {
         return true
     }
 
-    /// A project row: just the project's folder name, bold, with the
-    /// add-task button and task count trailing. Branch and path live on the
-    /// project dashboard instead, keeping the sidebar scannable.
+    /// Branch and path live on the project dashboard instead, keeping the sidebar scannable.
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
         let isSelected = store.selectedProjectID == project.id && store.selectedTaskID == nil
         let primary = theme.palette.textPrimary
@@ -368,22 +323,13 @@ struct SidebarView: View {
         }
     }
 
-    /// Whether `project` has a neighbour on `direction`'s side to move
-    /// towards — disables the "Move Up"/"Move Down" context menu items and
-    /// accessibility actions at the ends of the list, matching `.onMove`'s
-    /// own behaviour of doing nothing past either end.
+    /// Disables Move Up/Down at the ends of the list, matching `.onMove`'s own behaviour.
     private func canMoveProject(_ project: Project, direction: ProjectMoveDirection) -> Bool {
         guard let index = store.projects.firstIndex(where: { $0.id == project.id }) else { return false }
         return direction == .up ? index > 0 : index < store.projects.count - 1
     }
 
-    /// A quiet, low-contrast "+" beside each project header for starting a
-    /// task in that project without opening its context menu. Sized to a
-    /// fixed small frame and drawn with `.plain` so it neither disturbs the
-    /// header row's existing height/padding nor the task-count indicator
-    /// beside it, and a nested `Button` inside `projectRow`'s own `Button`
-    /// label works fine here because SwiftUI resolves the tap to whichever
-    /// control's own hit area was actually touched.
+    /// Nested inside `projectRow`'s own `Button` label; SwiftUI resolves the tap to whichever hit area was touched.
     private func addTaskButton(for project: Project) -> some View {
         Button {
             store.pendingTaskCreationProject = project
@@ -398,46 +344,25 @@ struct SidebarView: View {
         .help("New Task in \(project.displayName)")
     }
 
-    /// The last path component of the project's directory (`dotfiles` for
-    /// `~/Claude/dotfiles`) — what the sidebar shows instead of the stored
-    /// display name, falling back to it only if the path has no usable name.
+    /// Shown instead of the stored display name, falling back to it only if the path has no usable name.
     static func folderName(of project: Project) -> String {
         let name = URL(fileURLWithPath: project.path).lastPathComponent
         return name.isEmpty || name == "/" ? project.displayName : name
     }
 
-    /// Tight `List` row insets so the selection fill spans nearly the full
-    /// sidebar width instead of sitting inside `.sidebar`'s default margins.
+    /// Tight insets so the selection fill spans nearly the full sidebar width instead of `.sidebar`'s default margins.
     private static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
 
-    /// How far the selection fill extends past each side of its row.
     private static let selectionBleed: CGFloat = 17
 
-    /// The leading inset a task row sits at, aligned with where the project
-    /// title's text begins. Measured against a snapshot capture (see
-    /// `SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`): a collapsible
-    /// `Section(isExpanded:)` header (`projectRow`) gets its own extra
-    /// leading indent from `.sidebar`'s built-in disclosure-chevron space,
-    /// which already covers part of `projectRow`'s own horizontal padding,
-    /// so this needed a smaller inset to land at the same x.
+    /// Measured against a snapshot (`SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`):
+    /// `projectRow`'s collapsible header gets extra leading indent from `.sidebar`'s disclosure chevron.
     private static let taskLeadingIndent: CGFloat = 3
 
-    /// The leading inset an "Active" section row sits at. Measured against a
-    /// snapshot capture (see `SidebarSnapshotTests.statusDotsLeftAlignWithHeaders`):
-    /// `.sidebar`'s plain (non-collapsible) `Section` header applies its own
-    /// built-in leading inset to "ACTIVE" that differs from a `List` row's
-    /// own `listRowInsets` + padding, so this needed its own constant rather
-    /// than sharing `taskLeadingIndent`.
+    /// Measured the same way: the plain "Active" `Section` header has its own built-in inset, differing from `taskLeadingIndent`.
     private static let activeRowLeadingIndent: CGFloat = -5
 
-    /// A task row nested beneath its project. The leading status-dot column
-    /// is reserved at a fixed width even when no dot is shown, so every
-    /// title starts at the same x (`TaskRowLayout.statusDotColumnWidth`).
-    /// The trailing edge carries the subagent child count/blocked indicator
-    /// and the branch sync summary, in that order, quiet and compact. Smaller
-    /// and lighter than the project title above it, and indented beneath it,
-    /// so tasks read as the project's children rather than its peers — a
-    /// project is a container, never a terminal.
+    /// The leading status-dot column is reserved at a fixed width even with no dot, so every title starts at the same x.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let info = taskStatusInfo(for: task)
         let summary = info.summary
@@ -515,13 +440,7 @@ struct SidebarView: View {
         }
     }
 
-    /// A small "Merged" pill for a task whose branch is already merged —
-    /// the status dot alone (a green dot, same colour family as "running"'s
-    /// blue) and the tiny caption2 "merged" text it used to share the
-    /// trailing edge with were both too quiet to read at a glance. Uses
-    /// `statusSuccess` (the same colour `TaskStatus.finished` already maps
-    /// to) tinted into its own background rather than the selection fill,
-    /// so it stays legible in both the selected and unselected row states.
+    /// Uses `statusSuccess` tinted into its own background, not the selection fill, so it stays legible either way.
     private func mergedBadge(isSelected: Bool) -> some View {
         let tint = theme.palette.statusSuccess
         return HStack(spacing: 3) {
@@ -539,12 +458,7 @@ struct SidebarView: View {
         )
     }
 
-    /// A pill for a task with work the base ref doesn't have yet: commits of
-    /// its own (`↑N`) and/or a pencil marker for uncommitted worktree edits.
-    /// Styled to match `mergedBadge` (same pill shape, 11pt) but tinted with
-    /// `statusRunning` (the palette's amber "in progress" colour) rather than
-    /// `statusSuccess`, since this is explicitly the opposite state: work
-    /// still outstanding, not landed.
+    /// Styled like `mergedBadge` but tinted `statusRunning`: the opposite state, work outstanding rather than landed.
     private func pendingPill(ahead: Int, hasUncommittedChanges: Bool, isSelected: Bool) -> some View {
         let tint = theme.palette.statusRunning
         return HStack(spacing: 3) {
@@ -568,30 +482,18 @@ struct SidebarView: View {
         .accessibilityLabel(BranchSyncSummary.accessibilityLabel(ahead: ahead, hasUncommittedChanges: hasUncommittedChanges) ?? "")
     }
 
-    /// The selected row's fill, painted directly on the row's own content
-    /// rather than via `.listRowBackground`/`List`'s built-in selection
-    /// styling — under `.listStyle(.sidebar)` that styling did not reliably
-    /// paint behind these custom `Button` rows, which is how a
-    /// `selectionForeground` meant to sit on `selectionBackground` ended up on
-    /// the bare (and, for some themes, near-black) row background instead.
-    /// Painting the fill ourselves keeps it independent of `List`'s internal
-    /// rendering. The fill is a faint wash of the theme's own text colour
-    /// (white-ish on dark themes, dark on light ones) rather than the theme's
-    /// often saturated `selectionBackground`, so selected rows keep their
-    /// normal text colours.
+    /// Painted directly on the row's content rather than `List`'s built-in
+    /// selection styling, which under `.listStyle(.sidebar)` didn't reliably
+    /// paint behind these custom `Button` rows. A faint wash of the theme's
+    /// text colour rather than the often-saturated `selectionBackground`, so text colours stay normal.
     private func selectionFill(isSelected: Bool, in palette: BSidePalette) -> some View {
         RoundedRectangle(cornerRadius: 6, style: .continuous)
             .fill(isSelected ? palette.textPrimary.opacity(0.32) : Color.clear)
-            // `.sidebar` keeps its own ~20pt horizontal margins even with
-            // tight `listRowInsets`; bleeding the fill past the row lets it
-            // span nearly the whole sidebar width.
+            // `.sidebar` keeps ~20pt margins even with tight `listRowInsets`; bleed past the row to span the full width.
             .padding(.horizontal, -Self.selectionBleed)
     }
 
-    /// The persistent "Add Project" row pinned below the list — not a `List`
-    /// row itself, so it never scrolls out of view. Same `.plain`,
-    /// palette-only styling as the rest of the sidebar; routes through
-    /// `ProjectCreation` like every other add-project entry point.
+    /// Pinned below the list, not a `List` row, so it never scrolls out of view.
     private var addProjectFooter: some View {
         Button {
             ProjectCreation.addProject(store: store)
@@ -611,9 +513,6 @@ struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
-    /// Shown instead of the (otherwise empty) list when there are no
-    /// projects yet, so a brand-new install invites the first "Add Project"
-    /// rather than presenting a blank column.
     private var emptyProjectsState: some View {
         VStack(spacing: 8) {
             Text("No projects yet")
