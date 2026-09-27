@@ -1,26 +1,17 @@
 import Foundation
 import OSLog
 
-/// Automatic task renaming from a task's first pi prompt: a task created
-/// with a blank name (`TaskRecord.awaitingAutoRename`) is renamed once its
-/// user types their first prompt into its agent terminal, and its
-/// app-created branch is renamed to match. The worktree directory itself is
-/// never moved — moving it out from under a live pi process breaks pi's
-/// tools (stale cwd) and its session transcript lookup, so the directory
-/// stays put for the lifetime of the task, the same way Claude Desktop and
-/// Codex keep a stable worktree path and only rename title and branch.
-///
-/// The transcript parsing and title derivation below are pure and call no
-/// model; only `applyRename` touches git or the filesystem.
+/// A task created with a blank name (`TaskRecord.awaitingAutoRename`) is
+/// renamed once its first prompt is typed, and its app-created branch is
+/// renamed to match. The worktree directory is never moved — moving it out
+/// from under a live pi process breaks pi's tools (stale cwd) and transcript
+/// lookup — so it stays put for the task's lifetime, like Claude Desktop/Codex.
 public enum TaskAutoRenameService {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-auto-rename")
 
     // MARK: - Transcript parsing
 
-    /// One line of a pi transcript, as much of it as this parser cares
-    /// about. Every other line type (`session`, `session_info`,
-    /// `model_change`, `thinking_level_change`, ...) fails to decode
-    /// `message` and is skipped.
+    /// Every other line type (`session`, `session_info`, ...) fails to decode `message` and is skipped.
     private struct TranscriptLine: Decodable {
         let type: String
         let message: TranscriptMessage?
@@ -31,9 +22,7 @@ public enum TaskAutoRenameService {
         let content: TranscriptContent
     }
 
-    /// A message's `content` is either a plain string or an array of typed
-    /// blocks (text, tool calls, tool results, thinking, ...) \u2014 pi uses both
-    /// shapes depending on role and harness.
+    /// Either a plain string or an array of typed blocks; pi uses both depending on role/harness.
     private enum TranscriptContent: Decodable {
         case text(String)
         case blocks([TranscriptContentBlock])
@@ -53,11 +42,7 @@ public enum TaskAutoRenameService {
         let text: String?
     }
 
-    /// The text of the first *user* prompt in a transcript's lines, or `nil`
-    /// if none has been sent yet. Ignores the session header, model/thinking
-    /// metadata lines, assistant messages, and tool results \u2014 only a
-    /// `{"type":"message","message":{"role":"user",...}}` line counts, and
-    /// its content is read as a plain string or the first `"text"` block.
+    /// `nil` if none sent yet. Only a `{"type":"message","message":{"role":"user",...}}` line counts.
     public static func firstUserPromptText(inTranscriptLines lines: [String]) -> String? {
         let decoder = JSONDecoder()
         for line in lines {
@@ -79,12 +64,9 @@ public enum TaskAutoRenameService {
 
     // MARK: - Title derivation
 
-    /// Derives a task title from a raw prompt: collapsed to one line,
-    /// stripped of markdown emphasis/code/heading markers and leading
-    /// punctuation, whitespace collapsed, then truncated at a word boundary
-    /// to roughly `maxLength` characters. Returns `nil` for empty or
-    /// all-punctuation input, so callers can leave the task named
-    /// "New Task" instead of renaming it to nothing.
+    /// Collapsed to one line, stripped of markdown markers and leading
+    /// punctuation, truncated at a word boundary. `nil` for empty/all-punctuation
+    /// input, so callers can leave "New Task" instead of renaming to nothing.
     public static func deriveTitle(fromPrompt prompt: String, maxLength: Int = 48) -> String? {
         var text = prompt
         text.removeAll { "`*_#".contains($0) }
@@ -112,16 +94,9 @@ public enum TaskAutoRenameService {
 
     // MARK: - Applying the rename
 
-    /// Renames `task` to `newName`, and \u2014 when it has its own worktree on a
-    /// branch the app created \u2014 renames that branch to match, deduping
-    /// against any existing branch the same way
-    /// `TaskWorktreeService.createWorktree` does. The worktree directory
-    /// itself (`task.worktreePath`) is never touched. Always clears
-    /// `awaitingAutoRename` on the returned record, so a caller persisting it
-    /// never re-fires this for the same task.
-    ///
-    /// Runs in place (task name only, no git calls) when the task has no
-    /// worktree of its own or its branch predates the app.
+    /// Renames the branch too when the task has its own app-created branch,
+    /// deduping like `TaskWorktreeService.createWorktree`; never touches
+    /// `task.worktreePath`. Runs name-only (no git calls) otherwise.
     public static func applyRename(task: TaskRecord, project: Project, newName: String) async -> TaskRecord {
         var updated = task
         updated.name = newName
@@ -157,12 +132,7 @@ public enum TaskAutoRenameService {
         return updated
     }
 
-    /// A slug derived from `baseSlug` whose `task/`-prefixed branch name is
-    /// free, suffixing with `-2`, `-3`, \u2026 like `TaskWorktreeService.uniqueSlug`
-    /// \u2014 except a candidate that matches the task's own current branch
-    /// doesn't count as taken, since that's exactly what's being renamed
-    /// away from. Directory existence no longer factors in, since renaming
-    /// never moves the worktree directory.
+    /// Like `TaskWorktreeService.uniqueSlug`, except the task's own current branch doesn't count as taken.
     private static func uniqueSlug(
         baseSlug: String,
         projectPath: String,
