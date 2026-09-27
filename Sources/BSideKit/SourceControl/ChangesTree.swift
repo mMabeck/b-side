@@ -31,10 +31,7 @@ public struct ChangesTreeFile: Sendable, Equatable, Identifiable {
 }
 
 /// A leaf the tree builder can place by `path` and aggregate `+`/`-` counts
-/// for. Conformed to by both `ChangesTreeFile` (the Changes overlay) and
-/// `SourceControlStore.Row` (the sidebar), so `id` stays whatever the caller
-/// already uses to key selection/diffing — a plain path for the former, an
-/// origin-prefixed path (`"staged:..."`) for the latter.
+/// for. `id` stays whatever the caller uses to key selection/diffing.
 public protocol ChangesTreeLeaf: Sendable, Equatable, Identifiable where ID == String {
     var path: String { get }
     var linesAdded: Int? { get }

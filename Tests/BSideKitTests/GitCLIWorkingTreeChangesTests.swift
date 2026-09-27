@@ -34,8 +34,8 @@ import Testing
         #expect(changes.contains { $0.path == "second.txt" && $0.kind == .modified })
         #expect(changes.contains { $0.path == "untracked.txt" && $0.kind == .untracked })
 
-        // parseNumstat: a modified tracked file reports both added and
-        // removed lines, an untracked file (via diff --no-index) only added.
+        // A modified tracked file reports both added and removed lines; an
+        // untracked file reports only added lines.
         let modified = try #require(changes.first { $0.path == "second.txt" })
         #expect(modified.linesAdded == 1)
         #expect(modified.linesRemoved == 1)
@@ -85,8 +85,7 @@ import Testing
             }
         )
 
-        // parseNumstat: a rename's `added\tremoved\t\0` record has an empty
-        // path field, resolved via the trailing old/new path tokens, keyed on the new path.
+        // A rename reports zero added/removed lines when unmodified.
         let renamed = try #require(changes.first { $0.path == "new-name.txt" })
         #expect(renamed.linesAdded == 0)
         #expect(renamed.linesRemoved == 0)
