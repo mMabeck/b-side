@@ -1,14 +1,9 @@
 import GhosttyTheme
 
-/// The brand Ghostty themes documented in `docs/brand.md` and shipped as
-/// installable config files at `assets/theme/b-side.conf` and
-/// `b-side-paper.conf`. `GhosttyThemeCatalog` only knows the themes baked
-/// into `libghostty-spm` itself — it has never heard of these — so a user
-/// who has not copied those files into `~/.config/ghostty/themes/` could
-/// otherwise never pick the brand look from the Appearance tab. Mirrored
-/// here by hand from the `.conf` files (small, fixed brand colours, not
-/// worth a resource-bundling step) so the picker can offer them regardless
-/// of what is installed on disk.
+/// The brand themes (`docs/brand.md`), also shipped as installable configs at
+/// `assets/theme/*.conf`. `GhosttyThemeCatalog` only knows themes baked into
+/// `libghostty-spm`, so these are mirrored here by hand so the Appearance tab
+/// can offer them regardless of what's installed on disk.
 enum BSideBundledThemes {
     static let bSide = GhosttyThemeDefinition(
         name: "B-Side",
@@ -45,17 +40,12 @@ enum BSideBundledThemes {
     static let all: [GhosttyThemeDefinition] = [bSide, bSidePaper]
 }
 
-/// Theme lookup across both sources: the brand themes above, and
-/// `GhosttyThemeCatalog`'s own corpus. The brand themes are listed first so
-/// they surface at the top of an unfiltered Appearance-tab picker.
-/// Lists the corpus via `GhosttyThemeCatalog.allThemes`, never `search("")`:
-/// Foundation's `contains("")` is false, so an empty search matches nothing.
+/// Theme lookup across both sources: brand themes first, then
+/// `GhosttyThemeCatalog`. Lists the corpus via `.allThemes`, never `search("")`,
+/// since Foundation's `contains("")` is false.
 enum ThemeCatalogSource {
-    /// Well-known themes pinned above the full alphabetical catalog, which
-    /// otherwise opens on obscure names ("0x96f", "12-bit Rainbow") and
-    /// buries these among ~480 entries. One dark and, where the family has
-    /// one, one light variant each. Every name must exist in the catalog —
-    /// `ThemeOverrideTests` guards against upstream renames.
+    /// Pinned above the alphabetical catalog, which otherwise opens on
+    /// obscure names and buries these among ~480 entries. `ThemeOverrideTests` guards against upstream renames.
     static let featuredNames: [String] = [
         "Catppuccin Mocha", "Catppuccin Latte",
         "TokyoNight", "TokyoNight Day",
@@ -77,13 +67,11 @@ enum ThemeCatalogSource {
         "Zenburn",
     ]
 
-    /// B-Side's own themes, then ``featuredNames`` in order.
     static func featuredThemes() -> [GhosttyThemeDefinition] {
         BSideBundledThemes.all + featuredNames.compactMap(GhosttyThemeCatalog.theme(named:))
     }
 
-    /// The rest of the catalog, excluding anything already in
-    /// ``featuredThemes()`` so each name appears once in the picker.
+    /// Excludes ``featuredThemes()`` so each name appears once in the picker.
     static func otherThemes() -> [GhosttyThemeDefinition] {
         let featured = Set(featuredNames)
         return GhosttyThemeCatalog.allThemes.filter { !featured.contains($0.name) }
@@ -93,8 +81,7 @@ enum ThemeCatalogSource {
         BSideBundledThemes.all + GhosttyThemeCatalog.allThemes
     }
 
-    /// Whether a theme reads as dark, by the same background-luminance test
-    /// ``BSidePalette/themed(from:)`` uses for the app's appearance.
+    /// Same background-luminance test ``BSidePalette/themed(from:)`` uses.
     static func isDark(_ definition: GhosttyThemeDefinition) -> Bool {
         RGBColor(hex: definition.background).relativeLuminance < 0.5
     }
@@ -106,9 +93,7 @@ enum ThemeCatalogSource {
         var id: String { title }
     }
 
-    /// The theme list's sections: popular dark, popular light, then the
-    /// rest of each. Computed once — classifying ~490 themes is not free and
-    /// the catalog never changes at runtime.
+    /// Computed once — classifying ~490 themes is not free and the catalog never changes at runtime.
     static let groups: [Group] = {
         let featured = featuredThemes()
         let other = otherThemes()
