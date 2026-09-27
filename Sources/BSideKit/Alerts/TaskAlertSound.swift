@@ -1,9 +1,7 @@
 import AppKit
 import AVFoundation
 
-/// `settings.notifications.*` `@AppStorage` keys, shared between
-/// `SettingsView` and the alert-handling code that reads them outside
-/// SwiftUI (`TaskAlertSoundPlayer`, `ProjectsStore`).
+/// Shared between `SettingsView` and alert-handling code outside SwiftUI.
 public enum TaskAlertSettingsKeys {
     public static let enabled = "settings.notifications.enabled"
     public static let soundsEnabled = "settings.notifications.playSounds"
@@ -12,10 +10,7 @@ public enum TaskAlertSettingsKeys {
     public static let volume = "settings.notifications.volume"
 }
 
-/// One of the macOS system sounds in `/System/Library/Sounds`, offerable as
-/// a per-alert-kind notification sound, plus "Off" to silence a kind
-/// without disabling notification sounds altogether. `rawValue` is both the
-/// persisted `@AppStorage` string and the name `NSSound(named:)` expects.
+/// `rawValue` is both the persisted `@AppStorage` string and the name `NSSound(named:)` expects.
 public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
     case off = "None"
     case basso = "Basso"
@@ -37,9 +32,7 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
         NormalizedSoundPlayer.play(self, volume: Float(max(0, min(100, volume)) / 100))
     }
 
-    /// Directories searched for a named sound, in the order `NSSound(named:)`
-    /// searches them: the user's own sounds first, then machine-wide ones,
-    /// then the system set the `.aiff` cases in this enum ship in.
+    /// Same order `NSSound(named:)` searches: user's own, then machine-wide, then system.
     static func searchDirectories(fileManager: FileManager = .default) -> [URL] {
         [
             fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Sounds"),
@@ -48,13 +41,9 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
         ]
     }
 
-    /// Extensions `NSSound(named:)` recognises, tried in this order within
-    /// each directory.
     static let soundExtensions = ["aiff", "aif", "wav", "caf", "m4a", "mp3"]
 
-    /// Pure so it's directly testable against a temp directory: the first
-    /// existing `<name>.<ext>` found by walking `directories` in order, then
-    /// `soundExtensions` in order within each.
+    /// First existing `<name>.<ext>` walking `directories`, then `soundExtensions`, in order.
     static func locate(name: String, in directories: [URL], fileManager: FileManager = .default) -> URL? {
         for directory in directories {
             for ext in soundExtensions {
@@ -72,14 +61,10 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Plays alert sounds peak-normalised to just under full scale.
-///
 /// The system alert sounds peak 5–14 dB below full scale, so even at 100%
-/// `NSSound` played them quietly and there was no way to go louder:
-/// `NSSound.volume`/`AVAudioPlayer.volume` top out at 1.0. Scaling each
-/// sound's samples up to `targetPeak` once, at load, makes 100% as loud as
-/// the sound can get without clipping, and levels the sounds against each
-/// other.
+/// `NSSound` played them quietly with no way to go louder (`.volume` tops
+/// out at 1.0). Scaling each sound's samples up to `targetPeak` once, at
+/// load, makes 100% as loud as possible without clipping and levels sounds against each other.
 @MainActor
 enum NormalizedSoundPlayer {
     /// −1 dBFS: loud, with a little margin against inter-sample clipping.
@@ -124,8 +109,7 @@ enum NormalizedSoundPlayer {
         return data
     }
 
-    /// Scales `samples` so their peak magnitude is `targetPeak`. Silence is
-    /// returned unchanged.
+    /// Silence is returned unchanged.
     nonisolated static func normalized(_ samples: [Float], targetPeak: Float) -> [Float] {
         let peak = samples.reduce(0) { max($0, abs($1)) }
         guard peak > 0 else { return samples }
@@ -133,7 +117,6 @@ enum NormalizedSoundPlayer {
         return samples.map { $0 * gain }
     }
 
-    /// A 16-bit PCM WAV file holding interleaved `samples`.
     nonisolated static func wavData(samples: [Float], channels: Int, sampleRate: Int) -> Data {
         var data = Data()
         func append<T: FixedWidthInteger>(_ value: T) {
@@ -160,26 +143,18 @@ enum NormalizedSoundPlayer {
     }
 }
 
-/// Plays the configured sound for an alert kind, reading settings directly
-/// from `UserDefaults` — the alert-handling path runs outside SwiftUI, so it
-/// can't read `@AppStorage` bindings the way `SettingsView` does. Defaults
-/// mirror the ones `SettingsView`'s `@AppStorage` declares, since a key
-/// `@AppStorage` has never written yet reads back as absent, not as its
-/// SwiftUI-side default.
+/// Reads settings directly from `UserDefaults`, since the alert-handling
+/// path runs outside SwiftUI and can't read `@AppStorage` bindings.
+/// Defaults mirror `SettingsView`'s, since an unwritten key reads back as absent, not its SwiftUI default.
 public enum TaskAlertSoundPlayer {
     public static let defaultVolume: Double = 70
 
-    /// Pure so it's directly testable: the sound a kind resolves to given
-    /// whatever `@AppStorage` string (or `nil`, if never written) is stored
-    /// for it.
     public static func resolvedSound(for kind: TaskAlertKind, storedName: String?) -> TaskAlertSound {
         let fallback = kind == .finished ? TaskAlertSound.defaultFinished : TaskAlertSound.defaultQuestion
         guard let storedName else { return fallback }
         return TaskAlertSound(rawValue: storedName) ?? fallback
     }
 
-    /// Pure so it's directly testable: the volume to play at given whatever
-    /// `@AppStorage` value (or `nil`, if never written) is stored.
     public static func resolvedVolume(stored: Double?) -> Double {
         stored ?? defaultVolume
     }
