@@ -1,41 +1,28 @@
 import SwiftUI
 
 /// The subagent card strip: a real in-memory Ghostty surface
-/// (`SubagentStripHost`) rendered above a task's main
-/// terminal, drawing `SubagentStripRenderer`'s box-drawing cards. Reserves
-/// its own fixed height so the terminal below it is simply shorter — never
-/// an overlay.
+/// (`SubagentStripHost`) drawing `SubagentStripRenderer`'s box-drawing cards
+/// above a task's terminal. Reserves its own fixed height, never an overlay.
 ///
-/// Ticks its own render loop at ~10fps while any run is active (for the
-/// spinner and the elapsed clocks), and stops ticking once every run in the
-/// batch has settled (blocked/completed/failed), since a static status row
-/// never needs another frame until something changes again.
+/// Ticks its own render loop at ~10fps while any run is active, stopping once every run has settled.
 struct SubagentStripView: View {
     var runs: [ChildRun]
     var viewedChildId: String?
     var onSelect: (SubagentStripMouseParser.HitTestResult) -> Void
-    /// Called for every press on the strip, hit or not — see
-    /// `TaskTerminalAreaView.focusShownSurface`'s doc comment for why.
+    /// Called for every press on the strip, hit or not — see `TaskTerminalAreaView.focusShownSurface`.
     var onAnyClick: () -> Void
 
-    // `@StateObject`, not `@State`: the frame height below reads
-    // `host.pointHeight(forRows:)`, which depends on `host`'s own
-    // `@Published latestViewport` — a plain `@State` wrapping a class
-    // doesn't subscribe to that class's own publisher, so the view would
-    // never re-layout once the surface's real cell metrics arrive after
-    // the fallback estimate used for the very first frame.
+    // `@StateObject`, not `@State`: the frame height below depends on
+    // `host`'s own `@Published latestViewport`, which a plain `@State`
+    // wrapping a class wouldn't subscribe to, so the view would never
+    // re-layout once real cell metrics arrive after the fallback estimate.
     @StateObject private var host = SubagentStripHost()
 
-    // Both `onHostInput` (installed once in `onAppear`) and the render-loop
-    // `Task` below (started once per active stretch, but running across
-    // many renders) are long-lived closures that outlive any single `body`
-    // evaluation. Reading `runs`/`viewedChildId`/`onSelect` off `self`
-    // inside them would freeze on whatever this `SubagentStripView` value
-    // looked like when the closure was created — stale data forever after
-    // (Pi sends `begin` before `spawn`, so a click handler frozen at the
-    // first render never sees the panes that arrive moments later). `live`
-    // is a reference type refreshed on every `body` evaluation, so anything
-    // long-lived reads through it instead and always sees the latest state.
+    // `onHostInput` and the render-loop `Task` are long-lived closures
+    // outliving any single `body` evaluation; reading `self`'s properties
+    // inside them would freeze on stale data (Pi sends `begin` before
+    // `spawn`, so a frozen click handler would never see later panes).
+    // `live` is a reference type refreshed every `body` evaluation instead.
     @State private var live = LiveStripState()
     @State private var didEnableMouseReporting = false
 
@@ -50,12 +37,8 @@ struct SubagentStripView: View {
         live.onAnyClick = onAnyClick
 
         return TerminalHostView(host: host.hostView)
-            // +1 row of headroom: Ghostty derives its own row count from
-            // this height by flooring `heightPixels / cellHeightPixels`,
-            // so an exact `totalRowCount`-row height can round down to one
-            // row short and scroll the strip's top border off screen the
-            // moment the last line is written. A blank trailing row is
-            // harmless; a missing top border is not.
+            // +1 row of headroom: Ghostty floors `heightPixels / cellHeightPixels`,
+            // so an exact height can round down and scroll the top border off screen; a blank trailing row is harmless.
             .frame(height: host.pointHeight(forRows: SubagentStripRenderer.totalRowCount + 1))
             .onAppear {
                 let live = live
@@ -95,11 +78,8 @@ struct SubagentStripView: View {
     }
 
     private func renderNow() {
-        // `minCardWidth` here is only a bootstrap width for the brief window
-        // before the surface has reported any metrics at all
-        // (`host.columns == 0`); once it has, `SubagentStripRenderer.render`
-        // clamps card rendering itself when the real width is still under
-        // the minimum.
+        // Bootstrap width before the surface reports metrics (`host.columns == 0`);
+        // `SubagentStripRenderer.render` clamps itself if the real width is still under minimum.
         let columns = host.columns > 0 ? host.columns : SubagentStripRenderer.minCardWidth
         let result = SubagentStripRenderer.render(runs: runs, viewedChildId: viewedChildId, columns: columns, now: Date())
         live.lastResult = result
@@ -107,14 +87,9 @@ struct SubagentStripView: View {
     }
 }
 
-/// Mutable, reference-type mirror of `SubagentStripView`'s per-render
-/// parameters (`runs`, `viewedChildId`, `onSelect`) plus the last rendered
-/// hit-test geometry, refreshed on every `body` evaluation — see the
-/// `live` property's doc comment on why long-lived closures read through
-/// this instead of the view struct directly. Also owns the ~10fps render
-/// ticker: started while some run is active, stopped once none are, so a
-/// settled strip never redraws (and never keeps a `Task` alive) until
-/// something changes again.
+/// Mutable, reference-type mirror of `SubagentStripView`'s per-render state
+/// so long-lived closures always read the latest values (see `live`). Also
+/// owns the ~10fps render ticker, stopped once no run is active.
 @MainActor
 final class LiveStripState {
     var runs: [ChildRun] = []
