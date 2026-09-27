@@ -1,21 +1,15 @@
 import Foundation
 
-/// One event from a child's `events.jsonl` (or the HTTP transport carrying the
-/// same shapes), decoded per Pi's `getDisplayItems` (`extensions/subagent/index.ts`).
-///
-/// Tool names and arguments live only on `message_end`'s assistant content
-/// parts; `tool_execution_update`/`tool_execution_end` carry a `toolCallId`
-/// but no arguments, and only report liveness/completion for a call already
-/// known from that assistant message.
+/// One event from a child's `events.jsonl`, decoded per Pi's `getDisplayItems`.
+/// Tool names/arguments live only on `message_end`; `tool_execution_update`/
+/// `tool_execution_end` carry a `toolCallId` but no arguments.
 public enum SubagentEvent: Sendable, Equatable {
     case messageEnd(role: String?, stopReason: String?, errorMessage: String?, toolCalls: [SubagentToolCall], text: String?, usage: MessageUsage? = nil)
     case toolResult(toolCallId: String?, isError: Bool)
     case toolExecutionUpdate(toolCallId: String?, toolName: String?)
     case toolExecutionEnd(toolCallId: String?, toolName: String?)
 
-    /// Decodes one JSON line object (`{"type": "...", ...payload}`). Returns
-    /// `nil` for malformed lines or unrecognised types, which are skipped
-    /// rather than blocking the rest of the stream.
+    /// `nil` for malformed lines or unrecognised types, skipped rather than blocking the rest of the stream.
     public static func decode(from line: Data) -> SubagentEvent? {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: line),
               let object = value.objectValue,
@@ -56,8 +50,6 @@ public enum SubagentEvent: Sendable, Equatable {
         }
     }
 
-    /// An assistant message's `content` array carries each tool call as a
-    /// part with `type == "toolCall"`, `id`, `name`, and `arguments`.
     private static func extractToolCalls(from message: [String: JSONValue]) -> [SubagentToolCall] {
         guard case let .array(parts)? = message["content"] else { return [] }
         return parts.compactMap { part -> SubagentToolCall? in
@@ -69,8 +61,6 @@ public enum SubagentEvent: Sendable, Equatable {
         }
     }
 
-    /// An assistant message's `content` array may also carry `text` parts,
-    /// which surface the child's prose.
     private static func extractText(from message: [String: JSONValue]) -> String? {
         guard case let .array(parts)? = message["content"] else { return nil }
         let texts = parts.compactMap { part -> String? in
@@ -127,8 +117,7 @@ public struct SubagentDonePayload: Sendable, Equatable {
     public var exitCode: Int?
     public var stopReason: String?
     public var errorMessage: String?
-    /// Cumulative totals for the run, when the sender tracks them. Replaces
-    /// the per-message tally, which misses anything sent before the card opened.
+    /// Replaces the per-message tally, which misses anything sent before the card opened.
     public var statistics: RunStatistics?
 
     public init(exitCode: Int? = nil, stopReason: String? = nil, errorMessage: String? = nil, statistics: RunStatistics? = nil) {
