@@ -76,7 +76,7 @@ public struct SubagentSwapCommands: Commands {
     }
 }
 
-/// Plain data so they're directly testable without introspecting a rendered `Commands` scene.
+/// Plain data, not introspection of a rendered `Commands` scene.
 public enum SubagentSwapShortcut {
     public static let digitCount = 9
 

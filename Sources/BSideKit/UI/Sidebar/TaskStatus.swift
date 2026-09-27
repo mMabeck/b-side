@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Same intent as `accessibilityReduceMotion`, but writable, since the
-/// system one is read-only and snapshot tests need to force a settled capture.
+/// system one is read-only.
 private struct StatusDotReduceMotionKey: EnvironmentKey {
     static let defaultValue: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 }
@@ -82,7 +82,7 @@ public enum TaskRowLayout {
 
 /// Blinks while `.running`, using local view state rather than a
 /// store-driven timer, since only the dot's opacity changes each second.
-/// Solid under Reduce Motion, which snapshot tests use for a deterministic capture.
+/// Solid under Reduce Motion.
 public struct StatusDot: View {
     let status: TaskStatus
     let palette: BSidePalette

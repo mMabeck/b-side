@@ -13,7 +13,6 @@ enum StreamingProcessRunner {
         let status: Int32
     }
 
-
     static func run(
         command: String,
         in directory: URL,

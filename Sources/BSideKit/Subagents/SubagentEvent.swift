@@ -117,7 +117,8 @@ public struct SubagentDonePayload: Sendable, Equatable {
     public var exitCode: Int?
     public var stopReason: String?
     public var errorMessage: String?
-    /// Replaces the per-message tally, which misses anything sent before the card opened.
+    /// Cumulative totals for the run, when the sender tracks them; unlike a
+    /// per-message tally, includes anything sent before the card opened.
     public var statistics: RunStatistics?
 
     public init(exitCode: Int? = nil, stopReason: String? = nil, errorMessage: String? = nil, statistics: RunStatistics? = nil) {
