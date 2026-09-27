@@ -9,23 +9,15 @@ import Testing
 /// libghostty runtime.
 @MainActor
 struct BSidePaletteTests {
-    @Test("A known dark theme (Ayu Mirage) resolves as dark and forces darkAqua")
-    func darkThemeResolvesDarkAppearance() throws {
-        let ayuMirage = try #require(GhosttyThemeCatalog.theme(named: "Ayu Mirage"))
-        #expect(ayuMirage.background == "1f2430")
-
-        let palette = BSidePalette.themed(from: ayuMirage)
-        #expect(palette.isDark)
-        #expect(palette.preferredAppearance?.name == .darkAqua)
-    }
-
-    @Test("A known light theme resolves as light and forces aqua")
-    func lightThemeResolvesLightAppearance() throws {
-        let ayuLight = try #require(GhosttyThemeCatalog.theme(named: "Ayu Light"))
-
-        let palette = BSidePalette.themed(from: ayuLight)
-        #expect(!palette.isDark)
-        #expect(palette.preferredAppearance?.name == .aqua)
+    @Test("A known dark theme resolves as dark and forces darkAqua; a known light theme resolves as light and forces aqua", arguments: [
+        (themeName: "Ayu Mirage", isDark: true, appearance: NSAppearance.Name.darkAqua),
+        (themeName: "Ayu Light", isDark: false, appearance: NSAppearance.Name.aqua),
+    ])
+    func themeResolvesExpectedAppearance(themeName: String, isDark: Bool, appearance: NSAppearance.Name) throws {
+        let theme = try #require(GhosttyThemeCatalog.theme(named: themeName))
+        let palette = BSidePalette.themed(from: theme)
+        #expect(palette.isDark == isDark)
+        #expect(palette.preferredAppearance?.name == appearance)
     }
 
     @Test("Elevated surfaces are distinct from the window background but close to it")

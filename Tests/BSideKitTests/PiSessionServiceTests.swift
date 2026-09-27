@@ -156,24 +156,17 @@ struct PiSessionServiceTests {
         #expect(withEmptyEndpoint == ["BSIDE_TASK_ID": "7"])
     }
 
-    @Test("resolveBinary prefers the bundled binary over $PATH")
-    func resolveBinaryPrefersBundled() throws {
+    @Test("resolveBinary prefers the bundled binary over $PATH, but falls back when there's none", arguments: [
+        (bundled: "/opt/pi/bin/pi", expected: "/opt/pi/bin/pi"),
+        (bundled: nil, expected: "/usr/bin/pi"),
+    ])
+    func resolveBinaryPrecedence(bundled: String?, expected: String) throws {
         let locations = PiSessionService.Locations(
-            bundledBinaryPath: "/opt/pi/bin/pi",
+            bundledBinaryPath: bundled,
             sessionsRoot: FileManager.default.temporaryDirectory,
             pathBinaryFinder: { "/usr/bin/pi" }
         )
-        #expect(PiSessionService.resolveBinary(locations: locations) == "/opt/pi/bin/pi")
-    }
-
-    @Test("resolveBinary falls back to $PATH when there's no bundled binary")
-    func resolveBinaryFallsBackToPath() throws {
-        let locations = PiSessionService.Locations(
-            bundledBinaryPath: nil,
-            sessionsRoot: FileManager.default.temporaryDirectory,
-            pathBinaryFinder: { "/usr/bin/pi" }
-        )
-        #expect(PiSessionService.resolveBinary(locations: locations) == "/usr/bin/pi")
+        #expect(PiSessionService.resolveBinary(locations: locations) == expected)
     }
 
     @Test("sessions subdirectory naming collapses non-alphanumerics and wraps in --")
@@ -233,6 +226,23 @@ struct PiSessionServiceTests {
         #expect(try Data(contentsOf: transcriptURL) == originalContents)
     }
 
+    @Test("repair returns nil for a transcript file that doesn't exist")
+    func repairReturnsNilForMissingFile() throws {
+        let root = try TestRepo.makeTempDirectory()
+        defer { TestRepo.removeTempDirectory(root) }
+
+        let sessionsRoot = root.appendingPathComponent("sessions")
+        let locations = makeLocations(sessionsRoot: sessionsRoot)
+
+        let repaired = PiSessionService.repairTranscriptForResume(
+            transcriptPath: sessionsRoot.appendingPathComponent("proj/missing.jsonl").path,
+            currentWorkingDirectory: root.path,
+            locations: locations
+        )
+
+        #expect(repaired == nil)
+    }
+
     @Test("repair rewrites only the header cwd, relocates the file, and leaves every other line untouched")
     func repairRewritesHeaderCWDAndRelocates() throws {
         let root = try TestRepo.makeTempDirectory()
@@ -285,23 +295,6 @@ struct PiSessionServiceTests {
 
         // Every line after the header survives the rewrite byte-for-byte.
         #expect(Array(rewrittenLines.dropFirst()) == bodyLines + [""])
-    }
-
-    @Test("repair returns nil for a transcript file that doesn't exist")
-    func repairReturnsNilForMissingFile() throws {
-        let root = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(root) }
-
-        let sessionsRoot = root.appendingPathComponent("sessions")
-        let locations = makeLocations(sessionsRoot: sessionsRoot)
-
-        let repaired = PiSessionService.repairTranscriptForResume(
-            transcriptPath: sessionsRoot.appendingPathComponent("proj/missing.jsonl").path,
-            currentWorkingDirectory: root.path,
-            locations: locations
-        )
-
-        #expect(repaired == nil)
     }
 }
 

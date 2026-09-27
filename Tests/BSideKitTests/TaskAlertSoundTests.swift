@@ -86,30 +86,19 @@ struct TaskAlertSoundTests {
         #expect(TaskAlertSound.defaultQuestion == .tink)
     }
 
-    @Test("Resolving a sound with no stored value falls back to the kind's default")
-    func resolvedSoundFallsBackToDefaultWhenNothingStored() {
-        #expect(TaskAlertSoundPlayer.resolvedSound(for: .finished, storedName: nil) == .glass)
-        #expect(TaskAlertSoundPlayer.resolvedSound(for: .question, storedName: nil) == .tink)
+    @Test("Resolving a sound falls back to the kind's default when nothing/unknown is stored, and uses a valid stored name", arguments: [
+        (kind: TaskAlertKind.finished, stored: nil, expected: TaskAlertSound.glass),
+        (kind: TaskAlertKind.question, stored: nil, expected: TaskAlertSound.tink),
+        (kind: TaskAlertKind.finished, stored: "Hero", expected: TaskAlertSound.hero),
+        (kind: TaskAlertKind.question, stored: "NotARealSound", expected: TaskAlertSound.tink),
+    ])
+    func resolvedSound(kind: TaskAlertKind, stored: String?, expected: TaskAlertSound) {
+        #expect(TaskAlertSoundPlayer.resolvedSound(for: kind, storedName: stored) == expected)
     }
 
-    @Test("Resolving a sound with a valid stored name uses it")
-    func resolvedSoundUsesStoredValue() {
-        #expect(TaskAlertSoundPlayer.resolvedSound(for: .finished, storedName: "Hero") == .hero)
-    }
-
-    @Test("Resolving a sound with a stale/unknown stored name falls back")
-    func resolvedSoundFallsBackOnUnknownStoredValue() {
-        #expect(TaskAlertSoundPlayer.resolvedSound(for: .question, storedName: "NotARealSound") == .tink)
-    }
-
-    @Test("Volume defaults to 70% when nothing is stored")
-    func resolvedVolumeDefaults() {
-        #expect(TaskAlertSoundPlayer.resolvedVolume(stored: nil) == 70)
-    }
-
-    @Test("A stored volume is used as-is")
-    func resolvedVolumeUsesStoredValue() {
-        #expect(TaskAlertSoundPlayer.resolvedVolume(stored: 35) == 35)
+    @Test("Volume defaults to 70% when nothing is stored, and a stored volume is used as-is", arguments: [(stored: nil, expected: 70.0), (stored: 35.0, expected: 35.0)] as [(Double?, Double)])
+    func resolvedVolume(stored: Double?, expected: Double) {
+        #expect(TaskAlertSoundPlayer.resolvedVolume(stored: stored) == expected)
     }
 
     // MARK: - Settings keys

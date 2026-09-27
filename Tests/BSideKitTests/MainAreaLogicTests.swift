@@ -11,58 +11,34 @@ import Testing
 @MainActor
 @Suite("MainAreaView pure logic")
 struct MainAreaLogicTests {
-    @Test("A task with a live worktree resolves to that worktree's directory")
-    func resolvesToLiveWorktree() throws {
+    @Test("A live worktree resolves to itself; a vanished or non-directory worktree path falls back to the project path", arguments: [
+        (worktreeExists: true, worktreeIsFile: false),
+        (worktreeExists: false, worktreeIsFile: false),
+        (worktreeExists: true, worktreeIsFile: true),
+    ])
+    func resolvedDirectoryForTask(worktreeExists: Bool, worktreeIsFile: Bool) throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
+        let projectDir = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
         let worktree = root.appendingPathComponent("worktree", isDirectory: true)
-        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        if worktreeExists {
+            if worktreeIsFile {
+                try "not a directory".write(to: worktree, atomically: true, encoding: .utf8)
+            } else {
+                try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+            }
+        }
 
-        let project = Project(path: root.appendingPathComponent("project").path, displayName: "P", baseRef: "main")
+        let project = Project(path: projectDir.path, displayName: "P", baseRef: "main")
         let task = TaskRecord(
             projectId: 1, name: "T", branchName: "feature", worktreePath: worktree.path,
             harness: "claude", permissionLevel: "default"
         )
 
         let resolved = MainAreaView.resolvedDirectory(forTask: task, project: project)
-        #expect(resolved.path == worktree.path)
-    }
-
-    @Test("A task whose worktree has vanished falls back to the project's own path")
-    func fallsBackWhenWorktreeVanished() throws {
-        let root = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(root) }
-        let projectDir = root.appendingPathComponent("project", isDirectory: true)
-        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
-        let missingWorktree = root.appendingPathComponent("gone-worktree", isDirectory: true)
-
-        let project = Project(path: projectDir.path, displayName: "P", baseRef: "main")
-        let task = TaskRecord(
-            projectId: 1, name: "T", branchName: "feature", worktreePath: missingWorktree.path,
-            harness: "claude", permissionLevel: "default"
-        )
-
-        let resolved = MainAreaView.resolvedDirectory(forTask: task, project: project)
-        #expect(resolved.path == projectDir.path)
-    }
-
-    @Test("A task whose worktree path is a file, not a directory, also falls back to the project path")
-    func fallsBackWhenWorktreePathIsAFile() throws {
-        let root = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(root) }
-        let projectDir = root.appendingPathComponent("project", isDirectory: true)
-        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
-        let notADirectory = root.appendingPathComponent("worktree-file")
-        try "not a directory".write(to: notADirectory, atomically: true, encoding: .utf8)
-
-        let project = Project(path: projectDir.path, displayName: "P", baseRef: "main")
-        let task = TaskRecord(
-            projectId: 1, name: "T", branchName: "feature", worktreePath: notADirectory.path,
-            harness: "claude", permissionLevel: "default"
-        )
-
-        let resolved = MainAreaView.resolvedDirectory(forTask: task, project: project)
-        #expect(resolved.path == projectDir.path)
+        let expectsLiveWorktree = worktreeExists && !worktreeIsFile
+        #expect(resolved.path == (expectsLiveWorktree ? worktree.path : projectDir.path))
     }
 
     @Test("resolvedDirectory(for:) prefers the selected task's worktree, then the project, then home")
@@ -102,60 +78,34 @@ struct MainAreaLogicTests {
 
     // MARK: - Host-cache purging
 
-    @Test("Cached hosts for tasks no longer live are purged; hosts for live tasks are kept")
-    func purgesOnlyDeadTaskHosts() {
-        let cached: Set<Int64> = [1, 2, 3]
-        let live: Set<Int64> = [2, 3, 4]
-        #expect(MainAreaView.idsToPurge(cachedIDs: cached, liveTaskIDs: live) == [1])
-    }
-
-    @Test("No cached hosts are purged when every cached task is still live")
-    func purgesNothingWhenAllLive() {
-        let cached: Set<Int64> = [1, 2]
-        #expect(MainAreaView.idsToPurge(cachedIDs: cached, liveTaskIDs: cached) == [])
-    }
-
-    @Test("Every cached host is purged once no task is live")
-    func purgesAllWhenNoneLive() {
-        let cached: Set<Int64> = [1, 2, 3]
-        #expect(MainAreaView.idsToPurge(cachedIDs: cached, liveTaskIDs: []) == cached)
+    @Test("idsToPurge drops cached ids that are no longer live, keeping the rest", arguments: [
+        (cached: Set<Int64>([1, 2, 3]), live: Set<Int64>([2, 3, 4]), expected: Set<Int64>([1])),
+        (cached: Set<Int64>([1, 2]), live: Set<Int64>([1, 2]), expected: Set<Int64>()),
+        (cached: Set<Int64>([1, 2, 3]), live: Set<Int64>(), expected: Set<Int64>([1, 2, 3])),
+    ])
+    func idsToPurge(cached: Set<Int64>, live: Set<Int64>, expected: Set<Int64>) {
+        #expect(MainAreaView.idsToPurge(cachedIDs: cached, liveTaskIDs: live) == expected)
     }
 
     // MARK: - Visible/focused task id
 
-    @Test("A task main selection reports its task id as visible")
-    func visibleTaskIDForTaskSelection() {
+    @Test("Only a task main selection reports a visible task id; project or no selection reports none")
+    func visibleTaskIDForSelection() {
         let project = Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")
         let task = TaskRecord(id: 10, projectId: 1, name: "T", branchName: "b", worktreePath: "/tmp/a-wt", harness: "claude", permissionLevel: "default")
         #expect(MainAreaView.visibleTaskID(for: .task(task, project)) == 10)
-    }
-
-    @Test("A project main selection reports no visible task")
-    func visibleTaskIDForProjectSelection() {
-        let project = Project(id: 1, path: "/tmp/a", displayName: "A", baseRef: "main")
         #expect(MainAreaView.visibleTaskID(for: .project(project)) == nil)
-    }
-
-    @Test("No main selection reports no visible task")
-    func visibleTaskIDForNoSelection() {
         #expect(MainAreaView.visibleTaskID(for: .none) == nil)
     }
 
     // MARK: - Focus target
 
-    @Test("With no child shown, the parent is the focus target")
-    func focusTargetNoChildShown() {
-        #expect(MainAreaView.focusTarget(shownChildID: nil, livePaneIDs: ["c1"]) == .parent)
+    @Test("focusTarget is the parent with no or stale shown child, and the child when it has a live pane", arguments: [
+        (shownChildID: nil, livePaneIDs: Set(["c1"]), expected: MainAreaView.FocusTarget.parent),
+        (shownChildID: "c1", livePaneIDs: Set(["c1", "c2"]), expected: MainAreaView.FocusTarget.child("c1")),
+        (shownChildID: "gone", livePaneIDs: Set(["c1"]), expected: MainAreaView.FocusTarget.parent),
+    ] as [(String?, Set<String>, MainAreaView.FocusTarget)])
+    func focusTarget(shownChildID: String?, livePaneIDs: Set<String>, expected: MainAreaView.FocusTarget) {
+        #expect(MainAreaView.focusTarget(shownChildID: shownChildID, livePaneIDs: livePaneIDs) == expected)
     }
-
-    @Test("With a live child shown, the child is the focus target")
-    func focusTargetLiveChildShown() {
-        #expect(MainAreaView.focusTarget(shownChildID: "c1", livePaneIDs: ["c1", "c2"]) == .child("c1"))
-    }
-
-    @Test("A shown child id that no longer has a live pane falls back to the parent")
-    func focusTargetStaleShownChildFallsBackToParent() {
-        #expect(MainAreaView.focusTarget(shownChildID: "gone", livePaneIDs: ["c1"]) == .parent)
-    }
-
 }

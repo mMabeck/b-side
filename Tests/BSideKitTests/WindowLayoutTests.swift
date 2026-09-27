@@ -8,22 +8,14 @@ import Testing
 @MainActor
 @Suite("Window layout toggles and shortcuts")
 struct WindowLayoutTests {
-    @Test("Left sidebar shortcut is Cmd+B")
-    func leftSidebarShortcut() {
-        #expect(WindowLayoutShortcut.leftSidebar.key.character == "b")
-        #expect(WindowLayoutShortcut.leftSidebar.modifiers == [.command])
-    }
-
-    @Test("Right sidebar shortcut is Cmd+Option+B")
-    func rightSidebarShortcut() {
-        #expect(WindowLayoutShortcut.rightSidebar.key.character == "b")
-        #expect(WindowLayoutShortcut.rightSidebar.modifiers == [.command, .option])
-    }
-
-    @Test("Terminal drawer shortcut is Cmd+Æ")
-    func terminalDrawerShortcut() {
-        #expect(WindowLayoutShortcut.terminalDrawer.key.character == "æ")
-        #expect(WindowLayoutShortcut.terminalDrawer.modifiers == [.command])
+    @Test("Left/right sidebar and terminal drawer shortcuts are Cmd+B, Cmd+Option+B, and Cmd+Æ", arguments: [
+        (shortcut: WindowLayoutShortcut.leftSidebar, character: Character("b"), modifiers: EventModifiers.command),
+        (shortcut: WindowLayoutShortcut.rightSidebar, character: Character("b"), modifiers: EventModifiers([.command, .option])),
+        (shortcut: WindowLayoutShortcut.terminalDrawer, character: Character("æ"), modifiers: EventModifiers.command),
+    ])
+    func layoutShortcut(shortcut: KeyboardShortcut, character: Character, modifiers: EventModifiers) {
+        #expect(shortcut.key.character == character)
+        #expect(shortcut.modifiers == modifiers)
     }
 
     @Test("The three shortcuts are pairwise distinct")

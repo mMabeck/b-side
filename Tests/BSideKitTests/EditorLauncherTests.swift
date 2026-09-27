@@ -9,45 +9,24 @@ import Testing
 @MainActor
 @Suite("EditorLauncher resolution")
 struct EditorLauncherTests {
-    @Test("resolves VS Code when it's the only installed candidate")
-    func resolvesVSCode() {
-        let vscode = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
-        let launcher = EditorLauncher(resolveApp: { id in id == "com.microsoft.VSCode" ? vscode : nil })
-        #expect(launcher.resolvedEditorURL() == vscode)
-    }
+    @Test("Resolution prefers VS Code, then Insiders, then Cursor, in installed-candidate order; nil when none are installed", arguments: [
+        Set(["com.microsoft.VSCode"]),
+        Set(["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders"]),
+        Set(["com.microsoft.VSCodeInsiders"]),
+        Set(["com.todesktop.230313mzl4w4u92"]),
+        Set<String>(),
+    ])
+    func resolvesInPriorityOrder(installedIDs: Set<String>) {
+        let urls: [String: URL] = [
+            "com.microsoft.VSCode": URL(fileURLWithPath: "/Applications/Visual Studio Code.app"),
+            "com.microsoft.VSCodeInsiders": URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app"),
+            "com.todesktop.230313mzl4w4u92": URL(fileURLWithPath: "/Applications/Cursor.app"),
+        ]
+        let launcher = EditorLauncher(resolveApp: { id in installedIDs.contains(id) ? urls[id] : nil })
 
-    @Test("prefers VS Code over Insiders and Cursor when multiple are installed")
-    func prefersVSCodeOverAlternatives() {
-        let vscode = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
-        let insiders = URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app")
-        let launcher = EditorLauncher(resolveApp: { id in
-            switch id {
-            case "com.microsoft.VSCode": return vscode
-            case "com.microsoft.VSCodeInsiders": return insiders
-            default: return nil
-            }
-        })
-        #expect(launcher.resolvedEditorURL() == vscode)
-    }
-
-    @Test("falls back to Insiders when VS Code proper isn't installed")
-    func fallsBackToInsiders() {
-        let insiders = URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app")
-        let launcher = EditorLauncher(resolveApp: { id in id == "com.microsoft.VSCodeInsiders" ? insiders : nil })
-        #expect(launcher.resolvedEditorURL() == insiders)
-    }
-
-    @Test("falls back to Cursor when neither VS Code nor Insiders is installed")
-    func fallsBackToCursor() {
-        let cursor = URL(fileURLWithPath: "/Applications/Cursor.app")
-        let launcher = EditorLauncher(resolveApp: { id in id == "com.todesktop.230313mzl4w4u92" ? cursor : nil })
-        #expect(launcher.resolvedEditorURL() == cursor)
-    }
-
-    @Test("resolves to nil, so callers fall back to Finder/the default app, when no candidate is installed")
-    func nilWhenNoneInstalled() {
-        let launcher = EditorLauncher(resolveApp: { _ in nil })
-        #expect(launcher.resolvedEditorURL() == nil)
+        let priorityOrder = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92"]
+        let expected = priorityOrder.first { installedIDs.contains($0) }.flatMap { urls[$0] }
+        #expect(launcher.resolvedEditorURL() == expected)
     }
 }
 

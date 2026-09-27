@@ -69,19 +69,21 @@ struct SubagentEventServerTests {
         try await waitUntil { paneStore.panes(forTask: 1).map(\.id) == ["c1"] }
     }
 
-    @Test("Spawn for an unknown task returns 404 and registers no pane")
-    func spawnUnknownTaskReturns404() async throws {
+    @Test("Spawn returns 404 for an unknown task or 400 for a malformed body, registering no pane", arguments: [
+        (taskExists: true, body: #"{"label":"missing fields"}"#, expectedStatus: 400),
+        (taskExists: false, body: #"{"label":"explorer","cwd":"/tmp","command":"/bin/sh"}"#, expectedStatus: 404),
+    ])
+    func spawnFailureModes(taskExists: Bool, body: String, expectedStatus: Int) async throws {
         let store = SubagentFeedStore()
         let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
-        let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in false })
+        let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in taskExists })
         try await server.start()
         defer { server.stop() }
         let port = try #require(server.port)
 
-        let body = #"{"label":"explorer","cwd":"\#(tempDir().path)","command":"/bin/sh"}"#
         let status = try await postAndReadStatus(path: "/subagents/1/c1/spawn", body: body, port: port)
 
-        #expect(status == 404)
+        #expect(status == expectedStatus)
         #expect(paneStore.panes(forTask: 1).isEmpty)
     }
 
@@ -102,21 +104,6 @@ struct SubagentEventServerTests {
 
         #expect(status == 429)
         #expect(!paneStore.panes(forTask: 1).contains { $0.id == "over-cap" })
-    }
-
-    @Test("Spawn with a malformed body returns 400")
-    func spawnMalformedBodyReturns400() async throws {
-        let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
-        let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in true })
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let status = try await postAndReadStatus(path: "/subagents/1/c1/spawn", body: #"{"label":"missing fields"}"#, port: port)
-
-        #expect(status == 400)
-        #expect(paneStore.panes(forTask: 1).isEmpty)
     }
 
     @Test("Close always returns 204, including for a pane that was never spawned")
@@ -218,58 +205,27 @@ struct SubagentEventServerTests {
         #expect(alerts.first?.3 == "Continue?")
     }
 
-    @Test("alert with an unrecognised kind returns 400 and never dispatches")
-    func agentAlertUnknownKindReturns400() async throws {
+    @Test("alert returns 400 for an unrecognised kind or malformed body, and 404 for an unknown task, never dispatching", arguments: [
+        (taskExists: true, body: #"{"kind":"celebration","title":"x","body":"y"}"#, expectedStatus: 400),
+        (taskExists: true, body: #"{"title":"missing kind and body"}"#, expectedStatus: 400),
+        (taskExists: false, body: #"{"kind":"finished","title":"x","body":"y"}"#, expectedStatus: 404),
+    ])
+    func agentAlertFailureModes(taskExists: Bool, body: String, expectedStatus: Int) async throws {
         let store = SubagentFeedStore()
         var alerts = 0
         let server = try SubagentEventServer(
             store: store,
             paneStore: SubagentPaneStore(),
-            taskExists: { _ in true },
+            taskExists: { _ in taskExists },
             onAgentAlert: { _, _, _, _ in alerts += 1 }
         )
         try await server.start()
         defer { server.stop() }
         let port = try #require(server.port)
 
-        let body = #"{"kind":"celebration","title":"x","body":"y"}"#
         let status = try await postAndReadStatus(path: "/agent/1/alert", body: body, port: port)
 
-        #expect(status == 400)
-        #expect(alerts == 0)
-    }
-
-    @Test("alert with a malformed body returns 400")
-    func agentAlertMalformedBodyReturns400() async throws {
-        let store = SubagentFeedStore()
-        let server = try SubagentEventServer(store: store, paneStore: SubagentPaneStore(), taskExists: { _ in true })
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let status = try await postAndReadStatus(path: "/agent/1/alert", body: #"{"title":"missing kind and body"}"#, port: port)
-
-        #expect(status == 400)
-    }
-
-    @Test("alert for an unknown task returns 404")
-    func agentAlertUnknownTaskReturns404() async throws {
-        let store = SubagentFeedStore()
-        var alerts = 0
-        let server = try SubagentEventServer(
-            store: store,
-            paneStore: SubagentPaneStore(),
-            taskExists: { _ in false },
-            onAgentAlert: { _, _, _, _ in alerts += 1 }
-        )
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let body = #"{"kind":"finished","title":"x","body":"y"}"#
-        let status = try await postAndReadStatus(path: "/agent/99/alert", body: body, port: port)
-
-        #expect(status == 404)
+        #expect(status == expectedStatus)
         #expect(alerts == 0)
     }
 

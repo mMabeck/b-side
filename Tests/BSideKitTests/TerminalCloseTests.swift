@@ -13,27 +13,15 @@ import Testing
 struct TerminalCloseTests {
     // MARK: - ProjectsStore.nextActiveTaskID (pure)
 
-    @Test("Next active task id is the one that took the closed task's position")
-    func nextActiveTaskIDTakesClosedPosition() {
-        let openIDs: [Int64] = [10, 20, 30]
-        #expect(ProjectsStore.nextActiveTaskID(afterClosing: 20, in: openIDs) == 30)
-        #expect(ProjectsStore.nextActiveTaskID(afterClosing: 10, in: openIDs) == 20)
-    }
-
-    @Test("Closing the last open task falls back to the new last entry")
-    func nextActiveTaskIDFallsBackToNewLast() {
-        let openIDs: [Int64] = [10, 20, 30]
-        #expect(ProjectsStore.nextActiveTaskID(afterClosing: 30, in: openIDs) == 20)
-    }
-
-    @Test("Closing the only open task leaves no next active task")
-    func nextActiveTaskIDNilWhenNoneRemain() {
-        #expect(ProjectsStore.nextActiveTaskID(afterClosing: 10, in: [10]) == nil)
-    }
-
-    @Test("Closing an id not tracked as open is a no-op")
-    func nextActiveTaskIDNilForUntrackedID() {
-        #expect(ProjectsStore.nextActiveTaskID(afterClosing: 99, in: [10, 20]) == nil)
+    @Test("nextActiveTaskID picks the task that took the closed slot, falls back to the new last entry, or nil", arguments: [
+        (closing: Int64(20), open: [10, 20, 30], expected: Int64(30)),
+        (closing: Int64(10), open: [10, 20, 30], expected: Int64(20)),
+        (closing: Int64(30), open: [10, 20, 30], expected: Int64(20)),
+        (closing: Int64(10), open: [10], expected: nil),
+        (closing: Int64(99), open: [10, 20], expected: nil),
+    ] as [(Int64, [Int64], Int64?)])
+    func nextActiveTaskID(closing: Int64, open openIDs: [Int64], expected: Int64?) {
+        #expect(ProjectsStore.nextActiveTaskID(afterClosing: closing, in: openIDs) == expected)
     }
 
     // MARK: - ProjectsStore.closeTerminal (integration, real store)

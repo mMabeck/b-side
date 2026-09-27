@@ -14,38 +14,22 @@ import Testing
 struct PiSessionEndedTests {
     // MARK: - MainAreaView.exitedTaskIDs (pure): running -> exited -> relaunched
 
-    @Test("A running task starts with no exited flag")
-    func startsWithNoExitedTasks() {
-        let current: Set<Int64> = []
-        #expect(!current.contains(42))
-    }
-
-    @Test("Exiting marks only that task id exited, leaving others untouched")
+    @Test("Exiting marks only that task id exited, leaving others untouched, and is idempotent")
     func exitMarksOnlyThatTask() {
         let afterFirstExit = MainAreaView.exitedTaskIDs(afterExit: 1, current: [])
         #expect(afterFirstExit == [1])
 
         let afterSecondExit = MainAreaView.exitedTaskIDs(afterExit: 2, current: afterFirstExit)
         #expect(afterSecondExit == [1, 2])
+
+        #expect(MainAreaView.exitedTaskIDs(afterExit: 1, current: [1]) == [1])
     }
 
-    @Test("Relaunching clears only that task's exited flag")
+    @Test("Relaunching clears only that task's exited flag, and is a no-op for a task that was never marked exited")
     func relaunchClearsOnlyThatTask() {
         let exited: Set<Int64> = [1, 2]
-        let afterRelaunch = MainAreaView.exitedTaskIDs(afterRelaunch: 1, current: exited)
-        #expect(afterRelaunch == [2])
-    }
-
-    @Test("Exiting an already-exited task id is idempotent")
-    func exitIsIdempotent() {
-        let exited = MainAreaView.exitedTaskIDs(afterExit: 1, current: [1])
-        #expect(exited == [1])
-    }
-
-    @Test("Relaunching a task that was never marked exited is a no-op")
-    func relaunchOfNeverExitedIsNoOp() {
-        let afterRelaunch = MainAreaView.exitedTaskIDs(afterRelaunch: 99, current: [1, 2])
-        #expect(afterRelaunch == [1, 2])
+        #expect(MainAreaView.exitedTaskIDs(afterRelaunch: 1, current: exited) == [2])
+        #expect(MainAreaView.exitedTaskIDs(afterRelaunch: 99, current: [1, 2]) == [1, 2])
     }
 
     // MARK: - ProjectsStore.project(forTask:)
