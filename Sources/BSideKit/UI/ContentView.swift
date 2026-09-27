@@ -65,8 +65,8 @@ public struct ContentView: View {
                     .allowsHitTesting(!layout.terminalDrawerCollapsed)
                     .clipped()
             }
-            // Only the right sidebar earns a toolbar slot: the left already has
-            // NavigationSplitView's native toggle, and View-menu shortcuts cover the rest.
+            // The left sidebar already has NavigationSplitView's native toggle;
+            // everything else with no other on-screen affordance earns a toolbar slot too.
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -79,6 +79,16 @@ public struct ContentView: View {
                     .help("Open in VS Code (⇧⌘O)")
                     .accessibilityLabel("Open in VS Code")
                     .disabled(EditorCommands.targetFolder(selection: store.mainSelection) == nil)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        layout.toggleTerminalDrawer()
+                    } label: {
+                        Label("Toggle Terminal", systemImage: "terminal")
+                    }
+                    .help(layout.terminalDrawerCollapsed ? "Show Terminal (⌘æ)" : "Hide Terminal (⌘æ)")
+                    .accessibilityLabel(layout.terminalDrawerCollapsed ? "Show Terminal" : "Hide Terminal")
+                    .disabled(store.mainSelection == .none)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
