@@ -287,6 +287,7 @@ private final class ProcessRunner: @unchecked Sendable {
 
     private var continuation: CheckedContinuation<Result<String, TitleGenerationFailure>, Never>?
     private var hasLaunched = false
+    private var abandoned = false
     private var cancelRequested = false
     private var terminatedEarly = false
     private var terminating = false
@@ -408,6 +409,10 @@ private final class ProcessRunner: @unchecked Sendable {
     /// stdout EOF, stderr EOF, or termination will ever fire naturally since
     /// the process never started.
     private func abandonUnlaunchedProcess() {
+        lock.lock()
+        abandoned = true
+        lock.unlock()
+
         process.terminationHandler = nil
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
@@ -547,7 +552,7 @@ private final class ProcessRunner: @unchecked Sendable {
 
     private func finish() {
         lock.lock()
-        let launched = hasLaunched
+        let isAbandoned = abandoned
         let wasTerminatedEarly = terminatedEarly
         timeoutWorkItem?.cancel()
         killWorkItem?.cancel()
@@ -558,7 +563,14 @@ private final class ProcessRunner: @unchecked Sendable {
         // failed to launch): `abandonUnlaunchedProcess` already tore things
         // down and resumed with the right failure. `terminationReason`/
         // `terminationStatus` are undefined on a `Process` that never ran.
-        guard launched else { return }
+        // Guarding on `abandoned` (set synchronously before `run()` even
+        // leaves the group) rather than `hasLaunched` (set only after
+        // `process.run()` returns) closes a race: if the child terminates
+        // and both pipes hit EOF before `hasLaunched` is flipped, `finish()`
+        // must still proceed — by the time `group.notify` fires here, the
+        // termination handler has already run, so reading
+        // `terminationStatus`/`terminationReason` is safe regardless.
+        guard !isAbandoned else { return }
 
         process.terminationHandler = nil
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
