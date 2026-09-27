@@ -74,22 +74,14 @@ struct ProjectDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Styled like `SidebarView`'s rows rather than system chrome, so it restyles with the Ghostty theme.
     private var newTaskButton: some View {
         Button {
             store.pendingTaskCreationProject = project
         } label: {
             Label("New Task", systemImage: "plus")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.palette.selectionForeground)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(theme.palette.accent)
-                )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glassProminent)
+        .tint(theme.palette.accent)
     }
 
     /// Same signals and derivations the sidebar's task row uses, so the dashboard never disagrees about a task's state.
@@ -153,15 +145,12 @@ struct ProjectDashboardView: View {
                         .foregroundStyle(theme.palette.textDisabled)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(theme.palette.elevatedSurfaceBackground)
-            )
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.roundedRectangle(radius: 6))
+        .controlSize(.large)
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
         }
