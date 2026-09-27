@@ -2,19 +2,10 @@ import CoreServices
 import Foundation
 
 /// FSEvents-backed watcher behind the Source Control sidebar's live refresh
-/// (native-rewrite.md §7 "Live refresh"). Watches two things:
-///
-/// - The worktree root, for edits to tracked/untracked files — ignoring
-///   anything under its own `.git` (a file, for a linked worktree, but
-///   ignored by path prefix either way; the real git directory is watched
-///   separately below).
-/// - The real git directory (resolved through the `.git` pointer file for a
-///   linked worktree), restricted to `index`, `HEAD`, and `refs/**` — the
-///   only paths there that change what `git status`/`branchChanges` report.
-///
-/// Both streams coalesce bursts of events into a single refresh roughly
-/// every 300ms (`debounceInterval`), since agents write files in bursts and a
-/// refresh per write is unusable.
+/// (native-rewrite.md §7). Watches the worktree root (for tracked/untracked
+/// edits, ignoring its own `.git`) and the real git directory, restricted to
+/// `index`/`HEAD`/`refs/**` — the only paths that change git status/branch
+/// output. Both streams coalesce bursts into one refresh roughly every 300ms (`debounceInterval`).
 @MainActor
 final class WorktreeWatcher {
     private let worktreeURL: URL
@@ -75,13 +66,9 @@ final class WorktreeWatcher {
             }
         }
 
-        // For a linked worktree, `refs/heads`, `refs/remotes`, and
-        // `packed-refs` live in the *common* git dir shared by every worktree
-        // — not in `gitDir` above, which is this worktree's private
-        // `worktrees/<name>/` directory (HEAD, index, per-worktree refs).
-        // Without this, a commit or fetch made from a terminal in this
-        // worktree never updates `refs/heads/<branch>` where `gitDirStream`
-        // is looking, and the sidebar never refreshes.
+        // For a linked worktree, `refs/heads`/`refs/remotes`/`packed-refs` live
+        // in the *common* git dir shared by every worktree, not in `gitDir`'s
+        // own private `worktrees/<name>/`; without this the sidebar never sees a commit/fetch made elsewhere.
         if let gitDir, let commonGitDir = Self.resolveCommonGitDir(forGitDir: gitDir), commonGitDir != gitDir {
             commonGitDirStream = Self.makeStream(paths: [commonGitDir.standardizedFileURL.path], latency: 0.2) { [weak self] paths in
                 MainActor.assumeIsolated {
@@ -123,19 +110,14 @@ final class WorktreeWatcher {
         DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
 
-    /// Only `index`, `HEAD`, and anything under `refs/` change what the
-    /// sidebar shows; everything else in a git directory (`COMMIT_EDITMSG`,
-    /// lock files, `logs/`, hooks output, ...) is noise.
+    /// Only `index`, `HEAD`, and `refs/**` change what the sidebar shows; everything else is noise.
     private static func isRelevantGitDirPath(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         if name == "index" || name == "HEAD" { return true }
         return path.contains("/refs/") || path.hasSuffix("/refs")
     }
 
-    /// In the *common* git dir (shared across worktrees), only branch and
-    /// remote-tracking refs matter to the sidebar — not e.g. `refs/stash` or
-    /// `refs/bisect`, and not the many non-ref files there (`config`,
-    /// `hooks/`, `objects/`, ...).
+    /// Only branch/remote-tracking refs matter, not e.g. `refs/stash` or `refs/bisect`.
     static func isRelevantCommonGitDirPath(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         if name == "packed-refs" { return true }
@@ -143,12 +125,9 @@ final class WorktreeWatcher {
             || path.contains("/refs/remotes/") || path.hasSuffix("/refs/remotes")
     }
 
-    /// Resolves the common git dir shared by every worktree of a repository,
-    /// given `gitDir` (a worktree's own, possibly private, git directory) —
-    /// the analogue of `git rev-parse --git-common-dir`, without shelling out.
-    /// A linked worktree's git dir has a `commondir` file with a path (usually
-    /// `../..`) relative to itself pointing at the shared dir; a non-linked
-    /// git dir (the main checkout) has none and *is* the common dir.
+    /// Analogue of `git rev-parse --git-common-dir`, without shelling out. A
+    /// linked worktree's git dir has a `commondir` file pointing at the
+    /// shared dir; the main checkout has none and *is* the common dir.
     static func resolveCommonGitDir(forGitDir gitDir: URL) -> URL? {
         let commondirFile = gitDir.appendingPathComponent("commondir")
         guard let contents = try? String(contentsOf: commondirFile, encoding: .utf8) else {
@@ -162,12 +141,8 @@ final class WorktreeWatcher {
         return resolved.standardizedFileURL
     }
 
-    /// Resolves the real git directory for `worktreeURL`. For a linked
-    /// worktree, `.git` is a file containing `gitdir: <path>`, not a
-    /// directory — this reads and resolves that pointer (relative paths are
-    /// relative to the worktree root) so the watcher targets the actual
-    /// `refs`/`index`/`HEAD` location under the main repository's
-    /// `worktrees/<name>/`, not the tiny pointer file itself.
+    /// For a linked worktree, `.git` is a file containing `gitdir: <path>`,
+    /// not a directory; resolves that pointer to the real location.
     static func resolveGitDir(forWorktree worktreeURL: URL) -> URL? {
         let gitPath = worktreeURL.appendingPathComponent(".git")
         var isDirectory: ObjCBool = false
@@ -186,11 +161,7 @@ final class WorktreeWatcher {
         return resolved.standardizedFileURL
     }
 
-    /// Thin wrapper over `FSEventStreamCreate`, dispatched on the main queue
-    /// so `callback` always runs where `MainActor.assumeIsolated` at the call
-    /// sites above is safe. `callback` receives the raw list of changed paths
-    /// for one coalesced batch of events; flags aren't needed since both
-    /// callers only care about *which* paths changed.
+    /// Dispatched on the main queue so `callback` runs where `MainActor.assumeIsolated` above is safe.
     static func makeStream(
         paths: [String],
         latency: CFTimeInterval,
@@ -201,14 +172,10 @@ final class WorktreeWatcher {
             init(_ callback: @escaping ([String]) -> Void) { self.callback = callback }
         }
 
-        // `info` is handed to `FSEventStreamCreate` unretained: the `retain`
-        // callback below is what gives the stream its own +1 when the
-        // context is copied. Using `passRetained` here as well double-counted
-        // the retain (one from here, one from the framework's own `retain`
-        // call), so `release` — called once, on `FSEventStreamInvalidate`/
-        // deinit — only ever brought the count back to 1, leaking `box` (and
-        // its captured `callback`, and whatever it in turn captures) for the
-        // life of the process.
+        // `info` is handed unretained: the `retain` callback below gives the
+        // stream its own +1 when the context is copied. `passRetained` here
+        // too double-counted the retain, so `release` never brought it back
+        // below 1, leaking `box` for the life of the process.
         let box = CallbackBox(callback)
         var context = FSEventStreamContext(
             version: 0,

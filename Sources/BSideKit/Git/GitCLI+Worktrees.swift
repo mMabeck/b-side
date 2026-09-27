@@ -10,10 +10,7 @@ extension GitCLI {
         public let isDetached: Bool
     }
 
-    /// All worktrees known to the repository at `path` (including the primary one).
-    ///
-    /// Parses `git worktree list --porcelain -z`: records are separated by a blank
-    /// line (i.e. two consecutive NULs), each line within a record is `key value`.
+    /// Parses `git worktree list --porcelain -z`: records separated by two consecutive NULs, each line `key value`.
     public static func worktrees(at path: URL) async throws -> [Worktree] {
         let data = try await run(["worktree", "list", "--porcelain", "-z"], in: path)
         let text = String(data: data, encoding: .utf8) ?? ""
@@ -79,11 +76,7 @@ extension GitCLI {
         )
     }
 
-    /// Moves a worktree's directory from `oldPath` to `newPath`. Follows up with
-    /// `worktree repair`, which is cheap and idempotent, so both the worktree's
-    /// gitlink and the main repository's administrative files agree on the new
-    /// path even on git versions where `worktree move` alone can leave them
-    /// out of sync.
+    /// Follows up with `worktree repair` (cheap, idempotent) since `worktree move` alone can leave gitlinks out of sync on some git versions.
     public static func moveWorktree(from oldPath: URL, to newPath: URL, in repositoryPath: URL) async throws {
         _ = try await run(["worktree", "move", oldPath.path, newPath.path], in: repositoryPath)
         _ = try? await run(["worktree", "repair"], in: repositoryPath)

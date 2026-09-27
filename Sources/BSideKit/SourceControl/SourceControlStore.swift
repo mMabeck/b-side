@@ -3,14 +3,10 @@ import Foundation
 import Observation
 
 /// Drives the Source Control sidebar (native-rewrite.md §7) for whichever
-/// task is selected. One instance lives for the lifetime of `RightSidebarView`
-/// and is retargeted — not recreated — as the selection changes, via
-/// `setTask`.
+/// task is selected. One instance, retargeted (not recreated) via `setTask`.
 ///
-/// Status loads first and publishes immediately; per-file added/removed line
-/// counts are a second, slower pass (numstat, plus one `diff --no-index` per
-/// untracked file) that fills in once it lands, so the sidebar never blocks
-/// its first paint on diff stats. See `GitCLI+Changes.swift`.
+/// Status loads first and publishes immediately; per-file line counts are a
+/// slower second pass that fills in once it lands, so the sidebar never blocks its first paint.
 @MainActor
 @Observable
 public final class SourceControlStore {
@@ -21,9 +17,7 @@ public final class SourceControlStore {
         case error(String)
     }
 
-    /// One row in the sidebar, unifying `GitCLI.FileChange` (staged/unstaged)
-    /// and `GitCLI.BranchFileChange` (committed-on-branch) behind a single
-    /// shape the UI renders the same way.
+    /// Unifies `GitCLI.FileChange` and `GitCLI.BranchFileChange` behind one shape the UI renders the same way.
     public struct Row: Identifiable, Equatable, Sendable {
         public enum Origin: Equatable, Sendable {
             case staged
@@ -73,8 +67,7 @@ public final class SourceControlStore {
     public private(set) var loadState: LoadState = .idle
     public private(set) var staged: [Row] = []
     public private(set) var unstaged: [Row] = []
-    /// Everything committed on this task's branch since it diverged from
-    /// base — see `GitCLI.branchChanges`. Never reflects uncommitted work.
+    /// See `GitCLI.branchChanges`. Never reflects uncommitted work.
     public private(set) var branchChanges: [Row] = []
 
     public var commitMessage: String = ""
@@ -86,22 +79,18 @@ public final class SourceControlStore {
         public let behind: Int
     }
 
-    /// Whether this task's worktree has an `origin` remote configured; the
-    /// Push button and History section are both hidden without one.
+    /// The Push button and History section are both hidden without a remote.
     public private(set) var hasRemote = false
-    /// `nil` before the first refresh, or when the branch has no upstream
-    /// yet (still shows the Push button — pushing sets the upstream).
+    /// `nil` before the first refresh, or with no upstream yet (still shows the Push button).
     public private(set) var aheadBehind: AheadBehind?
     public private(set) var isPushing = false
     public private(set) var pushLog: [String] = []
 
-    /// Commits on this branch since it diverged from base, most recent
-    /// first — the History section. Same baseline as `branchChanges`.
+    /// Most recent first, the History section. Same baseline as `branchChanges`.
     public private(set) var history: [GitCLI.CommitSummary] = []
     private static let historyLimit = 50
 
-    /// Moves untracked files to the Trash. Injected so tests can assert
-    /// discard behaviour without touching a real Trash.
+    /// Injected so tests can assert discard behaviour without a real Trash.
     @ObservationIgnored
     public var recycle: (@Sendable ([URL]) async -> Void) = { urls in
         guard !urls.isEmpty else { return }
@@ -112,12 +101,9 @@ public final class SourceControlStore {
 
     @ObservationIgnored private var watcher: WorktreeWatcher?
     @ObservationIgnored private var refreshGeneration = 0
-    /// Bumped only when `setTask` actually retargets the store at a
-    /// different task (not on every refresh, unlike `refreshGeneration`).
-    /// `commit()`/`push()` capture it at the start and check it before every
-    /// write to `commitLog`/`pushLog`/`commitMessage`/`isCommitting`/
-    /// `isPushing`, so a commit or push left running past a task switch can't
-    /// write its trailing output into the newly-selected task's state.
+    /// Bumped only when `setTask` retargets to a different task, unlike
+    /// `refreshGeneration`. `commit()`/`push()` check it before every write
+    /// so output from a task switched away from can't land on the new task's state.
     @ObservationIgnored private var taskGeneration = 0
     @ObservationIgnored private var commitTask: Task<Void, Never>?
     @ObservationIgnored private var pushTask: Task<Void, Never>?
@@ -145,12 +131,8 @@ public final class SourceControlStore {
         task.map { URL(fileURLWithPath: $0.worktreePath) }
     }
 
-    /// Retargets the store at `newTask`. A no-op for the store's own reset
-    /// state when the worktree path is unchanged (e.g. a re-selection of the
-    /// same task, or a `TaskRecord` update that only touched unrelated
-    /// fields), aside from keeping the latest record around for
-    /// `baseCommit`. A worktree path change tears down the old watcher,
-    /// clears all state, and starts fresh.
+    /// No-op for the store's reset state when the worktree path is unchanged
+    /// (aside from keeping the latest record for `baseCommit`); a path change tears down and starts fresh.
     public func setTask(_ newTask: TaskRecord?) {
         if newTask?.worktreePath == task?.worktreePath, newTask?.id == task?.id {
             task = newTask
@@ -292,9 +274,7 @@ public final class SourceControlStore {
         }
     }
 
-    /// Caps how many `diff --no-index` processes run at once — refreshing a
-    /// worktree with hundreds of untracked files used to spawn one per file
-    /// concurrently on every refresh. `GitCLI.lineCounts(forUntracked:)`
+    /// Caps `diff --no-index` processes running at once; `GitCLI.lineCounts(forUntracked:)`
     /// itself skips line counts outright above `untrackedLineCountThreshold`.
     private static let maxConcurrentUntrackedDiffs = 8
 
@@ -352,21 +332,13 @@ public final class SourceControlStore {
         await refresh()
     }
 
-    /// Discards `rows`. An unstaged row's edits are reverted in the working
-    /// tree only, from the index — whatever's staged for the same path is
-    /// left alone (VS Code semantics: the sidebar doesn't offer Discard on a
-    /// staged row at all — see `RightSidebarView` — so committing the two
-    /// halves of a file's changes independently is the norm, not an edge
-    /// case). Untracked rows go to the Trash via `recycle` rather than `rm`,
-    /// so a discard is always recoverable.
-    ///
-    /// A staged row can still arrive here through a mixed bulk selection.
-    /// One whose path `HEAD` has is only unstaged, never reverted: the staged
-    /// content stays in the working tree rather than being lost with no copy
-    /// in the Trash. A file staged as newly added (or a rename's new name)
-    /// has no `HEAD` entry, so it's unstaged and sent to the Trash instead.
-    /// Conflicted rows are skipped — `restore` refuses unmerged paths, which
-    /// would abort the rest of the batch.
+    /// An unstaged row's edits are reverted in the working tree only,
+    /// leaving whatever's staged for the same path alone (VS Code semantics).
+    /// Untracked rows go to the Trash via `recycle`, so discard is always
+    /// recoverable. A staged row with a `HEAD` entry is only unstaged, never
+    /// reverted, so its content isn't lost with no Trash copy; one with no
+    /// `HEAD` entry (newly added, or a rename's new name) is unstaged and
+    /// trashed instead. Conflicted rows are skipped: `restore` refuses unmerged paths.
     public func discard(_ rows: [Row]) async {
         guard let worktreeURL else { return }
 
@@ -409,9 +381,7 @@ public final class SourceControlStore {
         await refresh()
     }
 
-    /// `rows`' paths, plus `origPath` for any renamed row — discarding or
-    /// unstaging only a rename's new name leaves the old name's deletion
-    /// staged (`D old`); git needs both pathspecs to undo the rename.
+    /// Plus `origPath` for a renamed row: discarding only the new name leaves the old name's deletion staged.
     private static func expandedPaths(for rows: [Row]) -> [String] {
         var paths: [String] = []
         for row in rows {
@@ -458,11 +428,7 @@ public final class SourceControlStore {
 
     // MARK: - Commit
 
-    /// Commits `commitMessage` against the currently staged changes,
-    /// streaming hook output into `commitLog` as it arrives. `commitMessage`
-    /// is only cleared on success, so a failed commit (or one killed by
-    /// `cancelCommit`) leaves the message and log both visible for the user
-    /// to read and retry.
+    /// `commitMessage` is only cleared on success, so a failed or cancelled commit leaves it visible to retry.
     public func commit() {
         guard let worktreeURL, !isCommitting, !isPushing, !staged.isEmpty else { return }
         let trimmed = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -506,10 +472,7 @@ public final class SourceControlStore {
 
     // MARK: - Push
 
-    /// Pushes `HEAD` to `origin`, setting the upstream if none exists yet,
-    /// streaming output into `pushLog` the same way `commit()` streams hook
-    /// output. Mutually exclusive with committing: the UI disables commit
-    /// while a push is in flight and vice versa.
+    /// Sets the upstream if none exists yet. Mutually exclusive with committing.
     public func push() {
         guard let worktreeURL, !isPushing, !isCommitting else { return }
 

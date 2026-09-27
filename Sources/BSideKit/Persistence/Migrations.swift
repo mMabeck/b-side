@@ -38,45 +38,32 @@ enum Migrations {
             }
         }
 
-        // Added for pi session resume (native-rewrite.md §6): the pi session
-        // id a conversation was launched under, known before the transcript
-        // file exists on disk and stable even if `transcriptPath` is later
-        // re-resolved.
+        // The pi session id, known before the transcript file exists and stable even if `transcriptPath` is later re-resolved.
         migrator.registerMigration("v2_conversation_session_id") { db in
             try db.alter(table: "conversation") { t in
                 t.add(column: "sessionId", .text).notNull().defaults(to: "")
             }
         }
 
-        // Added for automatic task renaming from a task's first pi prompt
-        // (see `TaskAutoRenameService`): whether a task, created with a
-        // blank name, is still waiting for that rename.
+        // Whether a blank-named task is still waiting for `TaskAutoRenameService`'s rename.
         migrator.registerMigration("v3_task_awaiting_auto_rename") { db in
             try db.alter(table: "task") { t in
                 t.add(column: "awaitingAutoRename", .boolean).notNull().defaults(to: false)
             }
         }
 
-        // Added so merged status can tell a fresh (or merely behind) branch
-        // apart from one that actually gained and merged commits of its own
-        // (see `GitCLI.isMerged`): the branch's tip commit right after the
-        // task was created. `nil` for rows from before this column existed;
-        // `TaskWorktreeService.syncStatus` falls back to the branch's reflog
-        // creation entry for those.
+        // The branch's tip commit right after task creation, so `GitCLI.isMerged`
+        // can tell a fresh branch apart from one that gained and merged its
+        // own commits. `nil` for legacy rows; `syncStatus` falls back to the reflog creation entry.
         migrator.registerMigration("v4_task_base_commit") { db in
             try db.alter(table: "task") { t in
                 t.add(column: "baseCommit", .text)
             }
         }
 
-        // Added to remember a project's last-used task-creation choices (New
-        // Task sheet: worktree toggle, new-branch/existing-branch mode) so
-        // reopening the sheet preselects them instead of always resetting to
-        // the project config defaults. Renamed from this branch's original
-        // "v4_project_last_task_creation_choices" to land after main's
-        // "v4_task_base_commit"; column adds are guarded because a dev DB may
-        // already have applied the old v4 (or the since-dropped
-        // "v5_task_start_commit") migration under its previous name.
+        // Remembers the New Task sheet's last choices so reopening it
+        // preselects them. Column adds are guarded: a dev DB may have applied
+        // this migration under a prior name ("v4_project_last_task_creation_choices").
         migrator.registerMigration("v5_project_last_task_creation_choices") { db in
             let existingColumns = Set(try db.columns(in: "project").map(\.name))
             try db.alter(table: "project") { t in
@@ -89,27 +76,17 @@ enum Migrations {
             }
         }
 
-        // Added so tasks with recent activity (a sent prompt, a genuine
-        // busy→idle transition, or an accepted question alert — see
-        // `ProjectsStore.bumpTaskActivity`) sort to the top of their
-        // project's task list instead of staying pinned by creation order.
-        // `nil` for a task that has never had qualifying activity; SQLite
-        // sorts `NULL` last in a `DESC` ordering, so such tasks fall below
-        // any that have.
+        // So tasks with recent activity (`ProjectsStore.bumpTaskActivity`) sort
+        // to the top instead of staying pinned by creation order. `nil` falls last in a `DESC` ordering.
         migrator.registerMigration("v6_task_last_activity_at") { db in
             try db.alter(table: "task") { t in
                 t.add(column: "lastActivityAt", .datetime)
             }
         }
 
-        // Added so the user can drag-reorder projects in the sidebar
-        // (`ProjectsStore.moveProjects`) instead of always seeing them in
-        // insertion (rowid) order. Backfilled from each project's current
-        // `id` so existing installs keep their present displayed order
-        // (`Project.fetchAll` had no explicit `ORDER BY`, i.e. rowid/id
-        // order) instead of the backfill silently reshuffling them. A new
-        // project not yet given an explicit position defaults to `0` here;
-        // `ProjectsStore.addProject` overrides that with max+1 before insert.
+        // Enables drag-reorder (`ProjectsStore.moveProjects`). Backfilled from
+        // each project's current `id` so existing installs keep their present
+        // order instead of the backfill reshuffling them.
         migrator.registerMigration("v7_project_sort_order") { db in
             try db.alter(table: "project") { t in
                 t.add(column: "sortOrder", .integer).notNull().defaults(to: 0)

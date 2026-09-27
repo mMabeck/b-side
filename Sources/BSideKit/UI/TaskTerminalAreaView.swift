@@ -1,33 +1,22 @@
 import SwiftUI
 
-/// One task's terminal area: the subagent card strip (only while the task
-/// has runs to show), above exactly one live surface — the parent's
-/// `TerminalHostView`, or one child's, per `ProjectsStore.subagentSwap`.
-/// Deliberately a plain `VStack`/`ZStack`, never `HSplitView`/`VSplitView`
-/// (AppKit `updateConstraints` crash — native-rewrite.md).
+/// The subagent card strip above exactly one live surface — the parent's or
+/// one child's, per `ProjectsStore.subagentSwap`. A plain `VStack`/`ZStack`,
+/// never `HSplitView`/`VSplitView` (AppKit `updateConstraints` crash).
 ///
-/// Every surface — parent and every live child pane — stays mounted in the
-/// `ZStack` at all times; only the shown one is visible (opacity/hit-testing
-/// toggle, the same "stays mounted, marked not-visible" discipline
-/// `MainAreaView` itself uses for hidden tasks). Swapping which one is shown
-/// also moves real keyboard focus to it — see the `onChange` below.
+/// Every surface stays mounted in the `ZStack`; only the shown one is
+/// visible (same discipline `MainAreaView` uses for hidden tasks). Swapping which is shown also moves real keyboard focus.
 struct TaskTerminalAreaView: View {
     var store: ProjectsStore
     var host: TerminalSurfaceHost
     var taskID: Int64
     var focusedTaskID: FocusState<Int64?>.Binding
 
-    /// Whether this task's Pi process has exited on its own; when `true`
-    /// (and `onResume` is set), `PiSessionEndedView` replaces the parent's
-    /// `TerminalHostView` in the same slot — see `MainAreaView`'s
-    /// `exitedTaskIDs`.
+    /// When `true` (with `onResume` set), `PiSessionEndedView` replaces `TerminalHostView` in the same slot.
     var isExited: Bool = false
     var onResume: (() -> Void)? = nil
 
-    /// Whether `MainAreaView` currently shows this task (vs. keeping it
-    /// mounted-but-hidden for another selection). The auto-return-on-close
-    /// `onChange` below must not steal focus into a hidden task — see its
-    /// own comment.
+    /// The auto-return-on-close `onChange` below must not steal focus into a hidden task.
     var isSelected: Bool = true
 
     var body: some View {
@@ -60,16 +49,11 @@ struct TaskTerminalAreaView: View {
             }
         }
         // Forces a re-render purely on the passage of time: a finished
-        // card's linger expiring changes no other observed state
-        // (`ProjectsStore.pruneAgedOutStripPanes` bumps this token once a
-        // second instead), so without this the strip would never notice.
+        // card's linger expiring changes no other observed state.
         .onChange(of: store.stripTickToken) { _, _ in }
-        // Auto-return on close: a shown child's surface closing swaps
-        // `shownChildID` back to `nil` (or to whatever's newly shown) out
-        // from under this view. Only follow that with real keyboard focus
-        // when this task is the one actually on screen — otherwise a child
-        // closing in a hidden, background task would steal focus away from
-        // whatever the user is looking at.
+        // A shown child's surface closing swaps `shownChildID` out from under
+        // this view; only follow with real focus when this task is on screen,
+        // or a hidden background task's child closing would steal focus.
         .onChange(of: shownChildID) { _, newValue in
             guard isSelected else { return }
             if let newValue, let pane = panes.first(where: { $0.id == newValue }) {
@@ -83,9 +67,7 @@ struct TaskTerminalAreaView: View {
     }
 
     private func handle(_ hit: SubagentStripMouseParser.HitTestResult) {
-        // Resolved fresh at click time, not from a snapshot captured when
-        // this closure was installed — see `SubagentStripClickResolver`'s
-        // doc comment.
+        // Resolved fresh at click time, not from a snapshot when the closure was installed.
         let livePaneIDs = Set(store.subagentPanes.panes(forTask: taskID).map(\.id))
         switch SubagentStripClickResolver.resolve(hit, livePaneIDs: livePaneIDs) {
         case .showMain:
@@ -93,19 +75,14 @@ struct TaskTerminalAreaView: View {
         case .toggle(let childId):
             store.subagentSwap.toggle(childId: childId, forTask: taskID)
         case .highlight(let childId):
-            // A headless, card-only child: highlight it in the strip
-            // without disturbing whatever the main area already shows.
+            // A headless, card-only child: highlight without disturbing the main area.
             store.subagentSwap.highlight(childId: childId, forTask: taskID)
         }
     }
 
-    /// Called for every press on the strip, hit or not (a gap, the label
-    /// row, or a card with no live surface all reach here too) — the strip
-    /// is a real Ghostty surface, so a click into it can otherwise leave it
-    /// holding keyboard focus with nothing to type into. Resolves the
-    /// target live, after `handle` above has had a chance to run, so a
-    /// click that swaps also focuses the newly shown surface rather than
-    /// the one that was shown a moment ago.
+    /// Called for every press on the strip, hit or not — a real Ghostty
+    /// surface would otherwise hold keyboard focus with nothing to type
+    /// into. Resolved live, after `handle`, so a swap also focuses the newly shown surface.
     private func focusShownSurface() {
         let shownChildID = store.subagentSwap.shownChildID(forTask: taskID)
         let panes = store.subagentPanes.panes(forTask: taskID)

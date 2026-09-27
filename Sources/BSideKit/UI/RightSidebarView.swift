@@ -229,9 +229,7 @@ struct RightSidebarView: View {
         onStage: (() -> Void)? = nil,
         onUnstage: (() -> Void)? = nil
     ) -> some View {
-        // Discard is worktree-only (see `SourceControlStore.discard`), so it's
-        // only offered on unstaged rows — there's no destructive "discard" of
-        // a staged row's index entry, just Unstage.
+        // Discard is worktree-only, so only offered on unstaged rows; a staged row's index entry gets Unstage instead.
         let onDiscard: (() -> Void)? = row.origin == .unstaged ? {
             requestDiscard(for: selectedRowsOrThis(row))
         } : nil
@@ -245,11 +243,8 @@ struct RightSidebarView: View {
             }
     }
 
-    /// The rows a bulk action (discard, or a future stage/unstage-selection
-    /// action) should apply to: the current multi-selection when `row` is
-    /// part of it, else just `row` itself — so right-clicking or hovering a
-    /// row outside the selection acts on that row alone rather than a stale
-    /// selection.
+    /// The multi-selection if `row` is part of it, else just `row` — so a
+    /// right-click outside the selection acts on that row alone.
     private func selectedRowsOrThis(_ row: SourceControlStore.Row) -> [SourceControlStore.Row] {
         guard selection.contains(row.id) else { return [row] }
         let all = scStore.staged + scStore.unstaged + scStore.branchChanges
@@ -340,11 +335,8 @@ struct RightSidebarView: View {
 
     // MARK: - Diff sheet
 
-    /// Loads and shows `row`'s diff. `requestedTaskId` is captured before the
-    /// `await` so that if the selected task changes while the diff is in
-    /// flight, the stale result is dropped instead of overwriting the
-    /// newly-selected task's sheet — and a genuine load failure surfaces as
-    /// an error rather than the empty-diff "No changes" state.
+    /// `requestedTaskId` is captured before the `await` so a stale result
+    /// from a since-changed selection is dropped instead of overwriting the new task's sheet.
     private func openDiff(for row: SourceControlStore.Row) {
         let requestedTaskId = scStore.task?.id
         Task {
@@ -405,9 +397,7 @@ struct RightSidebarView: View {
     }
 }
 
-/// Everything `DiffSheet` needs for one presentation, resolved before the
-/// sheet is shown so `DiffSheet` itself stays git-agnostic (see its own doc
-/// comment).
+/// Everything `DiffSheet` needs, resolved before the sheet is shown so `DiffSheet` itself stays git-agnostic.
 private struct DiffSheetData: Identifiable {
     let id: String
     let title: String
@@ -415,11 +405,9 @@ private struct DiffSheetData: Identifiable {
     let diffText: String
     let isBinary: Bool
     let isTruncated: Bool
-    /// Set when the diff failed to load; shown instead of the diff text or
-    /// the misleading "No changes" empty state.
+    /// Shown instead of the diff text or misleading "No changes" state.
     let errorMessage: String?
-    /// `nil` for a commit shown from History — hides the DiffSheet's "Open
-    /// in Editor" button, which only makes sense for a specific file.
+    /// `nil` for a commit from History — hides "Open in Editor", which only makes sense for a specific file.
     let row: SourceControlStore.Row?
 }
 

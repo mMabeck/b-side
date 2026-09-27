@@ -4,43 +4,25 @@ import OSLog
 
 /// The local HTTP endpoint agent processes POST lifecycle and subagent
 /// events to (§5, §6). Loopback-only, ephemeral port. Every response has an
-/// empty body — anything returned is liable to be injected into the agent's
-/// context.
+/// empty body — anything returned is liable to be injected into the agent's context.
 ///
-/// Routes (this app's own convention; see the builder's final report for
-/// what the Pi-side subagent backend would need to call):
-/// - `POST /subagents/{taskId}/{childId}/begin` — body `{"agent","taskLabel","openingLine"?}`
-/// - `POST /subagents/{taskId}/{childId}/events` — body one or more `\n`-terminated JSON event lines
-/// - `POST /subagents/{taskId}/{childId}/done` — body the `done.json` payload
-/// - `POST /subagents/{taskId}/{childId}/spawn` — body `{"label","cwd","command"}`;
-///   creates a child surface (hidden until swapped in) running `command`
-///   (an absolute path to an executable launch script, run directly — not
-///   wrapped in a login shell) in `cwd`. `204` once the surface is created;
-///   `404` if `taskId` is unknown; `429` if the task is already at
-///   `SubagentPaneStore.maxPanesPerTask` (the caller should fall back to
-///   headless); `400` for a malformed body.
-/// - `POST /subagents/{taskId}/{childId}/close` — empty body; tears down
-///   that child's pane. Always `204`, idempotent.
-/// - `POST /agent/{taskId}/busy` — empty body; the parent Pi agent loop
-///   started working. `204` on success, `404` for an unknown task id.
-/// - `POST /agent/{taskId}/idle` — empty body; the parent Pi agent loop
-///   ended, with no sound (unlike `alert`). `204`/`404` as above.
-/// - `POST /agent/{taskId}/alert` — body
-///   `{"kind":"finished"|"question","title":string,"body":string}`; routed
-///   into the same path as terminal alerts (sound, native notification,
-///   needs-attention for `question`, debounced). `204`/`404` as above;
-///   `400` for a malformed body or unrecognised `kind`. Every route may
-///   arrive in any order and be repeated.
+/// Routes:
+/// - `POST /subagents/{taskId}/{childId}/begin` — `{"agent","taskLabel","openingLine"?}`
+/// - `POST /subagents/{taskId}/{childId}/events` — one or more `\n`-terminated JSON event lines
+/// - `POST /subagents/{taskId}/{childId}/done` — the `done.json` payload
+/// - `POST /subagents/{taskId}/{childId}/spawn` — `{"label","cwd","command"}`;
+///   creates a child surface running `command` directly (not a login shell)
+///   in `cwd`. `204` once created; `404` unknown task; `429` at
+///   `SubagentPaneStore.maxPanesPerTask` (caller falls back to headless); `400` malformed.
+/// - `POST /subagents/{taskId}/{childId}/close` — tears down that child's pane. Always `204`, idempotent.
+/// - `POST /agent/{taskId}/busy` / `.../idle` — parent Pi loop started/ended working. `204`/`404`.
+/// - `POST /agent/{taskId}/alert` — `{"kind":"finished"|"question","title","body"}`,
+///   routed like a terminal alert. `204`/`404`/`400` for a bad body or `kind`.
 ///
-/// `spawn`/`close` hop to the main actor to touch `SubagentPaneStore` (and,
-/// for `spawn`, to create a `TerminalSurfaceHost`) before responding, unlike
-/// `begin`/`events`/`done`, which respond immediately and mutate `store`
-/// asynchronously — the caller needs to know a `spawn` actually produced a
-/// surface (or why not) before it decides whether to fall back to headless.
+/// `spawn`/`close` hop to the main actor and respond only once resolved,
+/// since the caller needs `spawn`'s real outcome (in particular `429`) before falling back to headless.
 
-/// Guards a resume-once flag shared between the listener's state-update
-/// closure and the enclosing continuation, since NWListener may deliver
-/// state updates from an arbitrary queue.
+/// Guards a resume-once flag since `NWListener` may deliver state updates from an arbitrary queue.
 private final class ResumeBox: @unchecked Sendable {
     private let lock = NSLock()
     private var resumed = false
@@ -61,14 +43,11 @@ public final class SubagentEventServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.mabeck.bside.subagent-server")
     private let store: SubagentFeedStore
 
-    /// Per-child incremental parser, since a child's events may arrive split
-    /// across multiple HTTP requests.
+    /// Per-child, since events may arrive split across multiple HTTP requests.
     private var lineParsers: [String: SubagentEventLineParser] = [:]
 
     public private(set) var port: UInt16?
 
-    /// The address to hand to spawned agent processes, once `start()`'s
-    /// continuation resolves.
     public var address: String? {
         port.map { "127.0.0.1:\($0)" }
     }
@@ -98,7 +77,6 @@ public final class SubagentEventServer: @unchecked Sendable {
         listener = try NWListener(using: parameters)
     }
 
-    /// Starts listening and returns once the port is bound.
     public func start() async throws {
         let resumeBox = ResumeBox()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -219,11 +197,6 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
     }
 
-    /// Decodes `{"label","cwd","command"}`, then hops to the main actor to
-    /// check the task exists and ask `SubagentPaneStore` to create the
-    /// surface, responding only once that's resolved — the caller needs the
-    /// real outcome (in particular `429`, cap reached) before deciding
-    /// whether to fall back to headless.
     private func handleSpawn(taskId: Int64, childId: String, body: Data, on connection: NWConnection) {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: body),
               let object = value.objectValue,
@@ -256,8 +229,7 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
     }
 
-    /// Tears down `childId`'s pane, if any. Always `204` — a close for an
-    /// already-gone (or never-spawned) pane is not an error.
+    /// Always `204` — closing an already-gone pane is not an error.
     private func handleClose(taskId: Int64, childId: String, on connection: NWConnection) {
         Task { @MainActor [weak self] in
             guard let self else {
@@ -269,11 +241,6 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
     }
 
-    /// `busy`/`idle`/`alert` for a task's own parent Pi agent loop, distinct
-    /// from the per-child `subagents/...` routes above. `busy`/`idle` just
-    /// flip `ProjectsStore.busyTaskIDs`; `alert` decodes its JSON body first
-    /// (`400` if that fails or `kind` isn't recognised) before hopping to the
-    /// main actor to check the task exists (`404` if not) and dispatch.
     private func handleAgentStatus(taskId: Int64, action: String, body: Data, on connection: NWConnection) {
         switch action {
         case "busy":
@@ -313,9 +280,7 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
     }
 
-    /// Maps the wire contract's `"finished"`/`"question"` strings to
-    /// `TaskAlertKind` — `nil` for anything else, which `handleAgentStatus`
-    /// turns into a `400`.
+    /// `nil` for anything unrecognised, which `handleAgentStatus` turns into a `400`.
     private static func alertKind(fromWireValue value: String) -> TaskAlertKind? {
         switch value {
         case "finished": return .finished
@@ -331,9 +296,6 @@ public final class SubagentEventServer: @unchecked Sendable {
         429: "Too Many Requests",
     ]
 
-    /// Every response keeps an empty body — anything returned is liable to
-    /// be injected into the agent's context (see the file doc comment) — so
-    /// only the status line varies.
     private func respond(status: Int, on connection: NWConnection) {
         let reason = Self.statusText[status] ?? "Unknown"
         let response = "HTTP/1.1 \(status) \(reason)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"

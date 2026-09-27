@@ -1,11 +1,8 @@
 import Foundation
 
-/// One changed file as the Changes overlay's tree builder consumes it —
-/// independent of `GitCLI.BranchFileChange`/`FileChange` so the builder
-/// itself needs no git-specific area/origin concepts and is directly unit
-/// testable. `path` is always the current path — for a rename, that's the
-/// new name; `origPath` is kept only for display, never used to place the
-/// node in the tree.
+/// Independent of `GitCLI.BranchFileChange`/`FileChange` so the builder is
+/// directly unit testable. `path` is always the current path (the new name
+/// for a rename); `origPath` is kept only for display, never for tree placement.
 public struct ChangesTreeFile: Sendable, Equatable, Identifiable {
     public let path: String
     public let origPath: String?
@@ -33,23 +30,16 @@ public struct ChangesTreeFile: Sendable, Equatable, Identifiable {
     }
 }
 
-/// One node in the Changes overlay's file tree: either a changed file, or a
-/// folder aggregating the files beneath it. A chain of folders that each
-/// have exactly one child and no files of their own is compressed into a
-/// single node (`a/b/c` rather than three nested single-child rows) — VS
-/// Code's "compact folders" behaviour.
+/// A chain of folders each with exactly one child and no files of their own
+/// is compressed into a single node (`a/b/c`, not three nested rows) — VS Code's "compact folders".
 public enum ChangesTreeNode: Sendable, Equatable, Identifiable {
     case file(ChangesTreeFile)
     case folder(Folder)
 
     public struct Folder: Sendable, Equatable {
-        /// Full path from the tree's root to this folder (post-compression),
-        /// e.g. `"Sources/BSideKit/Git"` — unique, so it doubles as the
-        /// node's `id`.
+        /// Full path post-compression, e.g. `"Sources/BSideKit/Git"` — unique, doubles as the node's `id`.
         public let id: String
-        /// The label to render for this row: the compressed chain relative
-        /// to its parent row, e.g. `"BSideKit/Git"` when `Sources` is its
-        /// own row above it.
+        /// The compressed chain relative to its parent row, e.g. `"BSideKit/Git"`.
         public let displayName: String
         public let children: [ChangesTreeNode]
         public let linesAdded: Int
@@ -70,21 +60,16 @@ public enum ChangesTreeNode: Sendable, Equatable, Identifiable {
         }
     }
 
-    /// `nil` for a file (a leaf), `[ChangesTreeNode]` for a folder — the
-    /// shape `OutlineGroup(_:children:)` expects.
+    /// The shape `OutlineGroup(_:children:)` expects.
     public var children: [ChangesTreeNode]? {
         if case .folder(let folder) = self { return folder.children }
         return nil
     }
 }
 
-/// Builds a compressed folder tree from a flat list of changed files. Pure
-/// and git-agnostic beyond `ChangesTreeFile`'s own `GitCLI.FileChange.Kind`,
-/// so it's directly unit testable without a repository.
+/// Pure and git-agnostic, so it's directly unit testable without a repository.
 public enum ChangesTreeBuilder {
-    /// - Returns: Root-level nodes, folders sorted before files and each
-    ///   group sorted alphabetically (`localizedStandardCompare`, so e.g.
-    ///   `file2` sorts before `file10`).
+    /// Folders sorted before files, each group alphabetical (`localizedStandardCompare`, so `file2` sorts before `file10`).
     public static func build(_ files: [ChangesTreeFile]) -> [ChangesTreeNode] {
         guard !files.isEmpty else { return [] }
         let root = MutableNode(path: "")
@@ -109,19 +94,15 @@ public enum ChangesTreeBuilder {
         return root.compressedChildren()
     }
 
-    /// Intermediate, mutable representation used only while building the
-    /// tree; converted to the immutable `ChangesTreeNode` once assembled.
+    /// Mutable representation used only while building; converted to `ChangesTreeNode` once assembled.
     private final class MutableNode {
-        /// This node's own full path from the tree root, uncompressed —
-        /// becomes a folder's `id` once it stops being collapsed into its
-        /// parent's row.
+        /// Uncompressed; becomes a folder's `id` once it stops being collapsed into its parent's row.
         let path: String
         var folderChildren: [String: MutableNode] = [:]
         var files: [String: ChangesTreeFile] = [:]
 
         init(path: String) { self.path = path }
 
-        /// This node's children as immutable, sorted `ChangesTreeNode`s.
         func compressedChildren() -> [ChangesTreeNode] {
             let folders = folderChildren
                 .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
@@ -132,12 +113,8 @@ public enum ChangesTreeBuilder {
             return folders + fileNodes
         }
 
-        /// Collapses a chain of single-child, file-less folders into one
-        /// node labelled `"a/b/c"`, recursing until a folder with more than
-        /// one entry (or a file of its own) is reached. `name` accumulates
-        /// the display label across the chain; `path` (this node's own,
-        /// uncompressed) is always the correct `id` for wherever the chain
-        /// bottoms out.
+        /// Recurses until a folder with more than one entry (or a file of
+        /// its own) is reached; `name` accumulates the label across the chain.
         func compressed(name: String) -> ChangesTreeNode {
             if files.isEmpty, folderChildren.count == 1, let onlyChild = folderChildren.first {
                 return onlyChild.value.compressed(name: "\(name)/\(onlyChild.key)")

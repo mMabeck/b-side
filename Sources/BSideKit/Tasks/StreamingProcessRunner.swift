@@ -1,23 +1,19 @@
 import Foundation
 import OSLog
 
-/// Runs an arbitrary shell command (setup/teardown, dependency installs) and
-/// streams its combined stdout+stderr line by line, without blocking the caller's
-/// actor. Distinct from `GitCLI.run`, which is for git subcommands with
-/// machine-readable output — this is for opaque project commands whose only
-/// useful output is "show it to the user".
+/// Streams a shell command's combined stdout+stderr line by line, without
+/// blocking the caller's actor. Distinct from `GitCLI.run`, which is for
+/// git subcommands with machine-readable output.
 enum StreamingProcessRunner {
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "process")
 
-    /// Thrown when the command exits non-zero. All output was already delivered to
-    /// `onOutput` before this is thrown.
+    /// All output was already delivered to `onOutput` before this is thrown.
     struct NonZeroExit: Error, Sendable {
         let command: String
         let status: Int32
     }
 
-    /// Runs `command` through `/bin/zsh -lc` in `directory`, invoking `onOutput` for
-    /// each line of combined output as it arrives.
+
     static func run(
         command: String,
         in directory: URL,
@@ -76,12 +72,8 @@ enum StreamingProcessRunner {
     }
 }
 
-/// Accumulates raw bytes and emits complete lines as they appear, buffering a
-/// trailing partial line across reads. Not thread-safe on its own — callers must
-/// serialize access, which `readabilityHandler`'s single dispatch source already does.
-///
-/// Shared with `GitCLI+Commit.swift`'s streaming runner, which follows the same
-/// EOF-plus-termination pattern as this file.
+/// Buffers a trailing partial line across reads. Not thread-safe on its own;
+/// callers must serialize access, which `readabilityHandler`'s single dispatch source already does.
 final class LineBuffer: @unchecked Sendable {
     private var pending = Data()
     private let onLine: @Sendable (String) -> Void

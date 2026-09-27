@@ -7,20 +7,15 @@ import SwiftUI
 /// repository. Themed like the rest of the app's chrome; see
 /// `TaskCreationView` for the same `.themedWindow`/`themedButton` convention.
 struct DiffSheet: View {
-    /// File path or name shown as the sheet's title.
     let title: String
-    /// Kind label shown under the title: "Staged", "Unstaged", or
-    /// "Committed on branch".
+    /// "Staged", "Unstaged", or "Committed on branch".
     let subtitle: String
-    /// Unified diff text. Ignored when `isBinary` is true.
+    /// Ignored when `isBinary` is true.
     let diffText: String
     let isBinary: Bool
-    /// Whether `diffText` was capped before reaching this view (e.g. a very
-    /// large file); shows a banner rather than implying the diff is complete.
+    /// Shows a banner rather than implying the diff is complete.
     let isTruncated: Bool
-    /// Set when the diff failed to load; shown instead of `diffText` or the
-    /// "No changes" empty state, which would otherwise misrepresent a load
-    /// failure as a clean working tree.
+    /// Shown instead of `diffText`/"No changes", which would otherwise misrepresent a load failure as clean.
     var errorMessage: String?
     /// Shows an "Open in Editor" button when non-nil.
     var onOpenInEditor: (() -> Void)?
@@ -47,17 +42,12 @@ struct DiffSheet: View {
         }
         .frame(minWidth: 640, minHeight: 480)
         .background(theme.palette.windowBackground)
-        // The sheet gets its own `NSWindow`, so it needs the palette applied
-        // to that window too — not just a themed SwiftUI background — or the
-        // system-drawn text inside it renders in light `aqua` over this dark
-        // background.
+        // Its own `NSWindow` needs the palette applied directly, or system-drawn text renders in light `aqua`.
         .themedWindow(theme.palette)
         .onExitCommand { dismiss() }
     }
 
-    /// Rendered lazily and only when there is text to show; not cached
-    /// across body re-evaluations, since ``UnifiedDiffRenderer`` is built to
-    /// stay fast even at 10k+ lines.
+    /// Not cached across body re-evaluations, since ``UnifiedDiffRenderer`` stays fast even at 10k+ lines.
     private var renderedDiff: NSAttributedString {
         guard !isBinary, !diffText.isEmpty else { return NSAttributedString() }
         return UnifiedDiffRenderer.render(diffText, palette: theme.palette)

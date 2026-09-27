@@ -22,10 +22,8 @@ public enum TaskWorktreeService {
         }
     }
 
-    /// A branch as offered to the user when starting a task from existing work,
-    /// annotated with where it's already checked out if it is — git refuses to
-    /// check out a branch a second time, so this must be surfaced up front rather
-    /// than discovered as a failure.
+    /// Annotated with where it's already checked out, if it is — git refuses
+    /// to check out a branch twice, so this must surface up front, not as a failure.
     public struct BranchOption: Identifiable, Sendable, Equatable {
         public let name: String
         public let checkedOutAt: String?
@@ -43,11 +41,8 @@ public enum TaskWorktreeService {
         public let branchCreatedByApp: Bool
         public let worktreePath: String
         public let copiedIgnoredFiles: [String]
-        /// The branch's tip commit right after creation/attachment (or `HEAD`
-        /// for in-place tasks) — the baseline `TaskRecord.baseCommit` is
-        /// persisted from, so `syncStatus` can tell "gained no commits of its
-        /// own yet" apart from "merged". `nil` only if the `rev-parse` that
-        /// resolves it fails outright.
+        /// The baseline `TaskRecord.baseCommit` is persisted from, so `syncStatus`
+        /// can tell "no commits yet" apart from "merged". `nil` only if `rev-parse` fails outright.
         public let baseCommit: String?
     }
 
@@ -55,18 +50,11 @@ public enum TaskWorktreeService {
         public let ahead: Int
         public let behind: Int
         public let merged: Bool
-        /// The base commit `syncStatus` actually used — either the one
-        /// passed in, or a reflog fallback it found for a legacy task with
-        /// no recorded `baseCommit`. Callers should persist this back onto
-        /// the task when it differs from what they had, so the fallback
-        /// lookup isn't repeated on every refresh.
+        /// Either the one passed in, or a reflog fallback for a legacy task
+        /// with no recorded `baseCommit`. Callers should persist this back so the fallback isn't repeated.
         public let resolvedBaseCommit: String?
-        /// Whether the task's own worktree has uncommitted changes (staged,
-        /// unstaged, or untracked). A branch that's `merged` but still has
-        /// uncommitted edits sitting on top of it hasn't actually landed
-        /// everything yet, so callers must never show "Merged" while this is
-        /// true. Defaults `false` so existing call sites and fixtures that
-        /// don't pass it keep compiling and reading as clean.
+        /// A `merged` branch with uncommitted edits on top hasn't actually
+        /// landed everything; callers must never show "Merged" while this is true.
         public let hasUncommittedChanges: Bool
 
         public init(ahead: Int, behind: Int, merged: Bool, resolvedBaseCommit: String? = nil, hasUncommittedChanges: Bool = false) {
@@ -139,19 +127,12 @@ public enum TaskWorktreeService {
         return siblingRoot.appendingPathComponent(slug).path
     }
 
-    /// Upper bound on the `-2`, `-3`, … suffixes `uniqueSlug` tries before giving
-    /// up and returning its last candidate, so a pathological filesystem/branch
-    /// state can't spin the dedupe loop forever.
+    /// Bounds the dedupe loop so a pathological filesystem/branch state can't spin it forever.
     static let maxUniqueSlugAttempts = 1000
 
-    /// A stable, neutral slug for a task created with a blank name —
-    /// `<adjective>-<noun>-<4 hex chars>`, e.g. `quiet-otter-3f9a` — rather
-    /// than one derived from the placeholder "New Task" title. Its worktree
-    /// directory is never renamed (see `TaskAutoRenameService`), so this name
-    /// has to be a permanent, content-free identifier from the start; the
-    /// word pair keeps it memorable and distinguishable at a glance, and the
-    /// hex suffix makes collisions (which `uniqueSlug` would still resolve)
-    /// vanishingly rare.
+    /// `<adjective>-<noun>-<4 hex chars>`, e.g. `quiet-otter-3f9a` — a
+    /// permanent, content-free identifier since the worktree directory is
+    /// never renamed (see `TaskAutoRenameService`).
     static func randomTaskSlug() -> String {
         let hexDigits = Array("0123456789abcdef")
         let suffix = String((0..<4).map { _ in hexDigits.randomElement()! })
@@ -180,11 +161,7 @@ public enum TaskWorktreeService {
         "walrus", "willow", "wren", "yak", "zebra", "aurora", "heath", "lagoon",
     ]
 
-    /// A variant of `baseSlug` whose worktree directory and `task/`-prefixed
-    /// branch name are both free, suffixing with `-2`, `-3`, … so repeated task
-    /// names — notably the blank-name placeholder "New Task" — get distinct
-    /// worktrees instead of colliding with an existing task's directory or a
-    /// branch left behind by a partially failed rename.
+    /// Suffixes with `-2`, `-3`, … so repeated task names get distinct worktrees instead of colliding.
     static func uniqueSlug(forProjectAt projectPath: String, baseSlug: String) async -> String {
         let projectURL = URL(fileURLWithPath: projectPath)
         var candidate = baseSlug
@@ -199,20 +176,10 @@ public enum TaskWorktreeService {
         return candidate
     }
 
-    /// Creates a task's branch and worktree, in the order the plan specifies:
-    /// resolve base ref, create branch, create worktree, copy ignored files, run
-    /// setup. If `existingBranch` is given, no branch is created — a worktree is
-    /// attached to it instead, after confirming it isn't already checked out
-    /// elsewhere.
-    ///
-    /// If `useWorktree` is false, the task runs in-place: no branch or worktree is
-    /// created, and the project's own path and current branch are used.
-    ///
-    /// `baseSlugOverride`, when given, is used as the base slug for the
-    /// worktree directory and branch instead of one derived from `taskName`
-    /// — used for tasks created with a blank name so their worktree
-    /// directory gets a stable, neutral name (`quiet-otter-3f9a`) rather than
-    /// one derived from the "New Task" placeholder title.
+    /// If `existingBranch` is given, a worktree is attached to it instead of
+    /// creating one, after confirming it isn't checked out elsewhere. If
+    /// `useWorktree` is false, the task runs in-place. `baseSlugOverride`, if
+    /// given, replaces the slug derived from `taskName` (e.g. for a blank-name task).
     @discardableResult
     public static func createWorktree(
         for project: Project,
@@ -277,9 +244,7 @@ public enum TaskWorktreeService {
         )
     }
 
-    /// Copies loose git-ignored files (see `GitCLI.looseIgnoredFiles`) from the
-    /// project into a freshly created worktree, preserving relative paths and
-    /// creating intermediate directories as needed. Returns the relative paths copied.
+    /// Returns the relative paths copied.
     @discardableResult
     public static func copyIgnoredFiles(from projectURL: URL, to worktreeURL: URL) async throws -> [String] {
         let relativePaths = try await GitCLI.looseIgnoredFiles(at: projectURL)
@@ -321,8 +286,7 @@ public enum TaskWorktreeService {
 
     // MARK: - Removal
 
-    /// Archives a task: optionally removes its worktree (running teardown first
-    /// and pruning afterwards), but never touches the branch.
+    /// Optionally removes the worktree (teardown, then prune), never touches the branch.
     public static func archiveWorktree(
         project: Project,
         worktreePath: String,
@@ -339,9 +303,7 @@ public enum TaskWorktreeService {
         )
     }
 
-    /// Deletes a task entirely: removes its worktree (teardown first), then
-    /// optionally the local branch (only ever offered when the app created it) and
-    /// the remote branch.
+    /// `deleteLocalBranch` should only be offered when the app created it.
     public static func deleteTask(
         project: Project,
         worktreePath: String,
@@ -364,8 +326,7 @@ public enum TaskWorktreeService {
         if deleteRemoteBranch {
             try await GitCLI.deleteRemoteBranch(branchName, at: projectURL)
         }
-        // The branch may already be gone (deleted outside the app); that must
-        // not block removing the task.
+        // Already gone (deleted outside the app) must not block removing the task.
         if deleteLocalBranch, try await GitCLI.branchExists(branchName, at: projectURL) {
             try await GitCLI.deleteLocalBranch(branchName, at: projectURL, force: true)
         }
@@ -386,9 +347,7 @@ public enum TaskWorktreeService {
             try await runCommand(teardownCommand, in: worktreeURL, onOutput: onOutput)
         }
 
-        // A worktree removed outside the app makes `git worktree remove` fail
-        // ("is not a working tree"), which would leave the task impossible to
-        // archive or delete; pruning alone clears its stale metadata.
+        // Removed outside the app makes `git worktree remove` fail ("is not a working tree"); pruning alone clears stale metadata.
         if FileManager.default.fileExists(atPath: worktreePath) {
             try await GitCLI.removeWorktree(at: worktreeURL, in: projectURL, force: true)
         }
@@ -397,9 +356,7 @@ public enum TaskWorktreeService {
 
     // MARK: - Hygiene
 
-    /// Prunes stale worktree metadata and reports which of `worktreePaths` no
-    /// longer exist on disk (their directories vanished out from under the app).
-    /// Call on launch.
+    /// Reports which of `worktreePaths` no longer exist on disk. Call on launch.
     public static func pruneAndDetectVanished(project: Project, worktreePaths: [String]) async throws -> Set<String> {
         let projectURL = URL(fileURLWithPath: project.path)
         try await GitCLI.pruneWorktrees(in: projectURL)
@@ -415,16 +372,10 @@ public enum TaskWorktreeService {
 
     // MARK: - Sync status
 
-    /// Ahead/behind counts and merged status for `branchName` against `baseRef`.
-    ///
-    /// `merged` requires more than every commit on `branchName` being an
-    /// ancestor of `baseRef` (`GitCLI.isMerged`) — that alone is also true
-    /// for a fresh branch that never gained any commits, and for an in-place
-    /// task whose branch *is* `baseRef`. `baseCommit` should be
-    /// `TaskRecord.baseCommit`; when `nil` (a legacy task from before that
-    /// column existed) this falls back to the branch's reflog creation
-    /// entry, conservatively reporting not-merged if even that isn't
-    /// available — a false "merged" is worse than a missed one.
+    /// `merged` requires more than `GitCLI.isMerged`'s ancestor check, which
+    /// alone is also true for a fresh branch or an in-place task whose branch
+    /// *is* `baseRef`. A legacy task with no `baseCommit` falls back to the
+    /// branch's reflog creation entry, reporting not-merged if even that's unavailable.
     public static func syncStatus(
         project: Project,
         branchName: String,
@@ -448,9 +399,7 @@ public enum TaskWorktreeService {
             baseCommit: resolvedBaseCommit,
             at: projectURL
         )
-        // Falls back to `projectURL` for an in-place task (no separate
-        // worktree, `worktreePath` unset), which is exactly where its
-        // uncommitted changes, if any, would live.
+        // Falls back to `projectURL` for an in-place task, where uncommitted changes would live.
         let dirtyCheckURL = worktreePath.map { URL(fileURLWithPath: $0) } ?? projectURL
         let hasUncommittedChanges = (try? await GitCLI.isWorkingTreeDirty(at: dirtyCheckURL)) ?? false
         return BranchSyncStatus(
@@ -462,13 +411,8 @@ public enum TaskWorktreeService {
         )
     }
 
-    /// Pure-ish merge decision (only the ancestor/tip lookup is async, inside
-    /// `GitCLI.isMerged`): never merged for an in-place task whose branch
-    /// resolves to `baseRef` itself — `GitCLI.isMerged` alone can't tell that
-    /// case apart from a genuinely merged branch, since every commit on
-    /// `baseRef` is trivially an ancestor of itself. Otherwise defers to
-    /// `GitCLI.isMerged`, which itself treats "branch hasn't moved off
-    /// `baseCommit`" and "no known `baseCommit`" as not merged.
+    /// Never merged for an in-place task whose branch *is* `baseRef` —
+    /// `GitCLI.isMerged` alone can't tell that apart from a genuine merge, since every commit is trivially its own ancestor.
     static func isBranchMerged(branchName: String, baseRef: String, baseCommit: String?, at projectURL: URL) async throws -> Bool {
         guard branchName != baseRef else { return false }
         return try await GitCLI.isMerged(branch: branchName, into: baseRef, since: baseCommit, at: projectURL)

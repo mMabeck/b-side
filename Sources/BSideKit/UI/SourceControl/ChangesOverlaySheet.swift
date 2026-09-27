@@ -1,10 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// VS Code–style "Changes" overlay: a file tree on the left, the selected
-/// file's unified diff on the right, for whichever `ChangesOverlayStore.Mode`
-/// is picked. Unlike `DiffSheet` (a single file, fixed content size), this is
-/// a large, resizable sheet — browsing a tree needs room to work in.
+/// File tree on the left, selected file's diff on the right. Unlike `DiffSheet`
+/// (fixed content size), this is a large, resizable sheet.
 struct ChangesOverlaySheet: View {
     let task: TaskRecord
     /// Shows an "Open in Editor" button for the selected file when non-nil.
@@ -91,9 +89,7 @@ struct ChangesOverlaySheet: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// A 7-40 character hex string reads as a commit SHA and is shortened to
-    /// 7 characters for the header; anything else (a branch or tag name from
-    /// a task with no recorded baseline) is shown in full.
+    /// A 7-40 character hex string is shortened to 7 for the header; anything else (a branch/tag name) is shown in full.
     private static func shortRef(_ ref: String) -> String {
         guard ref.count > 7, ref.range(of: "^[0-9a-f]{7,40}$", options: .regularExpression) != nil else {
             return ref
@@ -141,9 +137,7 @@ struct ChangesOverlaySheet: View {
         .background(theme.palette.windowBackground)
     }
 
-    /// Shown instead of `emptyState` for `.all`/`.committed` when
-    /// `TaskBaseline` couldn't resolve a baseline commit at all — an empty
-    /// file list there means "couldn't compare", not "nothing changed".
+    /// An empty file list here means "couldn't compare", not "nothing changed".
     private var noBaselineState: some View {
         SheetCenteredMessage(message: "Couldn't determine this task's base commit", palette: theme.palette)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -330,11 +324,7 @@ struct ChangesOverlaySheet: View {
     }
 }
 
-/// Grants the sheet's `NSWindow` the `.resizable` style mask, which SwiftUI
-/// sheets don't get by default — the tree/diff split is the whole reason
-/// this sheet is large, and a fixed size defeats resizing that split's
-/// panes to taste. Mirrors `ThemedWindowModifier`'s own `WindowAccessor`
-/// bridging pattern (that one is private to `ThemedWindow.swift`).
+/// Grants `.resizable`, which SwiftUI sheets don't get by default. Mirrors `ThemedWindowModifier`'s `WindowAccessor` pattern.
 private struct ResizableSheetWindowAccessor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)

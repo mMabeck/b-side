@@ -4,18 +4,14 @@ import UserNotifications
 /// Posts native macOS notifications for task alerts and routes clicks back
 /// to the task that raised them.
 ///
-/// `UNUserNotificationCenter` requires a bundled app (a real
-/// `Bundle.main.bundleIdentifier`) — the bare `swift run`/`swift test`
-/// binary has none, and `UNUserNotificationCenter.current()` crashes there.
-/// Every entry point below is guarded by `isSupported` so this stays a
-/// silent no-op in that environment instead of taking the process down.
+/// `UNUserNotificationCenter` requires a real `Bundle.main.bundleIdentifier`;
+/// the bare `swift run`/`swift test` binary has none and would crash there.
+/// Every entry point is guarded by `isSupported` to stay a silent no-op instead.
 @MainActor
 public final class TaskAlertNotificationCenter: NSObject, @preconcurrency UNUserNotificationCenterDelegate {
     public static let shared = TaskAlertNotificationCenter()
 
-    /// Set by `ProjectsStore.start()` so a clicked notification can select
-    /// its task. `nil` in contexts (tests, a store that never called
-    /// `start()`) with nothing to route to.
+    /// Set by `ProjectsStore.start()`; `nil` when there's nothing to route to.
     public var onSelectTask: ((Int64) -> Void)?
 
     private var didRequestAuthorization = false
@@ -24,9 +20,7 @@ public final class TaskAlertNotificationCenter: NSObject, @preconcurrency UNUser
         Bundle.main.bundleIdentifier != nil
     }
 
-    /// Registers this instance as `UNUserNotificationCenter`'s delegate so
-    /// `didReceive`/`willPresent` below actually fire. Safe to call more than
-    /// once. No-op when `isSupported` is false.
+    /// Safe to call more than once.
     public func activateIfSupported() {
         guard Self.isSupported else { return }
         UNUserNotificationCenter.current().delegate = self
@@ -39,9 +33,7 @@ public final class TaskAlertNotificationCenter: NSObject, @preconcurrency UNUser
         let content = UNMutableNotificationContent()
         content.title = "\(taskName) — \(title)"
         content.body = body
-        // Our own `TaskAlertSoundPlayer` already played the configured
-        // sound for this alert; a system notification sound too would
-        // double it.
+        // `TaskAlertSoundPlayer` already played the sound; a system one too would double it.
         content.sound = nil
         content.userInfo = ["taskID": taskID]
 
@@ -66,11 +58,8 @@ public final class TaskAlertNotificationCenter: NSObject, @preconcurrency UNUser
         completionHandler()
     }
 
-    /// Shows the notification even while B-Side is the frontmost app —
-    /// `ProjectsStore` already decides whether a notification should be
-    /// posted at all (see `handleTerminalAlert`'s frontmost/selected check),
-    /// so once one is posted it should always present, not be silently
-    /// dropped by `UNUserNotificationCenter`'s own foreground suppression.
+    /// `ProjectsStore.handleTerminalAlert` already decides whether to post at
+    /// all, so once posted it should always present, not be suppressed by the foreground default.
     public func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

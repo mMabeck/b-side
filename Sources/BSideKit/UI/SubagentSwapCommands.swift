@@ -1,21 +1,11 @@
 import SwiftUI
 
-/// Menu commands for swapping the selected task's main area between the
-/// parent Pi terminal and a child subagent's surface. `⌃⌘0` shows the
-/// parent; `⌃⌘1`…`⌃⌘9` show the Nth child in strip order; `⌃⌘]`/`⌃⌘[` step
-/// forward/back through the strip (wrapping through the parent at either
-/// end). Mirrors `TerminalCommands`'/`NavigationCommands`'s pattern of a
-/// `Commands` struct driving a per-window `ProjectsStore`.
+/// `⌃⌘0` shows the parent; `⌃⌘1`…`⌃⌘9` show the Nth child in strip order;
+/// `⌃⌘]`/`⌃⌘[` step forward/back (wrapping through the parent).
 ///
-/// `⌃⌘`-modified keys reach here even when a terminal surface has focus:
-/// `MainMenuKeyRouter` intercepts every Cmd/Ctrl-modified `keyDown` ahead of
-/// AppKit's normal dispatch and asks `NSApp.mainMenu` to handle it first,
-/// which is exactly what a real `Commands`/`.keyboardShortcut` item like
-/// these registers as — the same mechanism `TerminalCommands`' Cmd+Shift+R
-/// relies on. No `GhosttyBridge.appOwnedKeybinds` entry is needed for this
-/// modifier combination: Ghostty's default keybind table has no
-/// `ctrl+cmd+<digit>`/`ctrl+cmd+]`/`ctrl+cmd+[` bindings to unbind, and
-/// `MainMenuKeyRouter` wins regardless of what the surface would have done.
+/// `⌃⌘`-modified keys reach here even with a terminal focused, via
+/// `MainMenuKeyRouter`. No `GhosttyBridge.appOwnedKeybinds` entry is needed:
+/// Ghostty's default keybind table has no `ctrl+cmd+*` bindings to unbind.
 public struct SubagentSwapCommands: Commands {
     private var store: ProjectsStore
 
@@ -51,12 +41,9 @@ public struct SubagentSwapCommands: Commands {
             Button("Previous Subagent") { advance(next: false) }
                 .keyboardShortcut(SubagentSwapShortcut.previous)
 
-            // Same two actions again, under the arrow-key equivalents
-            // (`⌃⌘←`/`⌃⌘→`) — hidden from the menu so "Next"/"Previous
-            // Subagent" above aren't listed twice, but still registered with
-            // `NSApp.mainMenu` so `MainMenuKeyRouter` dispatches the arrow
-            // form too. `⌃⌘[`/`⌃⌘]` need ⌥ on a Danish keyboard to type at
-            // all, which the arrow keys don't.
+            // Arrow-key equivalents, hidden from the menu so "Next"/"Previous"
+            // aren't listed twice, but still registered so `MainMenuKeyRouter`
+            // dispatches them — `⌃⌘[`/`⌃⌘]` need ⌥ on a Danish keyboard.
             Button("Next Subagent (Arrow)") { advance(next: true) }
                 .keyboardShortcut(SubagentSwapShortcut.nextArrow)
                 .hidden()
@@ -89,9 +76,7 @@ public struct SubagentSwapCommands: Commands {
     }
 }
 
-/// The subagent-swap key equivalents, as plain data so they're directly
-/// testable without introspecting a rendered `Commands` scene — same
-/// rationale as `WindowLayoutShortcut`/`NavigationShortcuts`.
+/// Plain data so they're directly testable without introspecting a rendered `Commands` scene.
 public enum SubagentSwapShortcut {
     public static let digitCount = 9
 
@@ -104,9 +89,7 @@ public enum SubagentSwapShortcut {
     public static let next = KeyboardShortcut("]", modifiers: [.control, .command])
     public static let previous = KeyboardShortcut("[", modifiers: [.control, .command])
 
-    /// Same actions as `next`/`previous`, under the arrow keys instead of
-    /// brackets — a Danish keyboard layout needs ⌥ to type `[`/`]` at all, so
-    /// `⌃⌘[`/`⌃⌘]` alone is unreachable there without a third modifier.
+    /// Same actions under arrow keys: a Danish keyboard needs ⌥ to type `[`/`]` at all.
     public static let nextArrow = KeyboardShortcut(.rightArrow, modifiers: [.control, .command])
     public static let previousArrow = KeyboardShortcut(.leftArrow, modifiers: [.control, .command])
 }
