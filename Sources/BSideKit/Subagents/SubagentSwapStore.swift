@@ -1,29 +1,18 @@
 import Foundation
 
-/// Which surface a task's main area currently shows: the parent Pi terminal
-/// (the default, `nil`) or one child's live surface. Keyed by task so
-/// switching tasks in the sidebar never disturbs another task's swap state.
-///
-/// Distinct from `SubagentPaneStore`, which owns the actual child surfaces —
-/// this only tracks *which one is currently on screen*, the same
-/// presentation/data split `SubagentPaneStore`'s own doc comment describes
-/// for panes vs. `SubagentFeedStore`.
+/// Which surface a task's main area shows: the parent (default, `nil`) or
+/// one child's live surface. Keyed by task. Distinct from `SubagentPaneStore`,
+/// which owns the actual surfaces; this only tracks which is on screen.
 @MainActor
 @Observable
 public final class SubagentSwapStore {
     public private(set) var shownChildIDByTask: [Int64: String] = [:]
 
-    /// A card the user selected that has no live surface to swap to (a
-    /// headless, card-only child) — highlighted in the strip, but the main
-    /// area keeps showing whatever it already shows.
+    /// A headless card-only child the user selected — highlighted in the strip, but the main area shows what it already shows.
     public private(set) var highlightedChildIDByTask: [Int64: String] = [:]
 
-    /// Bumped on every change to `shownChildIDByTask` — which surface a
-    /// task's main area shows — so `MainAreaView` can re-derive
-    /// `isVisible`/focus on a swap the same way `SubagentPaneStore.version`
-    /// lets it react to panes appearing or disappearing. Not bumped for
-    /// `highlightedChildIDByTask` alone, since highlighting a headless card
-    /// never changes which surface is shown.
+    /// Bumped on every `shownChildIDByTask` change so `MainAreaView` can
+    /// re-derive `isVisible`/focus. Not bumped for highlighting alone, since that never changes what's shown.
     public private(set) var version = 0
 
     public init() {}
@@ -62,8 +51,7 @@ public final class SubagentSwapStore {
         }
     }
 
-    /// A shown child's surface closed (Pi `/close`, or the process exited):
-    /// swap back to the parent. A no-op if `childId` wasn't the shown one.
+    /// Swaps back to the parent. No-op if `childId` wasn't the shown one.
     public func handleClosed(childId: String, taskId: Int64) {
         if shownChildIDByTask[taskId] == childId {
             shownChildIDByTask.removeValue(forKey: taskId)
@@ -81,19 +69,15 @@ public final class SubagentSwapStore {
     }
 }
 
-/// Pure keyboard-shortcut index/order arithmetic for `SubagentSwapStore`,
-/// directly testable — `⌃⌘0` shows the parent, `⌃⌘1`…`⌃⌘9` show the Nth
-/// child in strip order, `⌃⌘]`/`⌃⌘[` step forward/back through the strip and
-/// wrap at either end (`nil` counts as "before the first"/"after the last").
+/// Pure keyboard-shortcut index/order arithmetic: `⌃⌘0` shows the parent,
+/// `⌃⌘1`…`⌃⌘9` the Nth child, `⌃⌘]`/`⌃⌘[` step and wrap (`nil` = before first/after last).
 public enum SubagentSwapNavigation {
     public static func childID(atIndex index: Int, strip: [String]) -> String? {
         guard index >= 0, index < strip.count else { return nil }
         return strip[index]
     }
 
-    /// `nil` shown means the parent is current; stepping "next" from the
-    /// parent goes to the first child, and stepping past the last child
-    /// wraps back to the parent.
+    /// `nil` means the parent is current; "next" goes to the first child, past the last wraps to the parent.
     public static func next(after shown: String?, strip: [String]) -> String? {
         guard !strip.isEmpty else { return nil }
         guard let shown, let index = strip.firstIndex(of: shown) else { return strip[0] }
