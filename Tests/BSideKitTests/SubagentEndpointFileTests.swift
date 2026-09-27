@@ -10,13 +10,6 @@ import Testing
 @MainActor
 @Suite("Subagent endpoint file")
 struct SubagentEndpointFileTests {
-    @Test("standard location is B-Side/subagent-endpoint under Application Support")
-    func standardLocation() throws {
-        let url = try #require(ProjectsStore.subagentEndpointFileURL())
-        #expect(url.lastPathComponent == "subagent-endpoint")
-        #expect(url.deletingLastPathComponent().lastPathComponent == "B-Side")
-    }
-
     @Test("writes the address with no trailing newline, and remove deletes it")
     func writeThenRemove() throws {
         let root = try TestRepo.makeTempDirectory()

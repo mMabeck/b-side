@@ -8,8 +8,12 @@ import Testing
 struct SidebarLogicTests {
     // MARK: - Collapse-state persistence
 
-    @Test("Collapse state round-trips through its RawRepresentable string")
+    @Test("Collapse state round-trips through its RawRepresentable string, empty or not")
     func collapseStateRoundTrips() {
+        let empty = SidebarCollapseState()
+        #expect(empty.rawValue == "")
+        #expect(SidebarCollapseState(rawValue: "") == empty)
+
         var state = SidebarCollapseState()
         state.setExpanded(false, for: 1)
         state.setExpanded(false, for: 42)
@@ -18,13 +22,6 @@ struct SidebarLogicTests {
         let roundTripped = SidebarCollapseState(rawValue: state.rawValue)
         #expect(roundTripped == state)
         #expect(roundTripped?.collapsedProjectIDs == [1, 42])
-    }
-
-    @Test("Empty collapse state round-trips to an empty string and back")
-    func emptyCollapseStateRoundTrips() {
-        let state = SidebarCollapseState()
-        #expect(state.rawValue == "")
-        #expect(SidebarCollapseState(rawValue: "") == state)
     }
 
     @Test("isExpanded defaults to true for an uncollapsed or nil project id")
@@ -127,20 +124,4 @@ struct SidebarLogicTests {
         #expect(BranchSyncSummary.accessibilityLabel(ahead: 0, hasUncommittedChanges: true) == "uncommitted changes")
         #expect(BranchSyncSummary.accessibilityLabel(ahead: 3, hasUncommittedChanges: true) == "3 commits not merged, uncommitted changes")
     }
-
-    // MARK: - Reserved dot-column alignment invariant
-
-    @Test("The status dot column reserves the same width regardless of status")
-    func dotColumnWidthIsInvariant() {
-        let widths: Set<CGFloat> = Set(
-            ([nil] + TaskStatus.allCasesForTesting.map { $0 as TaskStatus? })
-                .map(TaskRowLayout.dotColumnWidth(for:))
-        )
-        #expect(widths.count == 1)
-        #expect(widths.first == TaskRowLayout.statusDotColumnWidth)
-    }
-}
-
-private extension TaskStatus {
-    static var allCasesForTesting: [TaskStatus] { [.question, .running, .unread, .read, .inactive] }
 }

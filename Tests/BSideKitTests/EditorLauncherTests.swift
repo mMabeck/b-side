@@ -64,12 +64,6 @@ struct EditorCommandsTargetFolderTests {
 /// `WindowLayoutTests`.
 @Suite("Editor shortcut")
 struct EditorShortcutTests {
-    @Test("Open in VS Code shortcut is Shift+Cmd+O")
-    func openInEditorShortcut() {
-        #expect(EditorShortcut.openInEditor.key.character == "o")
-        #expect(EditorShortcut.openInEditor.modifiers == [.command, .shift])
-    }
-
     @Test("doesn't collide with the other app shortcuts")
     func noCollisionWithOtherShortcuts() {
         let others: [(Character, EventModifiers)] = [

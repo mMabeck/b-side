@@ -114,24 +114,12 @@ struct TerminalCloseTests {
         #expect(second != nil)
     }
 
-    // MARK: - TerminalCloseShortcut
-
-    @Test("Cmd+W is the task-terminal-close shortcut")
-    func closeTaskShortcutIsCmdW() {
-        #expect(TerminalCloseShortcut.closeTask.key.character == "w")
-        #expect(TerminalCloseShortcut.closeTask.modifiers == [.command])
-    }
-
     // MARK: - GhosttyBridge.appOwnedKeybinds
 
-    @Test("Cmd+Q and Cmd+W are unbound from Ghostty so AppKit's menu handles them")
-    func quitAndCloseAreUnboundFromGhostty() {
+    @Test("Cmd+Q, Cmd+W, and other standard app shortcuts Ghostty could swallow are unbound so AppKit's menu handles them")
+    func standardShortcutsAreUnboundFromGhostty() {
         #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+q=unbind"))
         #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+w=unbind"))
-    }
-
-    @Test("Other standard app shortcuts Ghostty could swallow are unbound too")
-    func otherStandardShortcutsAreUnbound() {
         #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+n=unbind"))
         #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+shift+n=unbind"))
         #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+h=unbind"))

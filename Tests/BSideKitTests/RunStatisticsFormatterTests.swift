@@ -19,31 +19,16 @@ struct RunStatisticsFormatterTests {
         #expect(formatted == "1 turn ↑2 ↓280 W14k ctx:14k claude-bridge/claude-sonnet-5")
     }
 
-    @Test("Pluralises turns")
-    func pluralisesTurns() {
-        let usage = RunStatistics(turns: 3)
-        #expect(RunStatisticsFormatter.format(usage) == "3 turns")
+    @Test("Pluralises turns, formats cost to 4 decimal places, and includes cache reads with an R prefix")
+    func formatsTurnsCostAndCacheReads() {
+        #expect(RunStatisticsFormatter.format(RunStatistics(turns: 3)) == "3 turns")
+        #expect(RunStatisticsFormatter.format(RunStatistics(turns: 1, cost: 0.12345)) == "1 turn $0.1235")
+        #expect(RunStatisticsFormatter.format(RunStatistics(turns: 1, cacheRead: 500)) == "1 turn R500")
     }
 
-    @Test("Formats cost to 4 decimal places")
-    func formatsCost() {
-        let usage = RunStatistics(turns: 1, cost: 0.12345)
-        #expect(RunStatisticsFormatter.format(usage) == "1 turn $0.1235")
-    }
-
-    @Test("Includes cache reads with an R prefix")
-    func includesCacheReads() {
-        let usage = RunStatistics(turns: 1, cacheRead: 500)
-        #expect(RunStatisticsFormatter.format(usage) == "1 turn R500")
-    }
-
-    @Test("Formats short durations in seconds")
-    func shortDuration() {
+    @Test("Formats durations in seconds under a minute, and as m + zero-padded seconds beyond it")
+    func formatsDuration() {
         #expect(RunStatisticsFormatter.formatDuration(18) == "18s")
-    }
-
-    @Test("Formats durations over a minute as m and zero-padded seconds")
-    func longDuration() {
         #expect(RunStatisticsFormatter.formatDuration(64) == "1m 04s")
     }
 }
