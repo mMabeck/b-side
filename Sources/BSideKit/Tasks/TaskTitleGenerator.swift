@@ -142,12 +142,16 @@ public enum TaskTitleGenerator {
             logger.notice("title model skipped: model file not found")
         case .launchFailed(let reason):
             logger.error("title model failed to launch: \(reason, privacy: .public)")
+        case .cancelled:
+            logger.notice("title model run was cancelled before it could launch")
         case .timedOut:
             logger.error("title model timed out or was cancelled and its process was terminated")
         case .nonZeroExit(let status, let stderrTail):
             logger.error(
                 "title model exited with status \(status, privacy: .public), stderr: \(stderrTail, privacy: .private)"
             )
+        case .signaled(let signal):
+            logger.error("title model was killed by signal \(signal, privacy: .public)")
         case .undecodableOutput:
             logger.error("title model produced output that could not be decoded as UTF-8")
         case .rejectedOutput(let raw):
@@ -227,8 +231,10 @@ enum TitleGenerationFailure: Error, Sendable {
     case binaryNotFound
     case modelNotFound
     case launchFailed(String)
+    case cancelled
     case timedOut
     case nonZeroExit(status: Int32, stderrTail: String)
+    case signaled(signal: Int32)
     case undecodableOutput
     case rejectedOutput(raw: String)
 }
@@ -263,16 +269,35 @@ private final class OutputBox: @unchecked Sendable {
 /// only ever called after a successful `run()`, since calling them before
 /// launch is undefined behavior.
 private final class ProcessRunner: @unchecked Sendable {
+    /// How long to wait, once the child has terminated (or been SIGKILLed),
+    /// for both output pipes to hit EOF before forcing completion anyway. A
+    /// grandchild that inherited stdout/stderr (e.g. a leaked background
+    /// process) keeps the write end of a pipe open long after the child we
+    /// actually launched has exited; without this bound `run()` would wait
+    /// on that grandchild indefinitely.
+    private static let drainDeadline: TimeInterval = 0.75
+
     private let process = Process()
     private let stdoutBox = OutputBox()
     private let stderrBox = OutputBox()
+    private let stdoutPipe = Pipe()
+    private let stderrPipe = Pipe()
+    private let group = DispatchGroup()
     private let lock = NSLock()
 
     private var continuation: CheckedContinuation<Result<String, TitleGenerationFailure>, Never>?
     private var hasLaunched = false
+    private var cancelRequested = false
     private var terminatedEarly = false
+    private var terminating = false
+    private var reaped = false
+    private var drainScheduled = false
+    private var stdoutLeft = false
+    private var stderrLeft = false
+    private var terminationLeft = false
     private var timeoutWorkItem: DispatchWorkItem?
     private var killWorkItem: DispatchWorkItem?
+    private var drainWorkItem: DispatchWorkItem?
 
     init(binaryPath: String, arguments: [String]) {
         process.executableURL = URL(fileURLWithPath: binaryPath)
@@ -287,42 +312,49 @@ private final class ProcessRunner: @unchecked Sendable {
         await withCheckedContinuation { (continuation: CheckedContinuation<Result<String, TitleGenerationFailure>, Never>) in
             lock.lock()
             self.continuation = continuation
+            let cancelledAtStart = cancelRequested
             lock.unlock()
 
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
+            if cancelledAtStart {
+                resume(.failure(.cancelled))
+                return
+            }
+
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
 
             // See GitCLI.run/StreamingProcessRunner: don't resolve until both
             // pipes have hit EOF and the process has terminated, or the
-            // final chunk of output can race process exit.
-            let group = DispatchGroup()
+            // final chunk of output can race process exit. Each leave is
+            // guarded so a forced drain (see scheduleDrain) and a genuine
+            // EOF/termination racing each other can't double-leave the group.
             group.enter()  // stdout EOF
             group.enter()  // stderr EOF
             group.enter()  // termination
 
-            stdoutPipe.fileHandleForReading.readabilityHandler = { [stdoutBox] handle in
+            stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self, stdoutBox] handle in
                 let data = handle.availableData
                 if data.isEmpty {
                     handle.readabilityHandler = nil
-                    group.leave()
+                    self?.leaveStdout()
                 } else {
                     stdoutBox.append(data)
                 }
             }
-            stderrPipe.fileHandleForReading.readabilityHandler = { [stderrBox] handle in
+            stderrPipe.fileHandleForReading.readabilityHandler = { [weak self, stderrBox] handle in
                 let data = handle.availableData
                 if data.isEmpty {
                     handle.readabilityHandler = nil
-                    group.leave()
+                    self?.leaveStderr()
                 } else {
                     stderrBox.append(data)
                 }
             }
 
-            process.terminationHandler = { _ in
-                group.leave()
+            process.terminationHandler = { [weak self] _ in
+                self?.markReaped()
+                self?.leaveTermination()
+                self?.scheduleDrain()
             }
 
             group.notify(queue: .global()) { [weak self] in
@@ -337,39 +369,78 @@ private final class ProcessRunner: @unchecked Sendable {
             lock.unlock()
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
 
+            // Checked again right before actually spawning: `cancel()` may
+            // have run concurrently with the setup above. If it fired, the
+            // group is still balanced (never entered by any of the natural
+            // triggers below, since the process never runs) only once we
+            // explicitly leave it ourselves here.
+            lock.lock()
+            let cancelledBeforeRun = cancelRequested
+            lock.unlock()
+            guard !cancelledBeforeRun else {
+                timeoutItem.cancel()
+                abandonUnlaunchedProcess()
+                resume(.failure(.cancelled))
+                return
+            }
+
             do {
                 try process.run()
                 lock.lock()
                 hasLaunched = true
+                let cancelledDuringLaunch = cancelRequested
                 lock.unlock()
                 onLaunch?(process.processIdentifier)
+                if cancelledDuringLaunch {
+                    handleEarlyTermination(gracePeriod: gracePeriod, reason: "was cancelled")
+                }
             } catch {
                 timeoutItem.cancel()
-                process.terminationHandler = nil
-                stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                stderrPipe.fileHandleForReading.readabilityHandler = nil
-                stdoutPipe.fileHandleForReading.closeFile()
-                stdoutPipe.fileHandleForWriting.closeFile()
-                stderrPipe.fileHandleForReading.closeFile()
-                stderrPipe.fileHandleForWriting.closeFile()
+                abandonUnlaunchedProcess()
                 resume(.failure(.launchFailed("\(error)")))
             }
         }
     }
 
+    /// Tears down pipes/handlers for a process that was set up but never
+    /// actually `run()` (launch failure or cancellation before launch), and
+    /// balances the `DispatchGroup`'s three outstanding `enter()`s — none of
+    /// stdout EOF, stderr EOF, or termination will ever fire naturally since
+    /// the process never started.
+    private func abandonUnlaunchedProcess() {
+        process.terminationHandler = nil
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        stdoutPipe.fileHandleForReading.closeFile()
+        stdoutPipe.fileHandleForWriting.closeFile()
+        stderrPipe.fileHandleForReading.closeFile()
+        stderrPipe.fileHandleForWriting.closeFile()
+        leaveStdout()
+        leaveStderr()
+        leaveTermination()
+    }
+
     /// Terminates the child if the awaiting `Task` is cancelled, escalating
-    /// the same way a timeout does. Safe to call even if the process hasn't
-    /// launched yet (a no-op) or has already finished.
+    /// the same way a timeout does. Safe to call before the process has
+    /// launched (`run()` then completes with `.cancelled` without spawning
+    /// anything) or after it has already finished.
     func cancel(gracePeriod: TimeInterval) {
-        handleEarlyTermination(gracePeriod: gracePeriod, reason: "was cancelled")
+        lock.lock()
+        cancelRequested = true
+        let launched = hasLaunched
+        lock.unlock()
+        if launched {
+            handleEarlyTermination(gracePeriod: gracePeriod, reason: "was cancelled")
+        }
     }
 
     private func handleEarlyTermination(gracePeriod: TimeInterval, reason: String) {
         lock.lock()
-        guard hasLaunched, process.isRunning else {
+        guard hasLaunched, process.isRunning, !terminating else {
             lock.unlock()
             return
         }
+        terminating = true
         terminatedEarly = true
         lock.unlock()
 
@@ -389,25 +460,118 @@ private final class ProcessRunner: @unchecked Sendable {
     }
 
     private func escalateToKill() {
-        guard process.isRunning else { return }
+        lock.lock()
+        guard !reaped, process.isRunning else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
         let pid = process.processIdentifier
         TaskTitleGenerator.logger.error(
             "title model still running after grace period; sending SIGKILL (pid \(pid, privacy: .public))"
         )
         kill(pid, SIGKILL)
+        scheduleDrain()
+    }
+
+    private func markReaped() {
+        lock.lock()
+        reaped = true
+        lock.unlock()
+    }
+
+    /// Starts the drain deadline the first time the child has terminated or
+    /// been SIGKILLed. If a grandchild is still holding either pipe open by
+    /// the time it fires, `forceDrain` cuts the wait short instead of
+    /// blocking on EOF that may never come.
+    private func scheduleDrain() {
+        lock.lock()
+        guard !drainScheduled else {
+            lock.unlock()
+            return
+        }
+        drainScheduled = true
+        lock.unlock()
+
+        let item = DispatchWorkItem { [weak self] in
+            self?.forceDrain()
+        }
+        lock.lock()
+        drainWorkItem = item
+        lock.unlock()
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.drainDeadline, execute: item)
+    }
+
+    private func forceDrain() {
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        try? stdoutPipe.fileHandleForReading.close()
+        try? stderrPipe.fileHandleForReading.close()
+        leaveStdout()
+        leaveStderr()
+    }
+
+    private func leaveStdout() {
+        lock.lock()
+        guard !stdoutLeft else {
+            lock.unlock()
+            return
+        }
+        stdoutLeft = true
+        lock.unlock()
+        group.leave()
+    }
+
+    private func leaveStderr() {
+        lock.lock()
+        guard !stderrLeft else {
+            lock.unlock()
+            return
+        }
+        stderrLeft = true
+        lock.unlock()
+        group.leave()
+    }
+
+    private func leaveTermination() {
+        lock.lock()
+        guard !terminationLeft else {
+            lock.unlock()
+            return
+        }
+        terminationLeft = true
+        lock.unlock()
+        group.leave()
     }
 
     private func finish() {
         lock.lock()
+        let launched = hasLaunched
         let wasTerminatedEarly = terminatedEarly
         timeoutWorkItem?.cancel()
         killWorkItem?.cancel()
+        drainWorkItem?.cancel()
         lock.unlock()
+
+        // The process was never actually run (cancelled before launch, or
+        // failed to launch): `abandonUnlaunchedProcess` already tore things
+        // down and resumed with the right failure. `terminationReason`/
+        // `terminationStatus` are undefined on a `Process` that never ran.
+        guard launched else { return }
+
+        process.terminationHandler = nil
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        try? stdoutPipe.fileHandleForReading.close()
+        try? stderrPipe.fileHandleForReading.close()
 
         let result: Result<String, TitleGenerationFailure>
         if wasTerminatedEarly {
             result = .failure(.timedOut)
-        } else if process.terminationReason != .exit || process.terminationStatus != 0 {
+        } else if process.terminationReason == .uncaughtSignal {
+            result = .failure(.signaled(signal: process.terminationStatus))
+        } else if process.terminationStatus != 0 {
             let stderrTail = String((stderrBox.decodedString() ?? "").suffix(500))
             result = .failure(.nonZeroExit(status: process.terminationStatus, stderrTail: stderrTail))
         } else if let rawOutput = stdoutBox.decodedString() {
