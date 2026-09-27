@@ -61,12 +61,20 @@ public enum TaskWorktreeService {
         /// the task when it differs from what they had, so the fallback
         /// lookup isn't repeated on every refresh.
         public let resolvedBaseCommit: String?
+        /// Whether the task's own worktree has uncommitted changes (staged,
+        /// unstaged, or untracked). A branch that's `merged` but still has
+        /// uncommitted edits sitting on top of it hasn't actually landed
+        /// everything yet, so callers must never show "Merged" while this is
+        /// true. Defaults `false` so existing call sites and fixtures that
+        /// don't pass it keep compiling and reading as clean.
+        public let hasUncommittedChanges: Bool
 
-        public init(ahead: Int, behind: Int, merged: Bool, resolvedBaseCommit: String? = nil) {
+        public init(ahead: Int, behind: Int, merged: Bool, resolvedBaseCommit: String? = nil, hasUncommittedChanges: Bool = false) {
             self.ahead = ahead
             self.behind = behind
             self.merged = merged
             self.resolvedBaseCommit = resolvedBaseCommit
+            self.hasUncommittedChanges = hasUncommittedChanges
         }
     }
 
@@ -421,7 +429,8 @@ public enum TaskWorktreeService {
         project: Project,
         branchName: String,
         baseRef: String? = nil,
-        baseCommit: String? = nil
+        baseCommit: String? = nil,
+        worktreePath: String? = nil
     ) async throws -> BranchSyncStatus {
         let projectURL = URL(fileURLWithPath: project.path)
         let resolvedBaseRef = baseRef ?? project.baseRef
@@ -439,7 +448,18 @@ public enum TaskWorktreeService {
             baseCommit: resolvedBaseCommit,
             at: projectURL
         )
-        return BranchSyncStatus(ahead: ahead, behind: behind, merged: merged, resolvedBaseCommit: resolvedBaseCommit)
+        // Falls back to `projectURL` for an in-place task (no separate
+        // worktree, `worktreePath` unset), which is exactly where its
+        // uncommitted changes, if any, would live.
+        let dirtyCheckURL = worktreePath.map { URL(fileURLWithPath: $0) } ?? projectURL
+        let hasUncommittedChanges = (try? await GitCLI.isWorkingTreeDirty(at: dirtyCheckURL)) ?? false
+        return BranchSyncStatus(
+            ahead: ahead,
+            behind: behind,
+            merged: merged,
+            resolvedBaseCommit: resolvedBaseCommit,
+            hasUncommittedChanges: hasUncommittedChanges
+        )
     }
 
     /// Pure-ish merge decision (only the ancestor/tip lookup is async, inside

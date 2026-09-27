@@ -119,7 +119,18 @@ struct ProjectDashboardView: View {
             needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
             busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
-        let syncText = syncStatus.flatMap(BranchSyncSummary.text(for:))
+        // Uses `isEffectivelyMerged` rather than `syncStatus.merged` directly
+        // so a branch that landed but has since gained uncommitted edits
+        // never reads as "merged" here either — with a trailing ● marker
+        // for those edits, kept text-only since this card has no room for
+        // the sidebar's styled pending pill.
+        let syncText: String? = syncStatus.flatMap { status -> String? in
+            let effectivelyMerged = BranchSyncSummary.isEffectivelyMerged(status)
+            let base = BranchSyncSummary.text(ahead: status.ahead, behind: status.behind, merged: effectivelyMerged)
+            guard !effectivelyMerged, status.hasUncommittedChanges else { return base }
+            let parts: [String?] = [base, "●"]
+            return parts.compactMap { $0 }.joined(separator: " ")
+        }
 
         return Button {
             store.selectTask(task, project: project)

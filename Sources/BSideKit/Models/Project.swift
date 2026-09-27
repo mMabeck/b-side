@@ -15,6 +15,11 @@ public struct Project: Identifiable, Equatable, Codable, Sendable {
     public var lastUseWorktree: Bool?
     /// Last `TaskCreationMode` raw value chosen in the New Task sheet.
     public var lastTaskCreationMode: String?
+    /// The project's position in the sidebar's drag-reordered list, lowest
+    /// first. `ProjectsStore.moveProjects` is the only writer after initial
+    /// insert; `addProject` gives a new project one past the current max so
+    /// it lands at the end.
+    public var sortOrder: Int
 
     public init(
         id: Int64? = nil,
@@ -23,7 +28,8 @@ public struct Project: Identifiable, Equatable, Codable, Sendable {
         remote: String? = nil,
         baseRef: String = "main",
         lastUseWorktree: Bool? = nil,
-        lastTaskCreationMode: String? = nil
+        lastTaskCreationMode: String? = nil,
+        sortOrder: Int = 0
     ) {
         self.id = id
         self.path = path
@@ -32,6 +38,7 @@ public struct Project: Identifiable, Equatable, Codable, Sendable {
         self.baseRef = baseRef
         self.lastUseWorktree = lastUseWorktree
         self.lastTaskCreationMode = lastTaskCreationMode
+        self.sortOrder = sortOrder
     }
 }
 
@@ -46,6 +53,7 @@ extension Project: FetchableRecord, MutablePersistableRecord {
         public static let baseRef = Column(CodingKeys.baseRef)
         public static let lastUseWorktree = Column(CodingKeys.lastUseWorktree)
         public static let lastTaskCreationMode = Column(CodingKeys.lastTaskCreationMode)
+        public static let sortOrder = Column(CodingKeys.sortOrder)
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {
