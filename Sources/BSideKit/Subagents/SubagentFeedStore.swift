@@ -1,9 +1,8 @@
 import Foundation
 import OSLog
 
-/// Observable store of child runs, keyed by task and then by a stable child
-/// id. This is the one feed both the Subagents tab's cards and (later) native
-/// splits are meant to render from — everything here is presentation-free.
+/// Observable store of child runs, keyed by task then a stable child id.
+/// Everything here is presentation-free.
 @MainActor
 @Observable
 public final class SubagentFeedStore {
@@ -27,9 +26,7 @@ public final class SubagentFeedStore {
         return TaskChildSummary(activeCount: active, totalCount: runs.count, isBlocked: blocked)
     }
 
-    /// Registers a child run, called once a child is known to have launched.
-    /// Idempotent: re-registering an existing id updates its labels in place
-    /// rather than duplicating the card.
+    /// Idempotent: re-registering an existing id updates its labels in place rather than duplicating the card.
     public func beginRun(
         taskId: Int64,
         childId: String,
@@ -56,11 +53,8 @@ public final class SubagentFeedStore {
         runsByTask[taskId] = runs
     }
 
-    /// Applies one decoded event to the named child, creating a placeholder
-    /// run if none was registered yet (events can race registration). Tool
-    /// rows are created only from a `message_end` assistant tool-call part —
-    /// `tool_execution_*`/`toolResult` events for an unrecognised
-    /// `toolCallId` update nothing and fabricate no row.
+    /// Creates a placeholder run if none was registered yet (events can race
+    /// registration). Tool rows come only from a `message_end` tool-call part.
     public func ingest(taskId: Int64, childId: String, event: SubagentEvent) {
         mutate(taskId: taskId, childId: childId) { run in
             switch event {
@@ -121,8 +115,6 @@ public final class SubagentFeedStore {
         }
     }
 
-    /// Applies the `done.json` payload: `exitCode != 0` or `stopReason ==
-    /// "error"` present as `failed`; anything else present as `completed`.
     public func markDone(taskId: Int64, childId: String, payload: SubagentDonePayload, endedAt: Date = Date()) {
         mutate(taskId: taskId, childId: childId) { run in
             let failed = (payload.exitCode ?? 0) != 0 || payload.stopReason == "error"
