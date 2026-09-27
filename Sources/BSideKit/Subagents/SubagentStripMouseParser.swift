@@ -1,18 +1,14 @@
 import Foundation
 
-/// Parses SGR mouse-report bytes (`\e[<b;x;yM`/`\e[<b;x;ym`) and hit-tests
-/// them against a rendered `SubagentStripRenderer.Result`.
-///
-/// The strip surface enables mouse reporting (`\e[?1000h\e[?1006h`) on its
-/// in-memory Ghostty session; a click over that surface's `NSView` is
-/// translated by Ghostty into an SGR report and delivered back to the host
-/// through the session's `write` handler (there is no real pty to send it
-/// to) — see `GhosttyBridge.SubagentStripHost`. This type is pure so the
-/// parsing and hit-testing are unit-testable without a live surface.
+/// Parses SGR mouse-report bytes and hit-tests them against a rendered
+/// `SubagentStripRenderer.Result`. Ghostty translates a click over the strip
+/// surface's `NSView` into an SGR report delivered via the in-memory
+/// session's `write` handler (see `GhosttyBridge.SubagentStripHost`); this
+/// type is pure so parsing/hit-testing are unit-testable without a live surface.
 public enum SubagentStripMouseParser {
     public struct MouseEvent: Equatable {
         public let button: Int
-        /// 1-based terminal column/row, as SGR reports them.
+        /// 1-based, as SGR reports them.
         public let column: Int
         public let row: Int
         public let isPress: Bool
@@ -25,10 +21,7 @@ public enum SubagentStripMouseParser {
         }
     }
 
-    /// Parses every complete SGR mouse sequence found in `data`. Only press
-    /// events (`M`) matter to the strip — release (`m`) sequences parse too,
-    /// in case a caller wants to filter for a real click (press then
-    /// release) rather than a drag.
+    /// Only press events (`M`) matter to the strip; release (`m`) parses too, for callers filtering a real click vs. a drag.
     public static func parse(_ data: Data) -> [MouseEvent] {
         guard let text = String(data: data, encoding: .utf8) else { return [] }
         var events: [MouseEvent] = []
@@ -54,10 +47,8 @@ public enum SubagentStripMouseParser {
         case mainHint
     }
 
-    /// Resolves a 1-based `(column, row)` click against a rendered strip:
-    /// a card's child id if the click lands within `cardRowCount` rows and
-    /// inside one of `slots`' column ranges, `.mainHint` if it lands on the
-    /// label row's "main" hint, else `nil`.
+    /// A card's child id within `cardRowCount` rows and a slot's column
+    /// range, `.mainHint` on the label row's hint, else `nil`.
     public static func hitTest(column: Int, row: Int, result: SubagentStripRenderer.Result) -> HitTestResult? {
         let zeroBasedColumn = column - 1
         let zeroBasedRow = row - 1
