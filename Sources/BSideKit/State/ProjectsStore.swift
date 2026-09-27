@@ -1048,14 +1048,32 @@ public final class ProjectsStore {
         tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == id }
     }
 
+    /// Generates an auto-rename title from a task's raw prompt — the local
+    /// title model (`TaskTitleGenerator.generate`) by default. Injectable so
+    /// tests can stub the model instead of invoking the real binary.
+    public var titleGenerator: (String) async -> String? = TaskTitleGenerator.generate
+
     /// Applies the once-only automatic rename derived from a task's first pi
     /// prompt (see `TaskAutoRenameService`): renames the task, and its
-    /// worktree/branch when it owns ones the app created. Always clears
-    /// `awaitingAutoRename`, even when `prompt` doesn't yield a usable title,
-    /// so this never re-fires for the same task.
+    /// worktree/branch when it owns ones the app created. Tries
+    /// `titleGenerator`'s local model first and falls back to
+    /// `TaskAutoRenameService.deriveTitle`'s heuristic when it returns `nil`
+    /// (missing binary/model, a timeout, a process failure, or output that
+    /// fails validation — `TaskTitleGenerator` itself logs the specific
+    /// reason). Always clears `awaitingAutoRename`, even when neither yields
+    /// a usable title, so this never re-fires for the same task.
     public func applyAutoRename(task: TaskRecord, project: Project, prompt: String) async {
         guard task.awaitingAutoRename else { return }
-        guard let title = TaskAutoRenameService.deriveTitle(fromPrompt: prompt) else {
+
+        let title: String
+        if let modelTitle = await titleGenerator(prompt) {
+            title = modelTitle
+        } else if let heuristicTitle = TaskAutoRenameService.deriveTitle(fromPrompt: prompt) {
+            Self.logger.notice(
+                "auto-rename falling back to heuristic title for task \(task.id ?? -1, privacy: .public)"
+            )
+            title = heuristicTitle
+        } else {
             await clearAwaitingAutoRename(task)
             return
         }
