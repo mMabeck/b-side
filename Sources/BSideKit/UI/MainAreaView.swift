@@ -126,29 +126,23 @@ struct MainAreaView: View {
     @ViewBuilder
     private var emptyStateView: some View {
         if store.projects.isEmpty {
-            VStack(spacing: 10) {
-                Text("No projects yet")
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.palette.textSecondary)
-                Button {
+            ContentUnavailableView {
+                Label("No Projects Yet", systemImage: "folder.badge.plus")
+            } description: {
+                Text("Add a project to start creating tasks.")
+            } actions: {
+                Button("Add Project") {
                     ProjectCreation.addProject(store: store)
-                } label: {
-                    Label("Add Project", systemImage: "plus")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(theme.palette.selectionForeground)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(theme.palette.accent)
-                        )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
+                .tint(theme.palette.accent)
             }
         } else {
-            Text("Select a project or task")
-                .font(.system(size: 13))
-                .foregroundStyle(theme.palette.textSecondary)
+            ContentUnavailableView {
+                Label("No Selection", systemImage: "arrow.left")
+            } description: {
+                Text("Select a project or task.")
+            }
         }
     }
 
