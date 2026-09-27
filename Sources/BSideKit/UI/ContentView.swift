@@ -25,10 +25,7 @@ public struct ContentView: View {
         )
     }
 
-    // Drives the native `.inspector` presentation from the same
-    // `WindowLayoutState.shared.rightSidebarCollapsed` flag the toolbar
-    // button and `WindowLayoutCommands`' View-menu item already toggle, so
-    // there is one source of truth rather than parallel presentation state.
+    // Drives `.inspector` from the same flag the toolbar button and menu item toggle, one source of truth.
     private var rightSidebarPresented: Binding<Bool> {
         Binding(
             get: { !layout.rightSidebarCollapsed },
@@ -42,16 +39,12 @@ public struct ContentView: View {
     public var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(store: store)
-                // The default sidebar column is narrow enough to truncate most
-                // task names to a few characters, which defeats the point of
-                // the list. Give it room, and a floor it cannot be dragged below.
+                // The default column is narrow enough to truncate most task names.
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         } detail: {
             VStack(spacing: 0) {
                 MainAreaView(store: store)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // The native inspector column: real resizable-by-drag
-                    // chrome with its own separator.
                     .inspector(isPresented: rightSidebarPresented) {
                         RightSidebarView(store: store)
                             .inspectorColumnWidth(min: 260, ideal: 300, max: 480)
@@ -60,10 +53,8 @@ public struct ContentView: View {
                 if !layout.terminalDrawerCollapsed {
                     Rectangle().fill(theme.palette.separator).frame(height: 1)
                 }
-                // Always mounted, collapsed to zero height rather than removed:
-                // removing it from the hierarchy would deinit its terminal
-                // surface instead of just marking it not-visible (see
-                // TerminalDrawerView's doc comment and native-rewrite.md §6).
+                // Always mounted, collapsed to zero height: removing it would
+                // deinit its surface instead of marking it not-visible (native-rewrite.md §6).
                 TerminalDrawerView(store: store, isCollapsed: layout.terminalDrawerCollapsed)
                     .frame(
                         maxWidth: .infinity,
@@ -74,12 +65,8 @@ public struct ContentView: View {
                     .allowsHitTesting(!layout.terminalDrawerCollapsed)
                     .clipped()
             }
-            // Only the right-sidebar toggle earns a toolbar slot: the left
-            // sidebar already has NavigationSplitView's own native toggle, and
-            // with the View-menu shortcuts from `WindowLayoutCommands` all
-            // three regions are reachable regardless. Fewer competing
-            // `ToolbarItem`s keeps the toolbar from overflowing into the
-            // » chevron at normal window widths.
+            // Only the right sidebar earns a toolbar slot: the left already has
+            // NavigationSplitView's native toggle, and View-menu shortcuts cover the rest.
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -108,22 +95,15 @@ public struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
-        // The one place the task-creation sheet is actually presented — every
-        // trigger (sidebar row, context menu, dashboard button, Cmd+N, File
-        // menu) just sets `store.pendingTaskCreationProject` rather than
-        // presenting its own sheet, so it can never be shown twice at once.
-        // See that property's doc comment on `ProjectsStore`.
+        // The one place the task-creation sheet is presented; every trigger
+        // just sets `store.pendingTaskCreationProject` so it's never shown twice.
         .sheet(item: pendingTaskCreationProjectBinding) { project in
-            // `project` is a copy captured at the moment its trigger set
-            // `pendingTaskCreationProject`, which can be stale for remembered
-            // task-creation choices persisted moments earlier. Prefer the
-            // current store copy so the sheet reflects the latest choices.
+            // `project` can be stale if choices were persisted moments earlier; prefer the current store copy.
             TaskCreationView(project: store.projects.first(where: { $0.id == project.id }) ?? project, store: store) {
                 store.pendingTaskCreationProject = nil
             }
         }
-        // Same one-presentation-site rationale as the task-creation sheet
-        // above: every trigger just sets `store.pendingChangesOverlayTask`.
+        // Same one-presentation-site rationale as above.
         .sheet(item: pendingChangesOverlayTaskBinding) { task in
             ChangesOverlaySheet(task: task) { path in
                 editorLauncher.openFile(
