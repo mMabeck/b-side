@@ -1,12 +1,8 @@
 import SwiftUI
 
 /// The main area's content when a project, but no task, is selected — a
-/// project is a container of tasks, never a terminal itself, so this is a
-/// lightweight read-only overview instead of a shell surface: header, "New
-/// Task" affordance, and the project's own tasks as compact rows. Clicking a
-/// task row hands selection to `ProjectsStore.selectTask(_:project:)`, which
-/// is what switches the main area over to that task's terminal (see
-/// `MainAreaView`).
+/// project is a container, never a terminal itself. Clicking a task row
+/// hands selection to `ProjectsStore.selectTask(_:project:)`, switching the main area to its terminal.
 struct ProjectDashboardView: View {
     var store: ProjectsStore
     var project: Project
@@ -43,9 +39,7 @@ struct ProjectDashboardView: View {
         .task(id: project.id) { gitInfo.refresh(project) }
     }
 
-    /// Same branch/dirty/path facts as the sidebar's project row, from the
-    /// same cache — the dashboard is a second view onto that git state, not
-    /// a second source of truth for it.
+    /// Same facts as the sidebar's project row, from the same cache — a second view onto that git state, not a second source of truth.
     private var header: some View {
         let info = gitInfo.info(forProject: project.id)
         return HStack(alignment: .firstTextBaseline) {
@@ -80,10 +74,7 @@ struct ProjectDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// A filled, themed "New Task" action, styled like `SidebarView`'s rows
-    /// (`.plain` with an explicit palette fill) rather than system
-    /// `.borderedProminent`/`.bordered` chrome, so it restyles with the
-    /// user's Ghostty theme instead of showing macOS's own accent colour.
+    /// Styled like `SidebarView`'s rows rather than system chrome, so it restyles with the Ghostty theme.
     private var newTaskButton: some View {
         Button {
             store.pendingTaskCreationProject = project
@@ -101,11 +92,7 @@ struct ProjectDashboardView: View {
         .buttonStyle(.plain)
     }
 
-    /// A compact task summary card: name, status dot, branch sync summary,
-    /// and subagent child count/blocked indicator — the same signals and
-    /// derivations the sidebar's task row uses (`TaskStatus.derive`,
-    /// `BranchSyncSummary.text(for:)`, `SubagentFeedStore.summary(forTask:)`),
-    /// so the dashboard never disagrees with the sidebar about a task's state.
+    /// Same signals and derivations the sidebar's task row uses, so the dashboard never disagrees about a task's state.
     private func taskCard(_ task: TaskRecord) -> some View {
         let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
         let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
