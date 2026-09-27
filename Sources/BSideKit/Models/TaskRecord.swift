@@ -19,24 +19,14 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     public var teardownCommand: String?
     public var archived: Bool
     public var sortPosition: Int
-    /// Set at creation when the task's name was left blank (it fell back to
-    /// the "New Task" placeholder). Watched by `TaskAutoRenameService`/
-    /// `MainAreaView` for the task's first pi prompt, which becomes its name
-    /// exactly once; cleared as soon as that rename is applied or
-    /// definitively skipped (no usable prompt text). Never set for a task
-    /// the user named explicitly.
+    /// Set when the task's name was left blank at creation. Watched by
+    /// `TaskAutoRenameService`/`MainAreaView` for its first pi prompt,
+    /// cleared once applied or definitively skipped.
     public var awaitingAutoRename: Bool
-    /// The branch's tip commit when this task was created (or attached to an
-    /// existing branch) — `TaskWorktreeService.WorktreeSetupResult.baseCommit`.
-    /// `nil` for rows created before this column existed; `syncStatus` falls
-    /// back to the branch's reflog creation entry in that case. Used so a
-    /// branch that has picked up no commits of its own (or is merely behind
-    /// base) never reads as "merged".
+    /// The branch's tip commit at creation/attachment. `nil` for legacy rows;
+    /// `syncStatus` falls back to the reflog creation entry. Used so a branch with no commits of its own never reads as "merged".
     public var baseCommit: String?
-    /// Last time this task had qualifying activity (a sent prompt, a
-    /// genuine busy→idle transition, or an accepted question alert — see
-    /// `ProjectsStore.bumpTaskActivity`). `nil` until the first such event.
-    /// Drives the task list's most-recent-first ordering in `ProjectsStore`.
+    /// `nil` until the first qualifying activity (see `ProjectsStore.bumpTaskActivity`). Drives most-recent-first ordering.
     public var lastActivityAt: Date?
 
     public init(
