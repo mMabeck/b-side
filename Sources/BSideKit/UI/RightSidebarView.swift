@@ -205,7 +205,6 @@ struct RightSidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
     }
 
     private func sectionHeader(_ title: String, actionTitle: String, action: @escaping () -> Void) -> some View {
@@ -498,7 +497,7 @@ private struct SourceControlTreeRow<RowContent: View>: View {
                 .font(.system(size: 10, weight: .semibold))
                 .frame(width: 16, height: 16)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .foregroundStyle(palette.textSecondary)
         .accessibilityLabel(label)
     }

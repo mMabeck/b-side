@@ -31,78 +31,55 @@ struct SidebarView: View {
             if store.projects.isEmpty {
                 emptyProjectsState
             } else {
-                List {
+                List(selection: selectionBinding) {
                     if !activeTaskEntries.isEmpty {
-                        Section {
+                        Section("Active") {
                             ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
-                                    .listRowInsets(Self.rowInsets)
-                                    .listRowSeparator(.hidden)
+                                    .tag(SidebarRowID.task(entry.taskID))
                             }
-                        } header: {
-                            Text("Active")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(theme.palette.textSecondary)
-                                .textCase(.uppercase)
                         }
                     }
 
-                    if !store.projects.isEmpty {
-                        Section {
-                            EmptyView()
-                        } header: {
-                            Text("Projects")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(theme.palette.textSecondary)
-                                .textCase(.uppercase)
-                        }
-                    }
-
-                    ForEach(store.projects) { project in
-                        let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
-                        let isExpandedBinding = Binding<Bool>(
-                            get: { collapseState.isExpanded(project.id) },
-                            set: { expanded in
-                                guard let id = project.id else { return }
-                                collapseState.setExpanded(expanded, for: id)
-                            }
-                        )
-                        Section(isExpanded: isExpandedBinding) {
-                            if tasks.isEmpty {
-                                // Aligned with where task titles start, so the
-                                // placeholder reads as the project's (empty) child.
-                                Text("No tasks")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(theme.palette.textSecondary)
-                                    .padding(.leading, Self.taskLeadingIndent + TaskRowLayout.statusDotColumnWidth + 6)
-                                    .padding(.vertical, 6)
-                                    .listRowInsets(Self.rowInsets)
-                                    .listRowSeparator(.hidden)
-                            } else {
-                                ForEach(tasks) { task in
-                                    taskRow(task, project: project)
-                                        .listRowInsets(Self.rowInsets)
-                                        .listRowSeparator(.hidden)
+                    Section("Projects") {
+                        ForEach(store.projects) { project in
+                            let tasks = project.id.flatMap { store.tasksByProject[$0] } ?? []
+                            let isExpandedBinding = Binding<Bool>(
+                                get: { collapseState.isExpanded(project.id) },
+                                set: { expanded in
+                                    guard let id = project.id else { return }
+                                    collapseState.setExpanded(expanded, for: id)
                                 }
-                            }
-                        } header: {
-                            projectRow(project, taskCount: tasks.count)
-                                .listRowInsets(Self.rowInsets)
-                                .listRowSeparator(.hidden)
-                                .draggable(ProjectDragPayload(projectID: project.id ?? -1))
-                                .dropDestination(for: ProjectDragPayload.self) { items, _ in
-                                    guard let dragged = items.first else { return false }
-                                    return reorderProject(draggedID: dragged.projectID, ontoID: project.id)
+                            )
+                            DisclosureGroup(isExpanded: isExpandedBinding) {
+                                if tasks.isEmpty {
+                                    Text("No tasks")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(theme.palette.textSecondary)
+                                        .padding(.leading, TaskRowLayout.statusDotColumnWidth + 6)
+                                        .padding(.vertical, 6)
+                                } else {
+                                    ForEach(tasks) { task in
+                                        taskRow(task, project: project)
+                                            .tag(SidebarRowID.task(task.id ?? -1))
+                                    }
                                 }
+                            } label: {
+                                projectRow(project, taskCount: tasks.count)
+                            }
+                            .tag(SidebarRowID.project(project.id ?? -1))
+                            .draggable(ProjectDragPayload(projectID: project.id ?? -1))
+                            .dropDestination(for: ProjectDragPayload.self) { items, _ in
+                                guard let dragged = items.first else { return false }
+                                return reorderProject(draggedID: dragged.projectID, ontoID: project.id)
+                            }
                         }
                     }
                 }
                 .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
             }
 
-            // Persistent footer, not a `List` row: stays put while the list scrolls, reachable even when empty.
-            Rectangle().fill(theme.palette.separator).frame(height: 1)
+            Divider()
             addProjectFooter
         }
         .background(SidebarFocusGuard(store: store))
@@ -137,6 +114,37 @@ struct SidebarView: View {
         } message: { pending in
             Text("This removes the worktree at \(pending.task.worktreePath) and, since it was created by the app, its branch \(pending.task.branchName).")
         }
+    }
+
+    private enum SidebarRowID: Hashable {
+        case project(Int64)
+        case task(Int64)
+    }
+
+    /// Round-trips `store.selectedProjectID`/`selectedTaskID` through a single tagged
+    /// selection so `List` drives the same selection state the rest of the app reads.
+    private var selectionBinding: Binding<SidebarRowID?> {
+        Binding(
+            get: {
+                if let taskID = store.selectedTaskID { return .task(taskID) }
+                if let projectID = store.selectedProjectID { return .project(projectID) }
+                return nil
+            },
+            set: { newValue in
+                switch newValue {
+                case .task(let id):
+                    if let match = store.taskAndProject(forID: id) {
+                        store.selectTask(match.task, project: match.project)
+                    }
+                case .project(let id):
+                    if let project = store.projects.first(where: { $0.id == id }) {
+                        store.selectProject(project)
+                    }
+                case nil:
+                    break
+                }
+            }
+        )
     }
 
     /// Same order `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes
@@ -194,58 +202,43 @@ struct SidebarView: View {
 
     /// The ⌘-digit shortcut (only the first 9 entries have one) surfaces only as a `.help` tooltip, not a visible label.
     private func activeTaskRow(_ task: TaskRecord, project: Project, shortcutIndex: Int) -> some View {
-        let isSelected = store.selectedTaskID == task.id
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
         let tertiary = theme.palette.textDisabled
         let hint = shortcutIndex < NavigationShortcuts.digitCount ? "⌘\(shortcutIndex + 1)" : nil
         let info = taskStatusInfo(for: task)
 
-        return Button {
-            store.selectTask(task, project: project)
-        } label: {
-            HStack(spacing: 8) {
-                StatusDot(status: info.status, palette: theme.palette)
-                    .frame(width: TaskRowLayout.statusDotColumnWidth, alignment: .leading)
+        return HStack(spacing: 8) {
+            StatusDot(status: info.status, palette: theme.palette)
+                .frame(width: TaskRowLayout.statusDotColumnWidth, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(task.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(primary)
-                        .lineLimit(1)
-                    Text(Self.folderName(of: project))
-                        .font(.system(size: 11))
-                        .foregroundStyle(secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                if info.isMerged {
-                    mergedBadge(isSelected: isSelected)
-                } else if info.hasPendingWork {
-                    pendingPill(
-                        ahead: info.pendingAhead,
-                        hasUncommittedChanges: info.hasUncommittedChanges,
-                        isSelected: isSelected
-                    )
-                }
-
-                if let syncText = info.syncText {
-                    Text(syncText)
-                        .font(.caption2)
-                        .foregroundStyle(tertiary)
-                        .lineLimit(1)
-                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(task.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(primary)
+                    .lineLimit(1)
+                Text(Self.folderName(of: project))
+                    .font(.system(size: 11))
+                    .foregroundStyle(secondary)
+                    .lineLimit(1)
             }
-            .padding(.leading, Self.activeRowLeadingIndent)
-            .padding(.trailing, 8)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-            .background(selectionFill(isSelected: isSelected, in: theme.palette))
+
+            Spacer()
+
+            if info.isMerged {
+                mergedBadge()
+            } else if info.hasPendingWork {
+                pendingPill(ahead: info.pendingAhead, hasUncommittedChanges: info.hasUncommittedChanges)
+            }
+
+            if let syncText = info.syncText {
+                Text(syncText)
+                    .font(.caption2)
+                    .foregroundStyle(tertiary)
+                    .lineLimit(1)
+            }
         }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .padding(.vertical, 2)
         .help(hint ?? "")
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
@@ -264,33 +257,22 @@ struct SidebarView: View {
 
     /// Branch and path live on the project dashboard instead, keeping the sidebar scannable.
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
-        let isSelected = store.selectedProjectID == project.id && store.selectedTaskID == nil
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
 
-        return Button {
-            store.selectProject(project)
-        } label: {
-            HStack(alignment: .firstTextBaseline) {
-                Text(Self.folderName(of: project))
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                addTaskButton(for: project)
-                Text("\(taskCount)")
-                    .font(.caption)
-                    .foregroundStyle(secondary)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .contentShape(Rectangle())
-            .background(selectionFill(isSelected: isSelected, in: theme.palette))
+        return HStack(alignment: .firstTextBaseline) {
+            Text(Self.folderName(of: project))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            addTaskButton(for: project)
+            Text("\(taskCount)")
+                .font(.caption)
+                .foregroundStyle(secondary)
         }
-        .padding(.top, 6)
-        .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .contentShape(Rectangle())
         .contextMenu {
             Button("New Task…") {
                 store.pendingTaskCreationProject = project
@@ -336,7 +318,7 @@ struct SidebarView: View {
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .help("New Task in \(project.displayName)")
     }
 
@@ -346,18 +328,6 @@ struct SidebarView: View {
         return name.isEmpty || name == "/" ? project.displayName : name
     }
 
-    /// Tight insets so the selection fill spans nearly the full sidebar width instead of `.sidebar`'s default margins.
-    private static let rowInsets = EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
-
-    private static let selectionBleed: CGFloat = 17
-
-    /// Measured against an offscreen snapshot: `projectRow`'s collapsible header
-    /// gets extra leading indent from `.sidebar`'s disclosure chevron.
-    private static let taskLeadingIndent: CGFloat = 3
-
-    /// Measured the same way: the plain "Active" `Section` header has its own built-in inset, differing from `taskLeadingIndent`.
-    private static let activeRowLeadingIndent: CGFloat = -5
-
     /// The leading status-dot column is reserved at a fixed width even with no dot, so every title starts at the same x.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let info = taskStatusInfo(for: task)
@@ -366,63 +336,48 @@ struct SidebarView: View {
         let status = info.status
         let isMerged = info.isMerged
         let syncText = info.syncText
-        let isSelected = store.selectedTaskID == task.id
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
         let tertiary = theme.palette.textDisabled
 
-        return Button {
-            store.selectTask(task, project: project)
-        } label: {
-            HStack(spacing: 6) {
-                StatusDot(status: status, palette: theme.palette)
-                    .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .leading)
+        return HStack(spacing: 6) {
+            StatusDot(status: status, palette: theme.palette)
+                .frame(width: TaskRowLayout.dotColumnWidth(for: status), alignment: .leading)
 
-                Text(task.name)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(primary)
+            Text(task.name)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(primary)
 
-                if isVanished {
-                    Image(systemName: "exclamationmark.triangle")
+            if isVanished {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(theme.palette.statusNeedsAttention)
+            }
+
+            Spacer()
+
+            if summary.hasChildren {
+                if summary.isBlocked {
+                    Image(systemName: "exclamationmark.bubble.fill")
                         .foregroundStyle(theme.palette.statusNeedsAttention)
                 }
-
-                Spacer()
-
-                if summary.hasChildren {
-                    if summary.isBlocked {
-                        Image(systemName: "exclamationmark.bubble.fill")
-                            .foregroundStyle(theme.palette.statusNeedsAttention)
-                    }
-                    Text("\(summary.totalCount)")
-                        .font(.caption)
-                        .foregroundStyle(secondary)
-                }
-
-                if isMerged {
-                    mergedBadge(isSelected: isSelected)
-                } else if info.hasPendingWork {
-                    pendingPill(
-                        ahead: info.pendingAhead,
-                        hasUncommittedChanges: info.hasUncommittedChanges,
-                        isSelected: isSelected
-                    )
-                }
-
-                if let syncText {
-                    Text(syncText)
-                        .font(.caption2)
-                        .foregroundStyle(tertiary)
-                }
+                Text("\(summary.totalCount)")
+                    .font(.caption)
+                    .foregroundStyle(secondary)
             }
-            .padding(.leading, Self.taskLeadingIndent)
-            .padding(.trailing, 8)
-            .padding(.vertical, 9)
-            .contentShape(Rectangle())
-            .background(selectionFill(isSelected: isSelected, in: theme.palette))
+
+            if isMerged {
+                mergedBadge()
+            } else if info.hasPendingWork {
+                pendingPill(ahead: info.pendingAhead, hasUncommittedChanges: info.hasUncommittedChanges)
+            }
+
+            if let syncText {
+                Text(syncText)
+                    .font(.caption2)
+                    .foregroundStyle(tertiary)
+            }
         }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .padding(.vertical, 2)
         .contextMenu {
             Button("Archive") {
                 Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
@@ -436,8 +391,8 @@ struct SidebarView: View {
         }
     }
 
-    /// Uses `statusSuccess` tinted into its own background, not the selection fill, so it stays legible either way.
-    private func mergedBadge(isSelected: Bool) -> some View {
+    /// Tinted with `statusSuccess`, independent of native selection so it stays legible either way.
+    private func mergedBadge() -> some View {
         let tint = theme.palette.statusSuccess
         return HStack(spacing: 3) {
             Image(systemName: "arrow.triangle.merge")
@@ -450,12 +405,12 @@ struct SidebarView: View {
         .padding(.vertical, 2)
         .background(
             Capsule(style: .continuous)
-                .fill(tint.opacity(isSelected ? 0.22 : 0.15))
+                .fill(tint.opacity(0.15))
         )
     }
 
     /// Styled like `mergedBadge` but tinted `statusRunning`: the opposite state, work outstanding rather than landed.
-    private func pendingPill(ahead: Int, hasUncommittedChanges: Bool, isSelected: Bool) -> some View {
+    private func pendingPill(ahead: Int, hasUncommittedChanges: Bool) -> some View {
         let tint = theme.palette.statusRunning
         return HStack(spacing: 3) {
             if ahead > 0 {
@@ -472,24 +427,13 @@ struct SidebarView: View {
         .padding(.vertical, 2)
         .background(
             Capsule(style: .continuous)
-                .fill(tint.opacity(isSelected ? 0.22 : 0.15))
+                .fill(tint.opacity(0.15))
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(BranchSyncSummary.accessibilityLabel(ahead: ahead, hasUncommittedChanges: hasUncommittedChanges) ?? "")
     }
 
-    /// Painted directly on the row's content rather than `List`'s built-in
-    /// selection styling, which under `.listStyle(.sidebar)` didn't reliably
-    /// paint behind these custom `Button` rows. A faint wash of the theme's
-    /// text colour rather than the often-saturated `selectionBackground`, so text colours stay normal.
-    private func selectionFill(isSelected: Bool, in palette: BSidePalette) -> some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(isSelected ? palette.textPrimary.opacity(0.32) : Color.clear)
-            // `.sidebar` keeps ~20pt margins even with tight `listRowInsets`; bleed past the row to span the full width.
-            .padding(.horizontal, -Self.selectionBleed)
-    }
-
-    /// Pinned below the list, not a `List` row, so it never scrolls out of view.
+    /// Pinned below the list via `.safeAreaInset`, not a `List` row, so it never scrolls out of view.
     private var addProjectFooter: some View {
         Button {
             ProjectCreation.addProject(store: store)

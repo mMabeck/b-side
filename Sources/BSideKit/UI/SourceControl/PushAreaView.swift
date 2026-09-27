@@ -17,7 +17,7 @@ struct PushAreaView: View {
             if isPushing {
                 pushLogView
                 Button("Cancel", role: .cancel, action: onCancel)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .foregroundStyle(palette.textSecondary)
             } else {
                 Button(action: onPush) {
@@ -39,29 +39,26 @@ struct PushAreaView: View {
     }
 
     private var pushLogView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(log.enumerated()), id: \.offset) { index, line in
-                        Text(line)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(palette.textSecondary)
-                            .id(index)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+        GroupBox {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(log.enumerated()), id: \.offset) { index, line in
+                            Text(line)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(palette.textSecondary)
+                                .id(index)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
-                .padding(6)
+                .onChange(of: log.count) { _, _ in
+                    guard let last = log.indices.last else { return }
+                    proxy.scrollTo(last, anchor: .bottom)
+                }
             }
-            .frame(height: 90)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(palette.elevatedSurfaceBackground)
-            )
-            .onChange(of: log.count) { _, _ in
-                guard let last = log.indices.last else { return }
-                proxy.scrollTo(last, anchor: .bottom)
-            }
-            .accessibilityLabel("Push output")
         }
+        .frame(height: 90)
+        .accessibilityLabel("Push output")
     }
 }

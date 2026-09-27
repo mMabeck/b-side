@@ -19,19 +19,13 @@ struct CommitAreaView: View {
             if isCommitting {
                 commitLogView
                 Button("Cancel", role: .cancel, action: onCancel)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .foregroundStyle(palette.textSecondary)
             } else {
                 TextField("Message", text: $message, axis: .vertical)
-                    .textFieldStyle(.plain)
+                    .textFieldStyle(.roundedBorder)
                     .lineLimit(2...5)
                     .font(.system(size: 12))
-                    .foregroundStyle(palette.textPrimary)
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(palette.elevatedSurfaceBackground)
-                    )
                     .focused(isFocused)
 
                 commitButton
@@ -60,29 +54,26 @@ struct CommitAreaView: View {
     }
 
     private var commitLogView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(log.enumerated()), id: \.offset) { index, line in
-                        Text(line)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(palette.textSecondary)
-                            .id(index)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+        GroupBox {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(log.enumerated()), id: \.offset) { index, line in
+                            Text(line)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(palette.textSecondary)
+                                .id(index)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
-                .padding(6)
+                .onChange(of: log.count) { _, _ in
+                    guard let last = log.indices.last else { return }
+                    proxy.scrollTo(last, anchor: .bottom)
+                }
             }
-            .frame(height: 90)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(palette.elevatedSurfaceBackground)
-            )
-            .onChange(of: log.count) { _, _ in
-                guard let last = log.indices.last else { return }
-                proxy.scrollTo(last, anchor: .bottom)
-            }
-            .accessibilityLabel("Commit output")
         }
+        .frame(height: 90)
+        .accessibilityLabel("Commit output")
     }
 }

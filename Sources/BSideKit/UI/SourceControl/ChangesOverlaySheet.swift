@@ -23,21 +23,27 @@ struct ChangesOverlaySheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Rectangle().fill(theme.palette.separator).frame(height: 1)
-
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Rectangle().fill(theme.palette.separator).frame(height: 1)
-            footer
+        NavigationStack {
+            VStack(spacing: 0) {
+                infoBar
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .navigationTitle("Changes")
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    modePicker
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
         }
         .frame(
             minWidth: Self.minSize.width, idealWidth: Self.idealSize.width,
             minHeight: Self.minSize.height, idealHeight: Self.idealSize.height
         )
-        .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
         .resizableSheetWindow()
         .onExitCommand { dismiss() }
@@ -53,45 +59,39 @@ struct ChangesOverlaySheet: View {
 
     // MARK: - Header
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Changes")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(theme.palette.textPrimary)
-                Spacer()
-                Picker(
-                    "Mode",
-                    selection: Binding(get: { store.mode }, set: { store.setMode($0) })
-                ) {
-                    ForEach(ChangesOverlayStore.Mode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 280)
+    private var modePicker: some View {
+        Picker(
+            "Mode",
+            selection: Binding(get: { store.mode }, set: { store.setMode($0) })
+        ) {
+            ForEach(ChangesOverlayStore.Mode.allCases) { mode in
+                Text(mode.label).tag(mode)
             }
-            HStack(spacing: 6) {
-                if let branchName = store.branchName {
-                    Text(branchName)
-                        .font(.system(size: 11, weight: .medium))
-                }
-                if let baseRefLabel = store.baseRefLabel {
-                    Text("vs \(Self.shortRef(baseRefLabel))")
-                        .font(.system(size: 11))
-                }
-                Spacer()
-                if !store.files.isEmpty {
-                    Text("\(store.files.count) file\(store.files.count == 1 ? "" : "s"), +\(store.totalAdded) \u{2212}\(store.totalRemoved)")
-                        .font(.system(size: 11, design: .monospaced))
-                }
-            }
-            .foregroundStyle(theme.palette.textSecondary)
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 280)
+    }
+
+    private var infoBar: some View {
+        HStack(spacing: 6) {
+            if let branchName = store.branchName {
+                Text(branchName)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            if let baseRefLabel = store.baseRefLabel {
+                Text("vs \(Self.shortRef(baseRefLabel))")
+                    .font(.system(size: 11))
+            }
+            Spacer()
+            if !store.files.isEmpty {
+                Text("\(store.files.count) file\(store.files.count == 1 ? "" : "s"), +\(store.totalAdded) \u{2212}\(store.totalRemoved)")
+                    .font(.system(size: 11, design: .monospaced))
+            }
+        }
+        .foregroundStyle(theme.palette.textSecondary)
         .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
     }
 
@@ -141,14 +141,12 @@ struct ChangesOverlaySheet: View {
         )
         .foregroundStyle(theme.palette.textSecondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.palette.windowBackground)
     }
 
     /// An empty file list here means "couldn't compare", not "nothing changed".
     private var noBaselineState: some View {
         SheetCenteredMessage(message: "Couldn't determine this task's base commit", palette: theme.palette)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(theme.palette.windowBackground)
     }
 
     // MARK: - Tree
@@ -160,7 +158,6 @@ struct ChangesOverlaySheet: View {
             }
         }
         .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
         .controlSize(.small)
     }
 
@@ -323,7 +320,8 @@ struct ChangesOverlaySheet: View {
             }
             Spacer()
             if let onOpenInEditor {
-                ThemedSheetButton(title: "Open in Editor", palette: theme.palette) { onOpenInEditor(file.path) }
+                Button("Open in Editor") { onOpenInEditor(file.path) }
+                    .buttonStyle(.bordered)
             }
         }
         .padding(.horizontal, 12)
@@ -357,16 +355,6 @@ struct ChangesOverlaySheet: View {
         }
     }
 
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack {
-            Spacer()
-            ThemedSheetButton(title: "Done", palette: theme.palette, isPrimary: true, isDefaultAction: true) { dismiss() }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
 }
 
 /// Grants `.resizable`, which SwiftUI sheets don't get by default. Mirrors `ThemedWindowModifier`'s `WindowAccessor` pattern.
