@@ -11,6 +11,8 @@ struct ChangesOverlaySheet: View {
     @State private var store = ChangesOverlayStore()
     @State private var treeWidth: CGFloat = 240
     @State private var treeWidthDragStart: CGFloat?
+    @State private var isHoveringDivider = false
+    @State private var resizeCursorPushed = false
     @ObservedObject private var theme: GhosttyResolvedTheme = .shared
     @Environment(\.dismiss) private var dismiss
 
@@ -171,11 +173,13 @@ struct ChangesOverlaySheet: View {
             .frame(width: 8)
             .contentShape(Rectangle())
             .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                } else if treeWidthDragStart == nil {
-                    NSCursor.pop()
-                }
+                isHoveringDivider = hovering
+                syncResizeCursor()
+            }
+            .onDisappear {
+                isHoveringDivider = false
+                treeWidthDragStart = nil
+                syncResizeCursor()
             }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
@@ -186,9 +190,17 @@ struct ChangesOverlaySheet: View {
                     }
                     .onEnded { _ in
                         treeWidthDragStart = nil
-                        NSCursor.pop()
+                        syncResizeCursor()
                     }
             )
+    }
+
+    // Hover and drag both keep the cursor; tracking our own push keeps the stack balanced.
+    private func syncResizeCursor() {
+        let wanted = isHoveringDivider || treeWidthDragStart != nil
+        guard wanted != resizeCursorPushed else { return }
+        if wanted { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        resizeCursorPushed = wanted
     }
 
     @ViewBuilder
