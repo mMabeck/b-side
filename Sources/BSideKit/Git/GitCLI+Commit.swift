@@ -15,13 +15,7 @@ extension GitCLI {
         }
     }
 
-    /// Commits staged changes with `message`, streaming combined stdout/stderr
-    /// from `git commit` (including pre-commit hook output) to `onOutput` line by
-    /// line as it arrives. The message is passed via `-F` and a temp file rather
-    /// than `-m`, so it survives arbitrary content without shell quoting.
-    ///
-    /// Cancelling the enclosing `Task` interrupts the underlying process; see
-    /// `runStreaming`.
+    /// The message is passed via `-F` and a temp file rather than `-m`, so it survives arbitrary content without shell quoting.
     public static func commit(
         message: String,
         at path: URL,
@@ -40,17 +34,9 @@ extension GitCLI {
         )
     }
 
-    /// Runs a git subcommand and streams its combined stdout+stderr line by line,
-    /// without blocking the caller. Distinct from `run`, which is for
-    /// machine-readable output collected in full: this is for commands whose
-    /// output (hook logs, progress) needs to reach the UI as it happens.
-    ///
-    /// Generic over arguments and environment so other long-running, user-visible
-    /// git operations (e.g. a future `push -u origin HEAD`) can reuse it.
-    ///
-    /// Cancelling the enclosing `Task` sends `SIGINT` via `process.interrupt()`,
-    /// then `SIGTERM` via `process.terminate()` if the process is still running
-    /// shortly after.
+    /// Distinct from `run`, which collects machine-readable output in full;
+    /// this is for commands whose output needs to reach the UI as it happens.
+    /// Cancellation sends `SIGINT`, then `SIGTERM` if still running shortly after.
     static func runStreaming(
         args: [String],
         at directory: URL,
@@ -77,9 +63,7 @@ extension GitCLI {
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                // See GitCLI.run: don't resume until both the pipe has hit EOF
-                // and the process has terminated, or the final chunk can race
-                // process exit and truncate output.
+                // See GitCLI.run: don't resume until EOF and termination both happen, or the final chunk can race process exit.
                 let group = DispatchGroup()
                 group.enter()  // pipe EOF
                 group.enter()  // termination
