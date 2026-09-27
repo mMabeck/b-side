@@ -87,17 +87,12 @@ public enum TaskTitleGenerator {
     // MARK: - Binary/model resolution
 
     private static func resolveBinaryPath() -> String? {
-        for candidate in binaryCandidates where FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
+        if let found = binaryCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return found
         }
         guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for directory in path.split(separator: ":") {
-            let candidate = "\(directory)/llama-completion"
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return nil
+        return path.split(separator: ":").lazy.map { "\($0)/llama-completion" }
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     }
 
     private static func resolveModelPath() -> String? {
