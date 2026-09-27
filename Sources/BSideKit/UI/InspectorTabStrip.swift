@@ -1,24 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// The right inspector's tab strip: one full-width, top-flush row of
-/// segments, each showing an SF Symbol *and* its title.
-///
-/// This wraps `NSSegmentedControl` directly instead of using a SwiftUI
-/// control, because neither SwiftUI option can draw both halves of a segment
-/// on this SDK — verified by offscreen pixel capture, not by assumption:
-///
-/// - `Picker(.segmented)` renders a segment's title **or** its image, never
-///   both. `Label(_:systemImage:)`, an inline `Text("\(Image(systemName:))…")`
-///   and a bare `Image` all collapse to text-only or icon-only. It also hugs
-///   its content into a small centred pill rather than spanning the sidebar.
-/// - `TabView`'s own tab strip drops `tabItem` images entirely and draws
-///   titles only.
-///
-/// AppKit's segmented control has had per-segment image + label since 10.0,
-/// so dropping one level down is what actually buys the icons. Everything
-/// else stays native: this is the same control SwiftUI would have used, just
-/// configured directly.
+/// Wraps `NSSegmentedControl` directly, since neither SwiftUI option can
+/// draw both a segment's title and image on this SDK (verified by offscreen
+/// pixel capture): `Picker(.segmented)` renders one or the other and hugs a
+/// small centred pill; `TabView`'s tab strip drops images entirely.
 struct InspectorTabStrip<Tab: Hashable>: NSViewRepresentable {
     struct Item {
         let tab: Tab
@@ -28,25 +14,20 @@ struct InspectorTabStrip<Tab: Hashable>: NSViewRepresentable {
 
     let items: [Item]
     @Binding var selection: Tab
-    /// Tints the selected segment's bezel with the theme's accent, matching
-    /// the rest of the app's chrome rather than the system's default blue.
+    /// Matches the app's chrome rather than the system's default blue.
     let accent: Color
 
     func makeNSView(context: Context) -> NSSegmentedControl {
         makeControl(target: context.coordinator, action: #selector(Coordinator.selectionChanged(_:)))
     }
 
-    /// Builds and fully configures the control. Split out of
-    /// ``makeNSView(context:)`` so tests can assert on a real, configured
-    /// `NSSegmentedControl` — an `NSViewRepresentableContext` cannot be
-    /// constructed outside SwiftUI, so a test could otherwise never reach
-    /// this configuration at all.
+    /// Split out of ``makeNSView(context:)`` so tests can assert on a real,
+    /// configured control without an `NSViewRepresentableContext`, which can't be constructed outside SwiftUI.
     func makeControl(target: AnyObject?, action: Selector?) -> NSSegmentedControl {
         let control = NSSegmentedControl()
         control.segmentStyle = .automatic
         control.trackingMode = .selectOne
-        // Equal-width segments are what let the control span the sidebar
-        // instead of shrink-wrapping its labels.
+        // Lets the control span the sidebar instead of shrink-wrapping its labels.
         control.segmentDistribution = .fillEqually
         control.segmentCount = items.count
         control.target = target
@@ -69,8 +50,6 @@ struct InspectorTabStrip<Tab: Hashable>: NSViewRepresentable {
                 NSImage(systemSymbolName: item.systemImage, accessibilityDescription: item.title),
                 forSegment: index
             )
-            // Scales an oversized symbol down to fit the segment, rather
-            // than letting it crowd out the label.
             control.setImageScaling(.scaleProportionallyDown, forSegment: index)
             control.setToolTip(item.title, forSegment: index)
         }
