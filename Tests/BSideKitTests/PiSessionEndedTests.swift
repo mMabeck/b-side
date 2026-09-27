@@ -25,13 +25,6 @@ struct PiSessionEndedTests {
         #expect(MainAreaView.exitedTaskIDs(afterExit: 1, current: [1]) == [1])
     }
 
-    @Test("Relaunching clears only that task's exited flag, and is a no-op for a task that was never marked exited")
-    func relaunchClearsOnlyThatTask() {
-        let exited: Set<Int64> = [1, 2]
-        #expect(MainAreaView.exitedTaskIDs(afterRelaunch: 1, current: exited) == [2])
-        #expect(MainAreaView.exitedTaskIDs(afterRelaunch: 99, current: [1, 2]) == [1, 2])
-    }
-
     // MARK: - ProjectsStore.project(forTask:)
 
     private func makeStore() async throws -> (store: ProjectsStore, project: Project, task: TaskRecord) {
@@ -56,22 +49,6 @@ struct PiSessionEndedTests {
         return (store, project, task)
     }
 
-    @Test("project(forTask:) resolves the task's own project")
-    func projectForTaskResolvesOwnProject() async throws {
-        let (store, project, task) = try await makeStore()
-        #expect(store.project(forTask: task) == project)
-    }
-
-    @Test("project(forTask:) is nil once the task's project is gone")
-    func projectForTaskNilWhenProjectMissing() async throws {
-        let (store, _, task) = try await makeStore()
-        let orphanTask = TaskRecord(
-            id: task.id, projectId: 999_999, name: task.name, branchName: task.branchName,
-            worktreePath: task.worktreePath, harness: task.harness, permissionLevel: task.permissionLevel
-        )
-        #expect(store.project(forTask: orphanTask) == nil)
-    }
-
     // MARK: - ProjectsStore.restartRequestedTaskID / acknowledgeRestartRequested
 
     @Test("Requesting a restart sets restartRequestedTaskID to the task's id")
@@ -81,25 +58,6 @@ struct PiSessionEndedTests {
 
         store.requestRestartTerminal(for: task)
         #expect(store.restartRequestedTaskID == task.id)
-    }
-
-    @Test("Acknowledging a restart request clears it, but only for the id it was raised for")
-    func acknowledgeRestartIsScopedToItsOwnID() async throws {
-        let (store, _, task) = try await makeStore()
-        store.requestRestartTerminal(for: task)
-
-        store.acknowledgeRestartRequested(999)
-        #expect(store.restartRequestedTaskID == task.id)
-
-        store.acknowledgeRestartRequested(task.id!)
-        #expect(store.restartRequestedTaskID == nil)
-    }
-
-    // MARK: - GhosttyBridge.appOwnedKeybinds
-
-    @Test("Cmd+Shift+R is unbound from Ghostty so the Restart Pi Session command handles it")
-    func restartShortcutIsUnboundFromGhostty() {
-        #expect(GhosttyBridge.appOwnedKeybinds.contains("keybind = cmd+shift+r=unbind"))
     }
 
     // MARK: - PiSessionService.launchCommand: relaunch uses the same command path

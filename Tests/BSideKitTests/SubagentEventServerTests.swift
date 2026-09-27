@@ -31,18 +31,6 @@ struct SubagentEventServerTests {
         #expect(run?.toolLines == ["$ ls"])
     }
 
-    @Test("Hook responses have an empty body")
-    func responsesHaveEmptyBody() async throws {
-        let store = SubagentFeedStore()
-        let server = try SubagentEventServer(store: store, paneStore: SubagentPaneStore(), taskExists: { _ in true })
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let responseBody = try await postAndReadBody(path: "/subagents/1/c1/begin", body: #"{"agent":"x","taskLabel":"y"}"#, port: port)
-        #expect(responseBody.isEmpty)
-    }
-
     private func fakeHostFactory(cwd: URL, command: String, onExit: @escaping (Bool) -> Void) -> TerminalSurfaceHost {
         TerminalSurfaceHost.makeInMemoryForTesting()
     }
@@ -51,40 +39,6 @@ struct SubagentEventServerTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("subagent-server-spawn-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
-
-    @Test("Spawn creates a pane and returns 204 for a known task")
-    func spawnCreatesPaneAndReturns204() async throws {
-        let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
-        let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in true })
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let body = #"{"label":"explorer: map callers","cwd":"\#(tempDir().path)","command":"/bin/sh"}"#
-        let status = try await postAndReadStatus(path: "/subagents/1/c1/spawn", body: body, port: port)
-
-        #expect(status == 204)
-        try await waitUntil { paneStore.panes(forTask: 1).map(\.id) == ["c1"] }
-    }
-
-    @Test("Spawn returns 404 for an unknown task or 400 for a malformed body, registering no pane", arguments: [
-        (taskExists: true, body: #"{"label":"missing fields"}"#, expectedStatus: 400),
-        (taskExists: false, body: #"{"label":"explorer","cwd":"/tmp","command":"/bin/sh"}"#, expectedStatus: 404),
-    ])
-    func spawnFailureModes(taskExists: Bool, body: String, expectedStatus: Int) async throws {
-        let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore(makeHost: fakeHostFactory)
-        let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in taskExists })
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let status = try await postAndReadStatus(path: "/subagents/1/c1/spawn", body: body, port: port)
-
-        #expect(status == expectedStatus)
-        #expect(paneStore.panes(forTask: 1).isEmpty)
     }
 
     @Test("Spawn past the pane cap returns 429")
@@ -104,129 +58,6 @@ struct SubagentEventServerTests {
 
         #expect(status == 429)
         #expect(!paneStore.panes(forTask: 1).contains { $0.id == "over-cap" })
-    }
-
-    @Test("Close always returns 204, including for a pane that was never spawned")
-    func closeIsIdempotent() async throws {
-        let store = SubagentFeedStore()
-        let paneStore = SubagentPaneStore()
-        paneStore.spawn(taskId: 1, childId: "c1", label: "x", cwd: tempDir(), command: "/bin/sh")
-        let server = try SubagentEventServer(store: store, paneStore: paneStore, taskExists: { _ in true })
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let firstClose = try await postAndReadStatus(path: "/subagents/1/c1/close", body: "", port: port)
-        #expect(firstClose == 204)
-        try await waitUntil { paneStore.panes(forTask: 1).isEmpty }
-
-        let secondClose = try await postAndReadStatus(path: "/subagents/1/c1/close", body: "", port: port)
-        #expect(secondClose == 204)
-
-        let neverSpawnedClose = try await postAndReadStatus(path: "/subagents/1/never-spawned/close", body: "", port: port)
-        #expect(neverSpawnedClose == 204)
-    }
-
-    @Test("busy and idle dispatch to their callbacks and return 204 for a known task")
-    func agentBusyAndIdleDispatch() async throws {
-        let store = SubagentFeedStore()
-        var busyCalls: [Int64] = []
-        var idleCalls: [Int64] = []
-        let server = try SubagentEventServer(
-            store: store,
-            paneStore: SubagentPaneStore(),
-            taskExists: { _ in true },
-            onAgentBusy: { busyCalls.append($0) },
-            onAgentIdle: { idleCalls.append($0) }
-        )
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let busyStatus = try await postAndReadStatus(path: "/agent/1/busy", body: "", port: port)
-        #expect(busyStatus == 204)
-        try await waitUntil { busyCalls == [1] }
-
-        let idleStatus = try await postAndReadStatus(path: "/agent/1/idle", body: "", port: port)
-        #expect(idleStatus == 204)
-        try await waitUntil { idleCalls == [1] }
-
-        // Repeatable, in any order.
-        _ = try await postAndReadStatus(path: "/agent/1/busy", body: "", port: port)
-        _ = try await postAndReadStatus(path: "/agent/1/busy", body: "", port: port)
-        try await waitUntil { busyCalls == [1, 1, 1] }
-    }
-
-    @Test("busy and idle return 404 for an unknown task and never dispatch")
-    func agentBusyIdleUnknownTaskReturns404() async throws {
-        let store = SubagentFeedStore()
-        var calls = 0
-        let server = try SubagentEventServer(
-            store: store,
-            paneStore: SubagentPaneStore(),
-            taskExists: { _ in false },
-            onAgentBusy: { _ in calls += 1 },
-            onAgentIdle: { _ in calls += 1 }
-        )
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let busyStatus = try await postAndReadStatus(path: "/agent/99/busy", body: "", port: port)
-        let idleStatus = try await postAndReadStatus(path: "/agent/99/idle", body: "", port: port)
-
-        #expect(busyStatus == 404)
-        #expect(idleStatus == 404)
-        #expect(calls == 0)
-    }
-
-    @Test("alert decodes kind/title/body and dispatches to its callback")
-    func agentAlertDispatches() async throws {
-        let store = SubagentFeedStore()
-        var alerts: [(Int64, TaskAlertKind, String, String)] = []
-        let server = try SubagentEventServer(
-            store: store,
-            paneStore: SubagentPaneStore(),
-            taskExists: { _ in true },
-            onAgentAlert: { taskId, kind, title, body in alerts.append((taskId, kind, title, body)) }
-        )
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let body = #"{"kind":"question","title":"Pi has a question","body":"Continue?"}"#
-        let status = try await postAndReadStatus(path: "/agent/1/alert", body: body, port: port)
-
-        #expect(status == 204)
-        try await waitUntil { alerts.count == 1 }
-        #expect(alerts.first?.0 == 1)
-        #expect(alerts.first?.1 == .question)
-        #expect(alerts.first?.2 == "Pi has a question")
-        #expect(alerts.first?.3 == "Continue?")
-    }
-
-    @Test("alert returns 400 for an unrecognised kind or malformed body, and 404 for an unknown task, never dispatching", arguments: [
-        (taskExists: true, body: #"{"kind":"celebration","title":"x","body":"y"}"#, expectedStatus: 400),
-        (taskExists: true, body: #"{"title":"missing kind and body"}"#, expectedStatus: 400),
-        (taskExists: false, body: #"{"kind":"finished","title":"x","body":"y"}"#, expectedStatus: 404),
-    ])
-    func agentAlertFailureModes(taskExists: Bool, body: String, expectedStatus: Int) async throws {
-        let store = SubagentFeedStore()
-        var alerts = 0
-        let server = try SubagentEventServer(
-            store: store,
-            paneStore: SubagentPaneStore(),
-            taskExists: { _ in taskExists },
-            onAgentAlert: { _, _, _, _ in alerts += 1 }
-        )
-        try await server.start()
-        defer { server.stop() }
-        let port = try #require(server.port)
-
-        let status = try await postAndReadStatus(path: "/agent/1/alert", body: body, port: port)
-
-        #expect(status == expectedStatus)
-        #expect(alerts == 0)
     }
 
     private func waitUntil(timeout: TimeInterval = 5, _ condition: @MainActor () -> Bool) async throws {

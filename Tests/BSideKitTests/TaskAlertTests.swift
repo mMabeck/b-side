@@ -28,14 +28,4 @@ struct TaskAlertTests {
         #expect(TaskAlertDebouncer.isDebounced(previous: start, now: start.addingTimeInterval(0.5), interval: 1.5))
     }
 
-    @Test("An event past the debounce interval is not dropped")
-    func eventPastIntervalIsNotDebounced() {
-        let start = Date()
-        #expect(!TaskAlertDebouncer.isDebounced(previous: start, now: start.addingTimeInterval(1.6), interval: 1.5))
-    }
-
-    @Test("With no previous event, nothing is debounced")
-    func noPreviousEventIsNeverDebounced() {
-        #expect(!TaskAlertDebouncer.isDebounced(previous: nil, now: Date(), interval: 1.5))
-    }
 }

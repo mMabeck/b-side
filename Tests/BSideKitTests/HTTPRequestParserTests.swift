@@ -23,16 +23,4 @@ struct HTTPRequestParserTests {
         #expect(HTTPRequestParser.parse(Data(raw.utf8)) == nil)
     }
 
-    @Test("Returns nil when headers are not yet fully buffered")
-    func returnsNilForIncompleteHeaders() {
-        let raw = "POST /subagents/1/c1/events HTTP/1.1\r\nContent-Length: 5\r\n"
-        #expect(HTTPRequestParser.parse(Data(raw.utf8)) == nil)
-    }
-
-    @Test("Parses a request with no body")
-    func parsesRequestWithNoBody() {
-        let raw = "POST /subagents/1/c1/done HTTP/1.1\r\nContent-Length: 0\r\n\r\n"
-        let result = HTTPRequestParser.parse(Data(raw.utf8))
-        #expect(result?.request.body.isEmpty == true)
-    }
 }

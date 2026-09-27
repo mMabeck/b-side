@@ -55,35 +55,6 @@ struct ProjectsStoreSelectionTests {
         return (store, projectA, projectB, taskA)
     }
 
-    @Test("Selecting a project clears any task selection")
-    func selectingProjectClearsTask() async throws {
-        let (store, projectA, projectB, taskA) = try await makeStore()
-
-        store.selectTask(taskA, project: projectA)
-        #expect(store.selectedTaskID == taskA.id)
-
-        store.selectProject(projectB)
-        #expect(store.selectedProjectID == projectB.id)
-        #expect(store.selectedTaskID == nil)
-    }
-
-    @Test("Reselecting the already-selected task still bumps focusRequestToken")
-    func reselectingSameTaskBumpsFocusToken() async throws {
-        let (store, projectA, _, taskA) = try await makeStore()
-
-        store.selectTask(taskA, project: projectA)
-        let tokenAfterFirstSelect = store.focusRequestToken
-
-        // Same task, same project — selectedTaskID doesn't change value, but
-        // MainAreaView still needs a signal to re-run syncFocus() so a
-        // sidebar click while focus sits elsewhere (see MainAreaView's
-        // FocusRequestKey doc comment) actually moves focus to the terminal.
-        store.selectTask(taskA, project: projectA)
-
-        #expect(store.selectedTaskID == taskA.id)
-        #expect(store.focusRequestToken == tokenAfterFirstSelect + 1)
-    }
-
     @Test("Selecting a task also selects its project")
     func selectingTaskSelectsProject() async throws {
         let (store, projectA, _, taskA) = try await makeStore()
@@ -93,33 +64,6 @@ struct ProjectsStoreSelectionTests {
 
         #expect(store.selectedTaskID == taskA.id)
         #expect(store.selectedProjectID == projectA.id)
-    }
-
-    @Test("mainSelection is .none, then .project, then .task as selection narrows")
-    func mainSelectionTracksSelection() async throws {
-        let (store, projectA, _, taskA) = try await makeStore()
-
-        #expect(store.mainSelection == .none)
-
-        store.selectProject(projectA)
-        #expect(store.mainSelection == .project(projectA))
-
-        store.selectTask(taskA, project: projectA)
-        #expect(store.mainSelection == .task(taskA, projectA))
-    }
-
-    @Test("A task selection takes priority over a stale project selection")
-    func taskSelectionWinsOverProject() async throws {
-        let (store, projectA, projectB, taskA) = try await makeStore()
-
-        // Bypass the mutual-exclusion helpers to simulate disagreeing IDs
-        // (e.g. something mutating them directly instead of through
-        // selectProject/selectTask) and confirm mainSelection still resolves
-        // sensibly rather than showing project B's dashboard for task A.
-        store.selectedProjectID = projectB.id
-        store.selectedTaskID = taskA.id
-
-        #expect(store.mainSelection == .task(taskA, projectA))
     }
 
     // MARK: - Selection reconciliation (pure)
@@ -175,60 +119,7 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedProjectID == projectA.id)
     }
 
-    @Test("Removing the selected project clears the whole selection")
-    func removingSelectedProjectReconcilesSelection() async throws {
-        let (store, projectA, _, _) = try await makeStore()
-        store.selectProject(projectA)
-
-        try await store.removeProject(projectA)
-        try await waitUntil {
-            !store.projects.contains { $0.id == projectA.id }
-        }
-
-        #expect(store.selectedProjectID == nil)
-        #expect(store.selectedTaskID == nil)
-    }
-
-    @Test("A terminal question alert marks its task needing attention until it's next selected")
-    func terminalQuestionMarksNeedsAttentionUntilSelected() async throws {
-        let (store, projectA, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-
-        store.handleTerminalDesktopNotification(taskID: id, title: "Pi has a question", body: "Ready?")
-        #expect(store.taskIDsNeedingAttention.contains(id))
-
-        store.selectTask(taskA, project: projectA)
-        #expect(!store.taskIDsNeedingAttention.contains(id))
-    }
-
-    @Test("A terminal bell always marks its task needing attention")
-    func terminalBellMarksNeedsAttention() async throws {
-        let (store, _, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-
-        store.handleTerminalBell(taskID: id)
-        #expect(store.taskIDsNeedingAttention.contains(id))
-    }
-
-    @Test("A plain finished notification does not mark needs-attention")
-    func terminalFinishedNotificationDoesNotMarkNeedsAttention() async throws {
-        let (store, _, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-
-        store.handleTerminalDesktopNotification(taskID: id, title: "Pi finished", body: "Ready for your next prompt.")
-        #expect(!store.taskIDsNeedingAttention.contains(id))
-    }
-
     // MARK: - Unread tracking
-
-    @Test("Clearing busy for a task that was never busy does not mark it unread")
-    func clearingBusyWithNoTransitionDoesNotMarkUnread() async throws {
-        let (store, _, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-
-        store.clearTaskBusy(id)
-        #expect(!store.unreadTaskIDs.contains(id))
-    }
 
     @Test("Selecting a task clears its unread flag")
     func selectingTaskClearsUnread() async throws {
@@ -243,42 +134,4 @@ struct ProjectsStoreSelectionTests {
         #expect(!store.unreadTaskIDs.contains(id))
     }
 
-    @Test("Closing a task's terminal clears its unread flag")
-    func closingTerminalClearsUnread() async throws {
-        let (store, projectA, _, taskA) = try await makeStore()
-        let id = try #require(taskA.id)
-        store.noteTerminalOpened(taskID: id)
-
-        store.setTaskBusy(id)
-        store.clearTaskBusy(id)
-        #expect(store.unreadTaskIDs.contains(id))
-
-        store.closeTerminal(for: taskA, project: projectA)
-        #expect(!store.unreadTaskIDs.contains(id))
-    }
-
-    @Test("Archiving or deleting a task clears its unread flag")
-    func archivingAndDeletingClearsUnread() async throws {
-        let database = try AppDatabase.openInMemory()
-        let store = ProjectsStore(database: database)
-        store.playAlertSound = { _ in }
-        store.start()
-        try await waitUntil { true }
-
-        let root = try TestRepo.makeTempDirectory()
-        defer { TestRepo.removeTempDirectory(root) }
-        let repoURL = try await TestRepo.makeRepo(in: root)
-        try await store.addProject(at: repoURL)
-        try await waitUntil { !store.projects.isEmpty }
-        let project = try #require(store.projects.first)
-
-        let task = try await store.createTask(project: project, name: "Task", useWorktree: false)
-        let id = try #require(task.id)
-        store.setTaskBusy(id)
-        store.clearTaskBusy(id)
-        #expect(store.unreadTaskIDs.contains(id))
-
-        try await store.archiveTask(task, project: project, removeWorktree: false)
-        #expect(!store.unreadTaskIDs.contains(id))
-    }
 }

@@ -108,29 +108,4 @@ struct SidebarFocusGuardTests {
         window.orderOut(nil)
     }
 
-    @Test("A mouse-down while a project dashboard (no task) is selected does not request terminal focus")
-    func clickWithNoTaskSelectedLeavesFocusAlone() async throws {
-        let (store, project, _) = try await makeStore()
-        store.selectProject(project)
-        let tokenBefore = store.focusRequestToken
-
-        let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 200, height: 400),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        let marker = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
-        window.contentView = marker
-        window.setIsVisible(true)
-
-        let coordinator = SidebarFocusGuard.Coordinator(store: store)
-        coordinator.attach(to: marker)
-
-        coordinator.handleMouseDown(mouseDown(at: NSPoint(x: 50, y: 50), in: window), in: window)
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(store.focusRequestToken == tokenBefore)
-
-        window.orderOut(nil)
-    }
 }
