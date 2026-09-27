@@ -9,8 +9,12 @@ struct ChangesOverlaySheet: View {
     var onOpenInEditor: ((String) -> Void)?
 
     @State private var store = ChangesOverlayStore()
+    @State private var treeWidth: CGFloat = 240
+    @State private var treeWidthDragStart: CGFloat?
     @ObservedObject private var theme: GhosttyResolvedTheme = .shared
     @Environment(\.dismiss) private var dismiss
+
+    private static let treeWidthRange: ClosedRange<CGFloat> = 200...360
 
     private var selectionBinding: Binding<String?> {
         Binding(get: { store.selectedPath }, set: { store.select($0) })
@@ -116,11 +120,12 @@ struct ChangesOverlaySheet: View {
                     emptyState
                 }
             } else {
-                HSplitView {
+                HStack(spacing: 0) {
                     treeList
-                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
+                        .frame(width: treeWidth)
+                    treeWidthDivider
                     diffPane
-                        .frame(minWidth: 400, maxWidth: .infinity)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -155,6 +160,29 @@ struct ChangesOverlaySheet: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(theme.palette.surfaceBackground)
+        .controlSize(.small)
+    }
+
+    /// A plain `Divider()` with a drag gesture, not `HSplitView` (AppKit
+    /// `updateConstraints` crash risk — see `TaskTerminalAreaView`).
+    private var treeWidthDivider: some View {
+        Divider()
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let startWidth = treeWidthDragStart ?? treeWidth
+                        treeWidthDragStart = startWidth
+                        treeWidth = min(max(startWidth + value.translation.width, Self.treeWidthRange.lowerBound), Self.treeWidthRange.upperBound)
+                    }
+                    .onEnded { _ in treeWidthDragStart = nil }
+            )
     }
 
     @ViewBuilder
@@ -184,7 +212,7 @@ struct ChangesOverlaySheet: View {
             Spacer(minLength: 4)
             fileCounts(file)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(for: file))
     }
@@ -204,7 +232,7 @@ struct ChangesOverlaySheet: View {
                     Text("\u{2212}\(removed)").foregroundStyle(theme.palette.statusError)
                 }
             }
-            .font(.system(size: 10, design: .monospaced))
+            .font(.system(.caption, design: .monospaced))
         }
     }
 
@@ -242,9 +270,9 @@ struct ChangesOverlaySheet: View {
                     Text("\u{2212}\(folder.linesRemoved)").foregroundStyle(theme.palette.statusError)
                 }
             }
-            .font(.system(size: 10, design: .monospaced))
+            .font(.system(.caption, design: .monospaced))
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(folder.displayName), folder, \(folder.linesAdded) additions, \(folder.linesRemoved) deletions")
     }
