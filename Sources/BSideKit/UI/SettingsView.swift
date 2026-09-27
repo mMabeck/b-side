@@ -26,7 +26,6 @@ public struct SettingsView: View {
         }
         // No shared frame: each tab sets its own size, and the Settings
         // window resizes per tab like standard macOS preference panes.
-        .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
     }
 }
@@ -40,8 +39,6 @@ private struct GeneralSettingsTab: View {
             Toggle("Launch at Login", isOn: $launchAtLogin)
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }
 }
@@ -109,7 +106,6 @@ private struct AppearanceSettingsTab: View {
         }
         .padding(20)
         .frame(width: 720, height: 420, alignment: .topLeading)
-        .background(theme.palette.windowBackground)
     }
 
     /// The theme the preview shows: whichever one the list is editing.
@@ -151,8 +147,6 @@ private struct AgentSettingsTab: View {
             TextField("Default Harness", text: $defaultHarness)
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }
 }
@@ -166,8 +160,6 @@ private struct GitSettingsTab: View {
             TextField("Default Base Ref", text: $defaultBaseRef)
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }
 }
@@ -181,8 +173,6 @@ private struct TerminalSettingsTab: View {
             Stepper("Font Size: \(Int(fontSize))", value: $fontSize, in: 9...24)
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }
 }
@@ -219,14 +209,12 @@ private struct KeybindingsSettingsTab: View {
                 }
             }
             .listStyle(.inset)
-            .scrollContentBackground(.hidden)
 
             Text("Ghostty's own terminal keybinds apply otherwise.")
                 .font(.caption)
                 .foregroundStyle(theme.palette.textSecondary)
                 .padding(12)
         }
-        .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }
 }
@@ -288,8 +276,6 @@ private struct NotificationsSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(theme.palette.windowBackground)
         .frame(width: 480, height: 420, alignment: .top)
     }
 }

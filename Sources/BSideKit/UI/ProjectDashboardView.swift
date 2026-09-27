@@ -35,7 +35,6 @@ struct ProjectDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(theme.palette.windowBackground)
         .task(id: project.id) { gitInfo.refresh(project) }
     }
 
@@ -65,13 +64,11 @@ struct ProjectDashboardView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Text("No tasks yet")
-                .font(.system(size: 13))
-                .foregroundStyle(theme.palette.textSecondary)
+        ContentUnavailableView {
+            Label("No Tasks Yet", systemImage: "checklist")
+        } actions: {
             newTaskButton
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var newTaskButton: some View {
