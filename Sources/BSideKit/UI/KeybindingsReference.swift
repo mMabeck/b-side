@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Pure formatting of a `KeyboardShortcut` into the glyphs macOS menus use
-/// (⌃⌥⇧⌘ in that fixed order) and into words for VoiceOver, kept separate
-/// from any view so both are directly testable.
+/// Formats a `KeyboardShortcut` into the glyphs macOS menus use (⌃⌥⇧⌘ in
+/// that fixed order) and into words for VoiceOver.
 public enum KeyboardShortcutGlyph {
     public static func symbols(for shortcut: KeyboardShortcut) -> String {
         modifierGlyphs(shortcut.modifiers) + keyGlyph(shortcut.key)
@@ -53,9 +52,8 @@ public enum KeyboardShortcutGlyph {
     }
 }
 
-/// One reference row: a menu item's title next to its glyph string, built
-/// straight from the same shortcut constants the real `Commands` use so
-/// this list can't drift from what the menu bar actually binds.
+/// Built from the same shortcut constants the real `Commands` use so this
+/// list can't drift from what the menu bar actually binds.
 public struct KeybindingRow: Identifiable, Sendable {
     public let id: String
     public let title: String
@@ -90,9 +88,7 @@ public struct KeybindingSection: Identifiable, Sendable {
     public var title: String { id }
 }
 
-/// The full reference list shown in Settings > Keybindings, one source of
-/// truth shared with the menu-bar `Commands` structs — see each shortcut
-/// constant's own file for why its keys were chosen.
+/// The full reference list shown in Settings > Keybindings.
 public enum KeybindingsReference {
     public static let sections: [KeybindingSection] = [
         KeybindingSection(title: "Projects & Tasks", rows: [
@@ -102,10 +98,12 @@ public enum KeybindingsReference {
         KeybindingSection(title: "Navigation", rows: [
             digitSeriesRow(
                 title: "Switch to Active Task 1–9",
+                count: NavigationShortcuts.digitCount,
                 shortcut: { NavigationShortcuts.activeTaskShortcut(forIndex: $0) }
             ),
             digitSeriesRow(
                 title: "Switch to Project 1–9",
+                count: NavigationShortcuts.digitCount,
                 shortcut: { NavigationShortcuts.projectShortcut(forIndex: $0) }
             ),
         ]),
@@ -123,10 +121,11 @@ public enum KeybindingsReference {
             KeybindingRow(title: "Show Main Terminal", shortcut: SubagentSwapShortcut.showMain),
             digitSeriesRow(
                 title: "Show Subagent 1–9",
+                count: SubagentSwapShortcut.digitCount,
                 shortcut: { SubagentSwapShortcut.showChild(atIndex: $0) }
             ),
-            KeybindingRow(title: "Next Subagent", shortcut: SubagentSwapShortcut.next),
-            KeybindingRow(title: "Previous Subagent", shortcut: SubagentSwapShortcut.previous),
+            dualShortcutRow(title: "Next Subagent", primary: SubagentSwapShortcut.next, alternate: SubagentSwapShortcut.nextArrow),
+            dualShortcutRow(title: "Previous Subagent", primary: SubagentSwapShortcut.previous, alternate: SubagentSwapShortcut.previousArrow),
         ]),
         KeybindingSection(title: "Changes", rows: [
             KeybindingRow(title: "Show All Changes", shortcut: ChangesOverlayShortcut.showAllChanges),
@@ -136,11 +135,18 @@ public enum KeybindingsReference {
     /// The first and last shortcut in a 1…9 digit series share the same
     /// modifiers, so their glyphs differ only in the digit — safe to splice
     /// into one "⌘1…⌘9" string instead of listing all nine.
-    private static func digitSeriesRow(title: String, shortcut: (Int) -> KeyboardShortcut) -> KeybindingRow {
+    private static func digitSeriesRow(title: String, count: Int, shortcut: (Int) -> KeyboardShortcut) -> KeybindingRow {
         let first = shortcut(0)
-        let last = shortcut(NavigationShortcuts.digitCount - 1)
+        let last = shortcut(count - 1)
         let symbols = "\(KeyboardShortcutGlyph.symbols(for: first))…\(KeyboardShortcutGlyph.symbols(for: last))"
         let label = "\(KeyboardShortcutGlyph.accessibilityLabel(for: first)) through \(KeyboardShortcutGlyph.accessibilityLabel(for: last))"
+        return KeybindingRow(title: title, symbols: symbols, accessibilityLabel: label)
+    }
+
+    /// Some actions register two shortcuts (e.g. `]`/`⌃⌘→`); show both on one row.
+    private static func dualShortcutRow(title: String, primary: KeyboardShortcut, alternate: KeyboardShortcut) -> KeybindingRow {
+        let symbols = "\(KeyboardShortcutGlyph.symbols(for: primary)) or \(KeyboardShortcutGlyph.symbols(for: alternate))"
+        let label = "\(KeyboardShortcutGlyph.accessibilityLabel(for: primary)) or \(KeyboardShortcutGlyph.accessibilityLabel(for: alternate))"
         return KeybindingRow(title: title, symbols: symbols, accessibilityLabel: label)
     }
 }
