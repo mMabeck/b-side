@@ -6,14 +6,7 @@ import SwiftUI
 /// view lifecycle — safe to call off the main thread and to unit test
 /// directly.
 enum UnifiedDiffRenderer {
-    /// Renders `diff` line by line, colouring hunk headers (`@@ ... @@`),
-    /// added (`+`) and removed (`-`) lines, and dimming file header lines
-    /// (`diff --git`, `index`, `---`, `+++`). Everything else (context
-    /// lines) uses the palette's primary text colour.
-    ///
-    /// Built with a single mutable `NSMutableAttributedString` and one
-    /// `append` per line rather than per-character attribute lookups, so a
-    /// 10k+ line diff renders in well under a second.
+    /// One `append` per line rather than per-character lookups, so a 10k+ line diff renders in well under a second.
     static func render(_ diff: String, palette: BSidePalette) -> NSAttributedString {
         let result = NSMutableAttributedString()
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -35,10 +28,7 @@ enum UnifiedDiffRenderer {
         return result
     }
 
-    /// Classifies a single diff line and picks its colour. Order matters:
-    /// the file-header prefixes (`+++`/`---`) must be checked before the
-    /// generic `+`/`-` line-content checks, or every added/removed-file
-    /// header would be miscoloured as a content line.
+    /// Order matters: file-header prefixes (`+++`/`---`) must be checked before generic `+`/`-` content checks.
     private static func color(for line: String, palette: BSidePalette) -> Color {
         if line.hasPrefix("diff --git") || line.hasPrefix("index ")
             || line.hasPrefix("--- ") || line.hasPrefix("+++ ")
@@ -60,9 +50,7 @@ enum UnifiedDiffRenderer {
     }
 }
 
-/// Read-only, selectable text view hosting a rendered diff, themed from a
-/// ``BSidePalette``. Wraps a plain `NSTextView` in an `NSScrollView` rather
-/// than a rich editor — the diff is display-only.
+/// Read-only, selectable text view; wraps a plain `NSTextView`, not a rich editor, since the diff is display-only.
 struct DiffTextView: NSViewRepresentable {
     let attributedText: NSAttributedString
     let palette: BSidePalette
