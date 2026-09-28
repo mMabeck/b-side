@@ -15,7 +15,7 @@ public struct WindowLayoutCommands: Commands {
     public var body: some Commands {
         CommandGroup(replacing: .sidebar) {
             Button(layout.leftSidebarCollapsed ? "Show Left Sidebar" : "Hide Left Sidebar") {
-                // AppKit's own toggle survives rapid repeats; flipping SwiftUI state raced
+                // AppKit's own toggle survives rapid repeats; flipping SwiftUI state races
                 // the split view's animation and its stale visibility write-back.
                 let toggle = #selector(NSSplitViewController.toggleSidebar(_:))
                 if !NSApp.sendAction(toggle, to: nil, from: nil) {

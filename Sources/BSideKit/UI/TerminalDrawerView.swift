@@ -1,19 +1,9 @@
 import Foundation
 import SwiftUI
 
-/// The bottom terminal drawer: a second, independent scratch shell for the
-/// user's own commands, distinct from the agent terminal in the main area.
-///
-/// One shell per task (or per project, for a project dashboard with no task
-/// selected), cached by `DrawerKey` and never torn down on selection change,
-/// only hidden — mirrors `MainAreaView.hostsByTaskID` so a user mid-command
-/// in one task's drawer shell isn't interrupted by switching away and back.
-/// A shell is created lazily, the first time the drawer is opened for that
-/// key, not on every selection change.
-///
-/// Collapsing marks the visible surface not-visible (native-rewrite.md §6)
-/// rather than tearing it down; `ContentView` keeps this view mounted at
-/// zero height so it's never deinitialized by the collapse toggle.
+/// Scratch shells for the user's own commands, one per task (or project), hidden
+/// rather than torn down on selection change or collapse (native-rewrite.md §6) so
+/// a running command survives; `ContentView` keeps this mounted at zero height.
 struct TerminalDrawerView: View {
     enum DrawerKey: Hashable {
         case task(Int64)
@@ -30,7 +20,7 @@ struct TerminalDrawerView: View {
         Self.key(for: store.mainSelection)
     }
 
-    /// Live keys the current project/task set still supports; anything else cached gets purged.
+    /// Every key the current projects and tasks still back; `purgeHosts` drops the rest.
     private var liveKeys: Set<DrawerKey> {
         var keys = Set(store.tasksByProject.values.flatMap { $0.compactMap { $0.id.map(DrawerKey.task) } })
         keys.formUnion(store.projects.compactMap { $0.id.map(DrawerKey.project) })
@@ -84,10 +74,8 @@ struct TerminalDrawerView: View {
         }
     }
 
-    private func purgeHosts(keeping liveKeys: Set<DrawerKey>) {
-        for key in hostsByKey.keys where !liveKeys.contains(key) {
-            hostsByKey.removeValue(forKey: key)
-        }
+    private func purgeHosts(keeping keys: Set<DrawerKey>) {
+        hostsByKey = hostsByKey.filter { keys.contains($0.key) }
     }
 
     static func key(for selection: MainSelection) -> DrawerKey? {

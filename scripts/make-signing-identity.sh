@@ -1,8 +1,7 @@
 #!/bin/bash
-# One-time setup: creates a self-signed "B-Side Local Signing" identity in a
-# dedicated keychain so bundle.sh signs every build with the same designated
-# requirement. Ad-hoc signatures change per build, so macOS privacy (TCC)
-# grants such as Documents access were re-requested after each rebuild.
+# One-time setup: a self-signed "B-Side Local Signing" identity in a dedicated
+# keychain, so bundle.sh signs every build with the same designated requirement
+# and macOS privacy (TCC) grants survive rebuilds.
 set -euo pipefail
 
 NAME="B-Side Local Signing"

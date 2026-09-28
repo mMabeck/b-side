@@ -9,15 +9,15 @@ public struct SettingsView: View {
 
     public var body: some View {
         TabView {
-            GeneralSettingsTab(theme: theme)
+            GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
             AppearanceSettingsTab(theme: theme)
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            AgentSettingsTab(theme: theme)
+            AgentSettingsTab()
                 .tabItem { Label("Agent", systemImage: "cpu") }
-            GitSettingsTab(theme: theme)
+            GitSettingsTab()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
-            TerminalSettingsTab(theme: theme)
+            TerminalSettingsTab()
                 .tabItem { Label("Terminal", systemImage: "terminal") }
             KeybindingsSettingsTab(theme: theme)
                 .tabItem { Label("Keybindings", systemImage: "keyboard") }
@@ -31,7 +31,6 @@ public struct SettingsView: View {
 }
 
 private struct GeneralSettingsTab: View {
-    var theme: GhosttyResolvedTheme
     @AppStorage("settings.general.launchAtLogin") private var launchAtLogin = false
 
     var body: some View {
@@ -139,7 +138,6 @@ private struct AppearanceSettingsTab: View {
 }
 
 private struct AgentSettingsTab: View {
-    var theme: GhosttyResolvedTheme
     @AppStorage("settings.agent.defaultHarness") private var defaultHarness = "claude"
 
     var body: some View {
@@ -152,7 +150,6 @@ private struct AgentSettingsTab: View {
 }
 
 private struct GitSettingsTab: View {
-    var theme: GhosttyResolvedTheme
     @AppStorage("settings.git.defaultBaseRef") private var defaultBaseRef = "main"
 
     var body: some View {
@@ -165,7 +162,6 @@ private struct GitSettingsTab: View {
 }
 
 private struct TerminalSettingsTab: View {
-    var theme: GhosttyResolvedTheme
     @AppStorage("settings.terminal.fontSize") private var fontSize = 13.0
 
     var body: some View {
