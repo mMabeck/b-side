@@ -16,7 +16,7 @@ enum UnifiedDiffRenderer {
 
     /// One parsed diff line. `text` never carries the leading `+`/`-`/space
     /// marker or any git metadata — those are either dropped or drawn in the gutter.
-    struct Row: Equatable {
+    struct Row {
         let kind: RowKind
         let oldLineNumber: Int?
         let newLineNumber: Int?
@@ -141,8 +141,7 @@ enum UnifiedDiffRenderer {
                 switch row.kind {
                 case .added: attributes[.diffRowBackground] = addedBackground
                 case .removed: attributes[.diffRowBackground] = removedBackground
-                case .context: break
-                case .separator: break
+                case .context, .separator: break
                 }
                 // A truly empty line needs one character to carry the gutter/background
                 // attributes; a space renders indistinguishably from blank.
@@ -208,9 +207,9 @@ enum UnifiedDiffRenderer {
             guard let stringRange = Range(match.range(at: index), in: line) else { return nil }
             return String(line[stringRange])
         }
-        // A hunk header's count is omitted when it's 1 (e.g. `@@ -5 +5,2 @@`).
         guard let oldString = group(1), let newString = group(3),
               let oldStart = Int(oldString), let newStart = Int(newString) else { return nil }
+        // A hunk header's count is omitted when it's 1 (e.g. `@@ -5 +5,2 @@`).
         let oldCount = group(2).flatMap(Int.init) ?? 1
         let newCount = group(4).flatMap(Int.init) ?? 1
         return HunkHeader(oldStart: oldStart, oldCount: oldCount, newStart: newStart, newCount: newCount, trailingContext: group(5) ?? "")
@@ -257,14 +256,9 @@ private final class DiffRowBackgroundLayoutManager: NSLayoutManager {
     }
 }
 
-/// Fixed-width line-number gutter drawn outside the text storage, so
-/// selecting/copying diff text never includes line numbers or +/- markers.
-/// A plain `NSView` pinned to the scroll view itself (not the scrolling
-/// clip/document view), with the text content inset out of its way by
-/// `DiffScrollView`: stays put when the text view scrolls horizontally, and
-/// repaints on vertical scroll via a bounds-changed notification on the clip
-/// view (an `NSRulerView` would do this automatically, but its automatic
-/// content-area accommodation wasn't reliably reserving space here, so this needs the notification wiring by hand).
+/// Line-number gutter drawn outside the text storage so copies exclude numbers
+/// and markers. Pinned to the scroll view, not the clip view, so it never
+/// scrolls horizontally; repaints on the clip view's bounds changes.
 private final class DiffGutterView: NSView {
     weak var diffTextView: NSTextView?
     private weak var scrollView: NSScrollView?
@@ -472,11 +466,7 @@ struct DiffTextView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
 
-        // The gutter is a plain sibling view pinned to the scroll view, not the
-        // scrolling clip/document view, so it never moves horizontally; `DiffScrollView.tile()`
-        // reserves the matching space in the scrollable content area.
-        let gutterWidth = DiffGutterView.preferredWidth
-        scrollView.gutterLeftInset = gutterWidth
+        scrollView.gutterLeftInset = DiffGutterView.preferredWidth
         let gutter = DiffGutterView(textView: textView, scrollView: scrollView)
         scrollView.gutterView = gutter
         scrollView.addSubview(gutter)
