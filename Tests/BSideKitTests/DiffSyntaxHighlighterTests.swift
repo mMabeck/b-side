@@ -1,4 +1,5 @@
 import AppKit
+import HighlightSwift
 import Testing
 
 @testable import BSideKit
@@ -67,5 +68,35 @@ struct DiffSyntaxHighlighterTests {
     @Test("Theme colours follow the requested light/dark appearance")
     func colorsFollowAppearance() {
         #expect(DiffSyntaxHighlighter.colors(isDark: true) != DiffSyntaxHighlighter.colors(isDark: false))
+    }
+
+    @Test("leadingTrim measures the same leading blank line and indent HighlightSwift itself trims, and colours land on the indented row")
+    func leadingTrimMatchesRealHighlightSwiftOutput() async throws {
+        let text = "\n    let x = \"a\" // c\nfunc f() {}"
+        let trim = DiffSyntaxHighlighter.leadingTrim(of: text)
+        #expect(trim == .init(droppedLines: 1, indent: 4))
+
+        let result = try await Highlight().request(text, mode: .languageAlias("swift"), colors: .light(.xcode))
+        let highlighted = NSAttributedString(result.attributedText)
+        #expect(highlighted.string == "let x = \"a\" // c\nfunc f() {}")
+
+        // Reconstruct the row plumbing `DiffPaneView.render` builds: the blank
+        // line then the indented one, laid out back to back as separate rows.
+        let rows = ["", "    let x = \"a\" // c"]
+        let rowRanges = [NSRange(location: 0, length: 0), NSRange(location: 0, length: (rows[1] as NSString).length)]
+        let rowTextLengths = rows.map { ($0 as NSString).length }
+        let rendered = NSMutableAttributedString(string: rows[1])
+
+        DiffSyntaxHighlighter.applyColorRuns(
+            DiffSyntaxHighlighter.colorRunsByLine(in: highlighted),
+            toRowIndices: Array([0, 1].dropFirst(trim.droppedLines)),
+            rowTextLengths: rowTextLengths, rowRanges: rowRanges, leadingIndent: trim.indent, in: rendered
+        )
+
+        // The "let" keyword should be coloured at its own offset (4) on the
+        // indented row, not shifted onto the blank row or left at the
+        // trimmed output's offset (0).
+        #expect(rendered.attribute(.foregroundColor, at: 4, effectiveRange: nil) != nil)
+        #expect(rendered.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
     }
 }

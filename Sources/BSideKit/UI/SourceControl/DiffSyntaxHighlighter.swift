@@ -16,6 +16,43 @@ enum DiffSyntaxHighlighter {
         let color: NSColor
     }
 
+    /// How much of the input `HighlightSwift` silently drops from the front
+    /// before highlighting (it trims `.whitespacesAndNewlines` off both ends
+    /// of its output): `droppedLines` whole leading blank lines, plus
+    /// `indent` UTF-16 units of leading whitespace remaining on the first
+    /// surviving line. Used to keep colour runs aligned to the right row.
+    struct LeadingTrim: Equatable {
+        let droppedLines: Int
+        let indent: Int
+    }
+
+    /// Measures the leading whitespace/newline run of `text` the same way
+    /// `HighlightSwift` trims it, so colour output can be remapped back onto
+    /// the rows it actually corresponds to. A `\r\n` pair counts as one
+    /// line break, not two.
+    static func leadingTrim(of text: String) -> LeadingTrim {
+        let ns = text as NSString
+        var index = 0
+        var droppedLines = 0
+        var indent = 0
+        while index < ns.length {
+            let unit = ns.character(at: index)
+            guard let scalar = Unicode.Scalar(unit), CharacterSet.whitespacesAndNewlines.contains(scalar) else { break }
+            if unit == 0x0D, index + 1 < ns.length, ns.character(at: index + 1) == 0x0A {
+                index += 1
+                continue
+            }
+            if unit == 0x0A || unit == 0x0D {
+                droppedLines += 1
+                indent = 0
+            } else {
+                indent += 1
+            }
+            index += 1
+        }
+        return LeadingTrim(droppedLines: droppedLines, indent: indent)
+    }
+
     /// Splits `attributed`'s `.foregroundColor` runs onto one array per line
     /// (split on `"\n"`), each entry's ranges relative to the start of that line.
     static func colorRunsByLine(in attributed: NSAttributedString) -> [[LineColorRun]] {
@@ -56,6 +93,7 @@ enum DiffSyntaxHighlighter {
         toRowIndices rowIndices: [Int],
         rowTextLengths: [Int],
         rowRanges: [NSRange],
+        leadingIndent: Int = 0,
         in result: NSMutableAttributedString
     ) {
         for (lineIndex, rowIndex) in rowIndices.enumerated() {
@@ -63,11 +101,15 @@ enum DiffSyntaxHighlighter {
                   rowIndex < rowRanges.count, rowIndex < rowTextLengths.count else { continue }
             let runs = colorRunsByLine[lineIndex]
             guard !runs.isEmpty else { continue }
+            // Only the first surviving line lost indentation to the trim; every
+            // later line's runs are already relative to its own start.
+            let indentShift = lineIndex == 0 ? leadingIndent : 0
             let rowRange = rowRanges[rowIndex]
             let rowTextLength = rowTextLengths[rowIndex]
             for run in runs {
-                guard run.range.location + run.range.length <= rowTextLength else { continue }
-                let target = NSRange(location: rowRange.location + run.range.location, length: run.range.length)
+                let shiftedLocation = run.range.location + indentShift
+                guard shiftedLocation + run.range.length <= rowTextLength else { continue }
+                let target = NSRange(location: rowRange.location + shiftedLocation, length: run.range.length)
                 guard target.location + target.length <= result.length else { continue }
                 result.addAttribute(.foregroundColor, value: run.color, range: target)
             }

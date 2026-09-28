@@ -636,14 +636,14 @@ struct DiffPaneView: View {
     private struct RenderKey: Equatable {
         let filePath: String
         let diffText: String
-        let isDark: Bool
+        let palette: BSidePalette
     }
 
     private static let highlighter = Highlight()
 
     var body: some View {
         DiffTextView(attributedText: displayed, palette: palette)
-            .task(id: RenderKey(filePath: filePath, diffText: diffText, isDark: palette.isDark)) {
+            .task(id: RenderKey(filePath: filePath, diffText: diffText, palette: palette)) {
                 await render()
             }
     }
@@ -658,8 +658,11 @@ struct DiffPaneView: View {
         let newRowIndices = rows.indices.filter { rows[$0].newLineNumber != nil }
         guard !oldRowIndices.isEmpty || !newRowIndices.isEmpty else { return }
 
-        let oldText = oldRowIndices.map { rows[$0].text }.joined(separator: "\n")
-        let newText = newRowIndices.map { rows[$0].text }.joined(separator: "\n")
+        // Strip stray `\r` (git preserves it as line content for CRLF-sourced
+        // files) so it never inflates the leading-whitespace run `leadingTrim`
+        // measures below.
+        let oldText = oldRowIndices.map { rows[$0].text.replacingOccurrences(of: "\r", with: "") }.joined(separator: "\n")
+        let newText = newRowIndices.map { rows[$0].text.replacingOccurrences(of: "\r", with: "") }.joined(separator: "\n")
         let mode: HighlightMode = DiffLanguageDetector.language(forPath: filePath).map { .languageIgnoreIllegal($0) } ?? .automatic
         let colors = DiffSyntaxHighlighter.colors(isDark: palette.isDark)
 
@@ -674,15 +677,19 @@ struct DiffPaneView: View {
         let rowTextLengths = rows.map { ($0.text as NSString).length }
         let colored = NSMutableAttributedString(attributedString: plain)
         if let old {
+            let trim = DiffSyntaxHighlighter.leadingTrim(of: oldText)
             DiffSyntaxHighlighter.applyColorRuns(
                 DiffSyntaxHighlighter.colorRunsByLine(in: old),
-                toRowIndices: oldRowIndices, rowTextLengths: rowTextLengths, rowRanges: rowRanges, in: colored
+                toRowIndices: Array(oldRowIndices.dropFirst(trim.droppedLines)),
+                rowTextLengths: rowTextLengths, rowRanges: rowRanges, leadingIndent: trim.indent, in: colored
             )
         }
         if let new {
+            let trim = DiffSyntaxHighlighter.leadingTrim(of: newText)
             DiffSyntaxHighlighter.applyColorRuns(
                 DiffSyntaxHighlighter.colorRunsByLine(in: new),
-                toRowIndices: newRowIndices, rowTextLengths: rowTextLengths, rowRanges: rowRanges, in: colored
+                toRowIndices: Array(newRowIndices.dropFirst(trim.droppedLines)),
+                rowTextLengths: rowTextLengths, rowRanges: rowRanges, leadingIndent: trim.indent, in: colored
             )
         }
         guard !Task.isCancelled else { return }
