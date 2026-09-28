@@ -20,9 +20,9 @@ Alternatives, in order of preference:
 
 ## Icon
 
-`assets/icon/` — a risograph half-LP rising out of a flat orange field, tonearm
-dropping in from the top right. Only the top half of the disc is in frame; the
-rest of the sheet is orange.
+`assets/icon/` — a risograph half-LP rising out of a flat purple field, a cream
+tonearm dropping in from the top right. Only the top half of the disc is in
+frame; the rest of the sheet is purple.
 
     assets/icon/icon.py        draws it (riso print simulator in ~/Claude/fun/riso)
     assets/icon/mask.py        insets the art into Apple's 824/1024 rounded-rect
@@ -37,7 +37,7 @@ grain, registration drift and groove wobble.
 
 Rules: never redraw the mark flat — the grain, the off-register paper halo and
 the halftone in the orange *are* the mark. Don't put type inside it. Don't
-recolour the field; orange `#FF6C2F` is the brand.
+recolour the field; purple `#765AB2` is the brand.
 
 ## Theme
 
@@ -47,10 +47,11 @@ theme, so these files set both terminal and chrome colours.
 
 | Role | Hex | Where |
 | --- | --- | --- |
-| Orange (brand) | `#FF6C2F` | cursor, running task, primary accent |
+| Purple (brand) | `#765AB2` | cursor, primary accent, icon field |
+| Orange | `#FF6C2F` | secondary ink |
 | Paper | `#F3EEE2` | light background, dark-mode foreground |
 | Near-black | `#16141C` | dark background |
-| Ink navy | `#26283E` | light foreground, tonearm |
+| Ink navy | `#26283E` | light foreground, icon halftone |
 | Pink | `#FF48B0` | selection highlight, label |
 | Teal | `#00A995` | clean/passing state |
 | Red | `#F03C3E` | conflict, failure |

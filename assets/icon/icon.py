@@ -1,4 +1,4 @@
-"""Render the app icon: a risograph half-LP rising out of a flat orange field.
+"""Render the app icon: a risograph half-LP rising out of a flat purple field.
 
 Reuses the riso print simulator in ~/Claude/fun/riso (engine.py) — spot inks,
 paper knockout, halftone, grain — so the icon is printed rather than drawn.
@@ -20,13 +20,13 @@ S = 1024  # design resolution; everything below is in these units
 
 
 def icon(c, arm=True, seed=7):
-    """Top half of the record, cut by the bottom edge, orange above."""
+    """Top half of the record, cut by the bottom edge, purple above."""
     sd = seed
     cx, cy, R = S * 0.50, S * 0.94, S * 0.465
 
-    bg = c.ink("orange")
+    bg = c.ink("purple")
     bg.rect(-40, -40, S + 40, S + 40)
-    shade = c.ink("wine")   # light screen in the top corners so the field is not dead flat
+    shade = c.ink("ink")   # light screen in the top corners so the field is not dead flat
     shade.halftone([(-40, -40), (S + 40, -40), (S + 40, S + 40), (-40, S + 40)],
                    (S * 0.5, -S * 0.15), (S * 0.5, S * 0.60), seed=sd * 3 + 51,
                    pitch=19, d0=0.40, d1=0.0, vmax=105)
@@ -60,17 +60,13 @@ def icon(c, arm=True, seed=7):
     marks.stroke(arc_pts(cx, cy, lr * 0.66, math.pi + 0.55, 2 * math.pi - 0.55, 26),
                  w=10, seed=sd * 83 + 2, amp=2.0)
 
-    if arm:   # tonearm coming in from the top right, halo'd clear of the grooves
+    if arm:   # cream tonearm coming in from the top right, knocked out of the field
         pivot = (S * 1.14, S * 0.02)
         head = (S * 0.66, S * 0.56)
         kn = c.paper_ink()
         kn.stroke([pivot, head], w=40, seed=sd * 96 + 4, amp=2.0)
         kn.circle(head[0], head[1], 46, seed=sd * 102 + 6, amp=2.4)
         kn.circle(pivot[0], pivot[1], 104, seed=sd * 100 + 5, amp=2.4)
-        a = c.ink("ink")
-        a.stroke([pivot, head], w=28, seed=sd * 97 + 4, amp=1.8)
-        a.circle(head[0], head[1], 38, seed=sd * 103 + 6, amp=2.2)
-        a.circle(pivot[0], pivot[1], 94, seed=sd * 101 + 5, amp=2.4)
 
 
 def main():
