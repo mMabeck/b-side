@@ -69,6 +69,29 @@ struct UnifiedDiffRendererTests {
         #expect(attributed.length > 0)
         #expect(elapsed < 2.0)
     }
+
+    private static let addedFileDiff = "diff --git a/new.txt b/new.txt\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,12 @@\n"
+        + (1...12).map { "+line \($0)" }.joined(separator: "\n")
+    private static let deletedFileDiff = "diff --git a/old.txt b/old.txt\n--- a/old.txt\n+++ /dev/null\n@@ -1,3 +0,0 @@\n"
+        + (1...3).map { "-line \($0)" }.joined(separator: "\n")
+    private static let modifiedThreeDigitDiff = "diff --git a/mod.txt b/mod.txt\n--- a/mod.txt\n+++ b/mod.txt\n@@ -98,3 +98,3 @@\n line 98\n-line 99\n+line ninety-nine\n line 100"
+
+    @Test("Gutter metrics size each column to the largest line number and collapse a column that never appears", arguments: [
+        (addedFileDiff, 0, 2),
+        (deletedFileDiff, 1, 0),
+        (modifiedThreeDigitDiff, 3, 3),
+    ])
+    private func gutterMetricsCollapseEmptySides(diff: String, oldDigits: Int, newDigits: Int) {
+        let rows = UnifiedDiffRenderer.parse(diff)
+        let metrics = UnifiedDiffRenderer.gutterMetrics(for: rows)
+        #expect(metrics.oldDigitCount == oldDigits)
+        #expect(metrics.newDigitCount == newDigits)
+
+        // The attributed-string-reading variant must agree, since the gutter view reads it back that way.
+        let attributed = UnifiedDiffRenderer.render(diff, palette: palette)
+        let attributedMetrics = UnifiedDiffRenderer.gutterMetrics(in: attributed)
+        #expect(attributedMetrics == metrics)
+    }
 }
 
 @MainActor

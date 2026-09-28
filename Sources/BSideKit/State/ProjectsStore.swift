@@ -48,11 +48,16 @@ public final class ProjectsStore {
     /// Task ids with a live terminal that have output since last viewed — the sidebar's blue "unread" dot. In-memory only.
     public private(set) var unreadTaskIDs: Set<Int64> = []
 
-    /// Idempotent since `/agent/{taskId}/busy` may repeat. Clears a question's red
-    /// state too: Pi reporting busy means it resumed, so the question was answered.
+    /// Idempotent since `/agent/{taskId}/busy` may repeat: only a genuine
+    /// not-busy -> busy transition bumps ordering, or a burst of repeated
+    /// busy pings mid-task would reorder the Active section several times a
+    /// second. Clears a question's red state too: Pi reporting busy means it
+    /// resumed, so the question was answered.
     public func setTaskBusy(_ taskId: Int64) {
+        let wasAlreadyBusy = busyTaskIDs.contains(taskId)
         busyTaskIDs.insert(taskId)
         taskIDsNeedingAttention.remove(taskId)
+        guard !wasAlreadyBusy else { return }
         bumpTaskActivity(taskId)
     }
 
@@ -204,18 +209,11 @@ public final class ProjectsStore {
     }
 
     /// Persists `lastActivityAt` asynchronously and moves `id` to the front
-    /// of `openTerminalTaskIDs` if open. Called only for real agent events, never for mere selection.
-    ///
-    /// Runs with animations disabled: agent activity can reorder the Active
-    /// section several times a second, and `List`'s implicit row-move
-    /// animation can't always settle between bumps, leaving one row's content
-    /// composited under another's mid-transition.
+    /// of `openTerminalTaskIDs` if open. Called only for real agent events
+    /// (never mere selection) and only on a genuine state transition by every
+    /// caller, so it can't fire faster than those transitions occur.
     public func bumpTaskActivity(_ id: Int64) {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            openTerminalTaskIDs = Self.movingToFront(id, in: openTerminalTaskIDs)
-        }
+        openTerminalTaskIDs = Self.movingToFront(id, in: openTerminalTaskIDs)
         Task { [database] in
             try? await database.dbQueue.write { db in
                 guard var task = try TaskRecord.fetchOne(db, key: id) else { return }

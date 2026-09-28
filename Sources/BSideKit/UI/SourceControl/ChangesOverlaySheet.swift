@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 /// File tree on the left, selected file's diff on the right. Unlike `DiffSheet`
@@ -13,8 +14,11 @@ struct ChangesOverlaySheet: View {
     @State private var treeWidthDragStart: CGFloat?
     @State private var isHoveringDivider = false
     @State private var resizeCursorPushed = false
+    @State private var vsCodePath: String?
     @ObservedObject private var theme: GhosttyResolvedTheme = .shared
     @Environment(\.dismiss) private var dismiss
+
+    private let vsCodeDiffLauncher = VSCodeDiffLauncher()
 
     private static let treeWidthRange: ClosedRange<CGFloat> = 200...360
 
@@ -47,7 +51,10 @@ struct ChangesOverlaySheet: View {
         .themedWindow(theme.palette)
         .resizableSheetWindow()
         .onExitCommand { dismiss() }
-        .onAppear { store.present(task: task) }
+        .onAppear {
+            store.present(task: task)
+            vsCodePath = vsCodeDiffLauncher.resolveCodePath()
+        }
         .onDisappear { store.dismiss() }
     }
 
@@ -74,24 +81,26 @@ struct ChangesOverlaySheet: View {
     }
 
     private var infoBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if let branchName = store.branchName {
                 Text(branchName)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.body.weight(.medium))
             }
             if let baseRefLabel = store.baseRefLabel {
                 Text("vs \(Self.shortRef(baseRefLabel))")
-                    .font(.system(size: 11))
+                    .font(.body)
             }
             Spacer()
             if !store.files.isEmpty {
                 Text("\(store.files.count) file\(store.files.count == 1 ? "" : "s"), +\(store.totalAdded) \u{2212}\(store.totalRemoved)")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(.body, design: .monospaced))
             }
         }
         .foregroundStyle(theme.palette.textSecondary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        // Leading inset matches the system title's indent past the window's traffic lights.
+        .padding(.leading, 80)
+        .padding(.trailing, 16)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .contain)
     }
 
@@ -158,7 +167,6 @@ struct ChangesOverlaySheet: View {
             }
         }
         .listStyle(.sidebar)
-        .controlSize(.small)
     }
 
     /// A plain `Divider()` with a drag gesture, not `HSplitView` (AppKit
@@ -212,21 +220,21 @@ struct ChangesOverlaySheet: View {
     private func fileRow(_ file: ChangesTreeFile) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "doc")
-                .font(.system(size: 11))
+                .font(.body)
                 .foregroundStyle(theme.palette.textSecondary)
             Text(SourceControlRowView.badgeLetter(file.kind))
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(SourceControlRowView.badgeColor(file.kind, palette: theme.palette))
-                .frame(width: 14, alignment: .center)
+                .frame(width: 16, alignment: .center)
             Text((file.path as NSString).lastPathComponent)
-                .font(.system(size: 12))
+                .font(.body)
                 .foregroundStyle(theme.palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)
             fileCounts(file)
         }
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel(for: file))
     }
@@ -235,7 +243,7 @@ struct ChangesOverlaySheet: View {
     private func fileCounts(_ file: ChangesTreeFile) -> some View {
         if file.isBinary {
             Text("bin")
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(.callout, design: .monospaced))
                 .foregroundStyle(theme.palette.textDisabled)
         } else {
             HStack(spacing: 4) {
@@ -246,7 +254,7 @@ struct ChangesOverlaySheet: View {
                     Text("\u{2212}\(removed)").foregroundStyle(theme.palette.statusError)
                 }
             }
-            .font(.system(.caption, design: .monospaced))
+            .font(.system(.callout, design: .monospaced))
         }
     }
 
@@ -268,10 +276,10 @@ struct ChangesOverlaySheet: View {
     private func folderRow(_ folder: ChangesTreeNode.Folder) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "folder")
-                .font(.system(size: 11))
+                .font(.body)
                 .foregroundStyle(theme.palette.textSecondary)
             Text(folder.displayName)
-                .font(.system(size: 12, weight: .medium))
+                .font(.body.weight(.medium))
                 .foregroundStyle(theme.palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -284,9 +292,9 @@ struct ChangesOverlaySheet: View {
                     Text("\u{2212}\(folder.linesRemoved)").foregroundStyle(theme.palette.statusError)
                 }
             }
-            .font(.system(.caption, design: .monospaced))
+            .font(.system(.callout, design: .monospaced))
         }
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(folder.displayName), folder, \(folder.linesAdded) additions, \(folder.linesRemoved) deletions")
     }
@@ -307,15 +315,15 @@ struct ChangesOverlaySheet: View {
     }
 
     private func diffHeader(for file: ChangesTreeFile) -> some View {
-        HStack {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.path)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(theme.palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(SourceControlRowView.kindDescription(file.kind))
-                    .font(.system(size: 10))
+                    .font(.subheadline)
                     .foregroundStyle(theme.palette.textSecondary)
             }
             Spacer()
@@ -325,13 +333,17 @@ struct ChangesOverlaySheet: View {
             )
             .toggleStyle(.checkbox)
             .help("Show the entire file, not just the changed lines")
+            if let vsCodePath {
+                Button("Open Diff in VS Code") { openDiffInVSCode(file: file, codePath: vsCodePath) }
+                    .buttonStyle(.bordered)
+            }
             if let onOpenInEditor {
                 Button("Open in Editor") { onOpenInEditor(file.path) }
                     .buttonStyle(.bordered)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
     }
 
@@ -344,15 +356,12 @@ struct ChangesOverlaySheet: View {
                 SheetCenteredMessage(message: "Binary file — no text diff", palette: theme.palette)
             } else if diffText.text.isEmpty {
                 SheetCenteredMessage(message: "No changes", palette: theme.palette)
-            } else {
+            } else if let selectedPath = store.selectedPath {
                 VStack(spacing: 0) {
                     if diffText.isTruncated {
                         SheetTruncationBanner(palette: theme.palette)
                     }
-                    DiffTextView(
-                        attributedText: UnifiedDiffRenderer.render(diffText.text, palette: theme.palette),
-                        palette: theme.palette
-                    )
+                    DiffPaneView(diffText: diffText.text, filePath: selectedPath, palette: theme.palette)
                 }
             }
         } else {
@@ -360,6 +369,39 @@ struct ChangesOverlaySheet: View {
         }
     }
 
+    // MARK: - Open Diff in VS Code
+
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "changes-overlay")
+
+    private func openDiffInVSCode(file: ChangesTreeFile, codePath: String) {
+        guard let baseRefLabel = store.baseRefLabel else { return }
+        let worktreeURL = URL(fileURLWithPath: task.worktreePath)
+        let fileName = (file.path as NSString).lastPathComponent
+        let mode = store.mode
+        Task {
+            let baseContent: Data?
+            if file.kind == .added || file.kind == .untracked {
+                baseContent = nil
+            } else {
+                do {
+                    baseContent = try await GitCLI.fileContent(file.origPath ?? file.path, at: baseRefLabel, in: worktreeURL)
+                } catch {
+                    Self.logger.error("Failed to load base content for \(file.path, privacy: .public) at \(baseRefLabel, privacy: .public): \(error, privacy: .public)")
+                    return
+                }
+            }
+            let currentContent: Data?
+            switch VSCodeDiffLauncher.currentSideSource(mode: mode, kind: file.kind) {
+            case .none:
+                currentContent = nil
+            case .worktreeFile:
+                currentContent = try? Data(contentsOf: worktreeURL.appendingPathComponent(file.path))
+            case .gitRef(let ref):
+                currentContent = try? await GitCLI.fileContent(file.path, at: ref, in: worktreeURL)
+            }
+            try? vsCodeDiffLauncher.openDiff(fileName: fileName, baseContent: baseContent, currentContent: currentContent, codePath: codePath)
+        }
+    }
 }
 
 /// Grants `.resizable`, which SwiftUI sheets don't get by default. Mirrors `ThemedWindowModifier`'s `WindowAccessor` pattern.

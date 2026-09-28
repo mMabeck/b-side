@@ -1,4 +1,5 @@
 import AppKit
+import HighlightSwift
 import SwiftUI
 
 /// Pure, side-effect-free parsing and rendering of a unified diff `String`
@@ -110,10 +111,21 @@ enum UnifiedDiffRenderer {
 
     /// One `append` per row rather than per-character lookups, so a 10k+ line diff renders in well under a second.
     static func render(_ diff: String, palette: BSidePalette) -> NSAttributedString {
-        let rows = parse(diff)
+        renderRows(parse(diff), palette: palette).attributed
+    }
+
+    /// Font used for diff body text; shared with the syntax highlighter so highlighted
+    /// runs are measured against the same metrics the base render used.
+    static var bodyFont: NSFont { NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) }
+
+    /// Same as ``render(_:palette:)`` but also returns each row's character range in
+    /// the result, so callers (the syntax highlighter) can overlay colours onto exactly
+    /// the right span without re-deriving row boundaries.
+    static func renderRows(_ rows: [Row], palette: BSidePalette) -> (attributed: NSMutableAttributedString, rowRanges: [NSRange]) {
         let result = NSMutableAttributedString()
-        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        let separatorFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+        var rowRanges: [NSRange] = []
+        let font = bodyFont
+        let separatorFont = NSFont.systemFont(ofSize: 12, weight: .regular)
         let addedBackground = NSColor(palette.statusSuccess).withAlphaComponent(0.14)
         let removedBackground = NSColor(palette.statusError).withAlphaComponent(0.14)
 
@@ -121,6 +133,7 @@ enum UnifiedDiffRenderer {
             if index > 0 {
                 result.append(NSAttributedString(string: "\n", attributes: [.font: font]))
             }
+            let startLocation = result.length
 
             switch row.kind {
             case .separator:
@@ -148,9 +161,11 @@ enum UnifiedDiffRenderer {
                 let text = row.text.isEmpty ? " " : row.text
                 result.append(NSAttributedString(string: text, attributes: attributes))
             }
+
+            rowRanges.append(NSRange(location: startLocation, length: result.length - startLocation))
         }
 
-        return result
+        return (result, rowRanges)
     }
 
     /// Counts additions/deletions by scanning the rendered attributed string, so
@@ -167,6 +182,42 @@ enum UnifiedDiffRenderer {
             }
         }
         return (added, removed)
+    }
+
+    /// Digit-width of the largest old/new line number, `0` when a side never appears
+    /// (an added or deleted file), so the gutter can collapse that column entirely.
+    struct GutterMetrics: Equatable {
+        let oldDigitCount: Int
+        let newDigitCount: Int
+    }
+
+    static func gutterMetrics(for rows: [Row]) -> GutterMetrics {
+        var maxOld = 0
+        var maxNew = 0
+        for row in rows {
+            if let old = row.oldLineNumber { maxOld = max(maxOld, old) }
+            if let new = row.newLineNumber { maxNew = max(maxNew, new) }
+        }
+        return GutterMetrics(
+            oldDigitCount: maxOld > 0 ? String(maxOld).count : 0,
+            newDigitCount: maxNew > 0 ? String(maxNew).count : 0
+        )
+    }
+
+    /// Same as ``gutterMetrics(for:)`` but reads back from a rendered attributed
+    /// string, for callers (the gutter view) that only see the final text.
+    static func gutterMetrics(in attributed: NSAttributedString) -> GutterMetrics {
+        var maxOld = 0
+        var maxNew = 0
+        attributed.enumerateAttribute(.diffLineInfo, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in
+            guard let info = value as? DiffLineGutterInfo else { return }
+            if let old = info.oldLineNumber { maxOld = max(maxOld, old) }
+            if let new = info.newLineNumber { maxNew = max(maxNew, new) }
+        }
+        return GutterMetrics(
+            oldDigitCount: maxOld > 0 ? String(maxOld).count : 0,
+            newDigitCount: maxNew > 0 ? String(maxNew).count : 0
+        )
     }
 
     private static func gutterKind(for rowKind: RowKind) -> DiffLineGutterInfo.Kind {
@@ -261,28 +312,61 @@ private final class DiffRowBackgroundLayoutManager: NSLayoutManager {
 /// scrolls horizontally; repaints on the clip view's bounds changes.
 private final class DiffGutterView: NSView {
     weak var diffTextView: NSTextView?
-    private weak var scrollView: NSScrollView?
+    private weak var scrollView: DiffScrollView?
     var palette: BSidePalette = .fallback {
         didSet { needsDisplay = true }
     }
 
-    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    /// Set whenever the diff text changes; a collapsed (all-zero) side omits that
+    /// column entirely instead of reserving empty space for it.
+    var metrics: UnifiedDiffRenderer.GutterMetrics = UnifiedDiffRenderer.GutterMetrics(oldDigitCount: 0, newDigitCount: 0) {
+        didSet {
+            guard metrics != oldValue else { return }
+            scrollView?.gutterLeftInset = preferredWidth
+            scrollView?.tile()
+            needsDisplay = true
+        }
+    }
+
+    private static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     private static let horizontalPadding: CGFloat = 8
-    private static let columnGap: CGFloat = 5
-    private static let digitColumnWidth: CGFloat = {
-        ("00000" as NSString).size(withAttributes: [.font: font]).width
-    }()
+    private static let columnGap: CGFloat = 4
     private static let markerColumnWidth: CGFloat = {
         ("\u{2212}" as NSString).size(withAttributes: [.font: font]).width
     }()
 
-    static var preferredWidth: CGFloat {
-        horizontalPadding * 2 + columnGap * 2 + digitColumnWidth * 2 + markerColumnWidth
+    private func digitColumnWidth(_ digitCount: Int) -> CGFloat {
+        guard digitCount > 0 else { return 0 }
+        return (String(repeating: "0", count: digitCount) as NSString).size(withAttributes: [.font: Self.font]).width
+    }
+
+    /// Layout in drawing order: left padding, old column (if any), gap, new column
+    /// (if any), gap, marker column, right padding into the code.
+    private var columnMaxXs: (old: CGFloat?, new: CGFloat?, marker: CGFloat) {
+        var x = Self.horizontalPadding
+        var oldMaxX: CGFloat?
+        var newMaxX: CGFloat?
+        if metrics.oldDigitCount > 0 {
+            x += digitColumnWidth(metrics.oldDigitCount)
+            oldMaxX = x
+        }
+        if metrics.newDigitCount > 0 {
+            if oldMaxX != nil { x += Self.columnGap }
+            x += digitColumnWidth(metrics.newDigitCount)
+            newMaxX = x
+        }
+        if oldMaxX != nil || newMaxX != nil { x += Self.columnGap }
+        let markerMaxX = x + Self.markerColumnWidth
+        return (oldMaxX, newMaxX, markerMaxX)
+    }
+
+    var preferredWidth: CGFloat {
+        columnMaxXs.marker + Self.horizontalPadding
     }
 
     override var isFlipped: Bool { true }
 
-    init(textView: NSTextView, scrollView: NSScrollView) {
+    init(textView: NSTextView, scrollView: DiffScrollView) {
         diffTextView = textView
         self.scrollView = scrollView
         super.init(frame: .zero)
@@ -326,9 +410,7 @@ private final class DiffGutterView: NSView {
             .foregroundColor: NSColor(palette.textDisabled),
         ]
 
-        let oldColumnMaxX = Self.horizontalPadding + Self.digitColumnWidth
-        let newColumnMaxX = oldColumnMaxX + Self.columnGap + Self.digitColumnWidth
-        let markerColumnMaxX = newColumnMaxX + Self.columnGap + Self.markerColumnWidth
+        let (oldColumnMaxX, newColumnMaxX, markerColumnMaxX) = columnMaxXs
 
         func drawRightAligned(_ string: String, maxX: CGFloat, lineOriginY: CGFloat, lineHeight: CGFloat) {
             guard !string.isEmpty else { return }
@@ -346,10 +428,10 @@ private final class DiffGutterView: NSView {
             let lineOriginInTextView = NSPoint(x: 0, y: fragmentRect.minY + textView.textContainerInset.height)
             let lineOriginInGutter = self.convert(lineOriginInTextView, from: textView)
 
-            if let old = info.oldLineNumber {
+            if let old = info.oldLineNumber, let oldColumnMaxX {
                 drawRightAligned(String(old), maxX: oldColumnMaxX, lineOriginY: lineOriginInGutter.y, lineHeight: fragmentRect.height)
             }
-            if let new = info.newLineNumber {
+            if let new = info.newLineNumber, let newColumnMaxX {
                 drawRightAligned(String(new), maxX: newColumnMaxX, lineOriginY: lineOriginInGutter.y, lineHeight: fragmentRect.height)
             }
             let marker: String
@@ -447,7 +529,7 @@ struct DiffTextView: NSViewRepresentable {
         textView.isSelectable = true
         textView.isRichText = false
         textView.drawsBackground = true
-        textView.textContainerInset = NSSize(width: 12, height: 8)
+        textView.textContainerInset = NSSize(width: 6, height: 8)
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
@@ -466,8 +548,9 @@ struct DiffTextView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
 
-        scrollView.gutterLeftInset = DiffGutterView.preferredWidth
         let gutter = DiffGutterView(textView: textView, scrollView: scrollView)
+        gutter.metrics = UnifiedDiffRenderer.gutterMetrics(in: attributedText)
+        scrollView.gutterLeftInset = gutter.preferredWidth
         scrollView.gutterView = gutter
         scrollView.addSubview(gutter)
         scrollView.tile()
@@ -494,6 +577,7 @@ struct DiffTextView: NSViewRepresentable {
         apply(palette: palette, to: textView, scrollView: scrollView, gutter: gutter)
         if textView.attributedString() != attributedText {
             textView.textStorage?.setAttributedString(attributedText)
+            gutter?.metrics = UnifiedDiffRenderer.gutterMetrics(in: attributedText)
             updateAccessibilityLabel(textView: textView)
             gutter?.needsDisplay = true
             scrollToStart(scrollView)
@@ -532,5 +616,89 @@ struct DiffTextView: NSViewRepresentable {
         textView.setAccessibilityLabel(
             "Diff, \(added) addition\(added == 1 ? "" : "s"), \(removed) deletion\(removed == 1 ? "" : "s")"
         )
+    }
+}
+
+/// Renders a unified diff, showing the plain (uncoloured) result immediately and
+/// layering in `HighlightSwift` token colours once ready. Reconstructs the old and
+/// new side of the diff from the parsed rows and highlights each independently so
+/// multi-line constructs (docstrings, block comments) colour correctly even where a
+/// hunk boundary would otherwise cut them off. Highlighting runs off the main thread
+/// via `Task`; SwiftUI's `.task(id:)` cancels a stale pass when the selected file
+/// (or diff text, or the palette's light/dark theme) changes.
+struct DiffPaneView: View {
+    let diffText: String
+    let filePath: String
+    let palette: BSidePalette
+
+    @State private var displayed = NSAttributedString()
+
+    private struct RenderKey: Equatable {
+        let filePath: String
+        let diffText: String
+        let palette: BSidePalette
+    }
+
+    private static let highlighter = Highlight()
+
+    var body: some View {
+        DiffTextView(attributedText: displayed, palette: palette)
+            .task(id: RenderKey(filePath: filePath, diffText: diffText, palette: palette)) {
+                await render()
+            }
+    }
+
+    private func render() async {
+        let rows = UnifiedDiffRenderer.parse(diffText)
+        let (plain, rowRanges) = UnifiedDiffRenderer.renderRows(rows, palette: palette)
+        displayed = plain
+        guard rows.count <= DiffSyntaxHighlighter.maxHighlightableRowCount else { return }
+
+        let oldRowIndices = rows.indices.filter { rows[$0].oldLineNumber != nil }
+        let newRowIndices = rows.indices.filter { rows[$0].newLineNumber != nil }
+        guard !oldRowIndices.isEmpty || !newRowIndices.isEmpty else { return }
+
+        // Strip stray `\r` (git preserves it as line content for CRLF-sourced
+        // files) so it never inflates the leading-whitespace run `leadingTrim`
+        // measures below.
+        let oldText = oldRowIndices.map { rows[$0].text.replacingOccurrences(of: "\r", with: "") }.joined(separator: "\n")
+        let newText = newRowIndices.map { rows[$0].text.replacingOccurrences(of: "\r", with: "") }.joined(separator: "\n")
+        let mode: HighlightMode = DiffLanguageDetector.language(forPath: filePath).map { .languageIgnoreIllegal($0) } ?? .automatic
+        let colors = DiffSyntaxHighlighter.colors(isDark: palette.isDark)
+
+        // Sequential, not `async let`: both calls funnel through the same `HLJS`
+        // actor anyway, and returning `NSAttributedString` (non-Sendable) across a
+        // concurrent child task's boundary isn't allowed under strict concurrency.
+        let old = await Self.highlight(oldText, mode: mode, colors: colors)
+        guard !Task.isCancelled else { return }
+        let new = await Self.highlight(newText, mode: mode, colors: colors)
+        guard !Task.isCancelled else { return }
+
+        let rowTextLengths = rows.map { ($0.text as NSString).length }
+        let colored = NSMutableAttributedString(attributedString: plain)
+        if let old {
+            let trim = DiffSyntaxHighlighter.leadingTrim(of: oldText)
+            DiffSyntaxHighlighter.applyColorRuns(
+                DiffSyntaxHighlighter.colorRunsByLine(in: old),
+                toRowIndices: Array(oldRowIndices.dropFirst(trim.droppedLines)),
+                rowTextLengths: rowTextLengths, rowRanges: rowRanges, leadingIndent: trim.indent, in: colored
+            )
+        }
+        if let new {
+            let trim = DiffSyntaxHighlighter.leadingTrim(of: newText)
+            DiffSyntaxHighlighter.applyColorRuns(
+                DiffSyntaxHighlighter.colorRunsByLine(in: new),
+                toRowIndices: Array(newRowIndices.dropFirst(trim.droppedLines)),
+                rowTextLengths: rowTextLengths, rowRanges: rowRanges, leadingIndent: trim.indent, in: colored
+            )
+        }
+        guard !Task.isCancelled else { return }
+        displayed = colored
+    }
+
+    private static func highlight(_ text: String, mode: HighlightMode, colors: HighlightColors) async -> NSAttributedString? {
+        guard !text.isEmpty else { return nil }
+        guard let result = try? await highlighter.request(text, mode: mode, colors: colors) else { return nil }
+        return NSAttributedString(result.attributedText)
     }
 }
