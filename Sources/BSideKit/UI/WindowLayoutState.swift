@@ -32,13 +32,12 @@ public final class WindowLayoutState: ObservableObject {
         terminalDrawerCollapsed = defaults.object(forKey: Keys.terminalDrawer) as? Bool ?? true
     }
 
-    /// Wrapped here, not at each call site, so every trigger animates identically.
+    /// No `withAnimation` for either sidebar: `NavigationSplitView` and `.inspector`
+    /// animate themselves, and a SwiftUI animation on top desyncs them under rapid toggling.
     public func toggleLeftSidebar() {
-        withAnimation(.easeInOut(duration: 0.18)) { leftSidebarCollapsed.toggle() }
+        leftSidebarCollapsed.toggle()
     }
 
-    /// Not wrapped in `withAnimation` like the other two: `.inspector` animates
-    /// its own transition, and imposing a custom curve on top made this side feel unlike the AppKit-animated left column.
     public func toggleRightSidebar() {
         rightSidebarCollapsed.toggle()
     }

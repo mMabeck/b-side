@@ -19,8 +19,9 @@ public struct ContentView: View {
             get: { layout.leftSidebarCollapsed ? .detailOnly : .all },
             set: { newValue in
                 let collapsed = newValue == .detailOnly
-                guard collapsed != layout.leftSidebarCollapsed else { return }
-                layout.toggleLeftSidebar()
+                if collapsed != layout.leftSidebarCollapsed {
+                    layout.leftSidebarCollapsed = collapsed
+                }
             }
         )
     }
@@ -30,8 +31,9 @@ public struct ContentView: View {
         Binding(
             get: { !layout.rightSidebarCollapsed },
             set: { isPresented in
-                guard isPresented == layout.rightSidebarCollapsed else { return }
-                layout.toggleRightSidebar()
+                if isPresented == layout.rightSidebarCollapsed {
+                    layout.rightSidebarCollapsed = !isPresented
+                }
             }
         )
     }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Real View-menu commands for the three collapsible chrome regions, per
@@ -12,9 +13,14 @@ public struct WindowLayoutCommands: Commands {
     public init() {}
 
     public var body: some Commands {
-        CommandGroup(after: .sidebar) {
+        CommandGroup(replacing: .sidebar) {
             Button(layout.leftSidebarCollapsed ? "Show Left Sidebar" : "Hide Left Sidebar") {
-                layout.toggleLeftSidebar()
+                // AppKit's own toggle survives rapid repeats; flipping SwiftUI state raced
+                // the split view's animation and its stale visibility write-back.
+                let toggle = #selector(NSSplitViewController.toggleSidebar(_:))
+                if !NSApp.sendAction(toggle, to: nil, from: nil) {
+                    layout.toggleLeftSidebar()
+                }
             }
             .keyboardShortcut(WindowLayoutShortcut.leftSidebar)
 
