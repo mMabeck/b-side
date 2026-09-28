@@ -397,9 +397,9 @@ extension GitCLI {
 
     /// Per-file counterpart to `workingTreeChanges`; untracked files go through `diffForUntracked` instead.
     public static func workingTreeDiff(
-        for filePath: String, origPath: String? = nil, against ref: String, at path: URL
+        for filePath: String, origPath: String? = nil, against ref: String, fullFile: Bool = false, at path: URL
     ) async throws -> DiffText {
-        var arguments = ["--literal-pathspecs", "diff", ref, "--"]
+        var arguments = ["--literal-pathspecs", "diff"] + contextArguments(fullFile: fullFile) + [ref, "--"]
         if let origPath { arguments.append(origPath) }
         arguments.append(filePath)
         let data = try await run(arguments, in: path)
@@ -407,6 +407,11 @@ extension GitCLI {
     }
 
     // MARK: - Diffs
+
+    // git has no "whole file" flag; a context larger than any real file yields one hunk spanning it.
+    private static func contextArguments(fullFile: Bool) -> [String] {
+        fullFile ? ["--unified=\(Int32.max)"] : []
+    }
 
     /// The diff for a single file, staged or unstaged against the working tree.
     public static func diff(for filePath: String, staged: Bool, at path: URL) async throws -> DiffText {
@@ -438,9 +443,9 @@ extension GitCLI {
 
     /// The diff for a single file's committed changes since `baseline`.
     public static func branchDiff(
-        for filePath: String, origPath: String? = nil, since baseline: String, at path: URL
+        for filePath: String, origPath: String? = nil, since baseline: String, fullFile: Bool = false, at path: URL
     ) async throws -> DiffText {
-        var arguments = ["--literal-pathspecs", "diff", "\(baseline)..HEAD", "--"]
+        var arguments = ["--literal-pathspecs", "diff"] + contextArguments(fullFile: fullFile) + ["\(baseline)..HEAD", "--"]
         if let origPath { arguments.append(origPath) }
         arguments.append(filePath)
         let data = try await run(arguments, in: path)

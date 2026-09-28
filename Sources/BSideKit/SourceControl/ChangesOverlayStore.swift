@@ -41,6 +41,8 @@ public final class ChangesOverlayStore {
     /// The task's baseline for `.all`/`.committed`, `"HEAD"` for `.uncommitted`.
     /// `nil` only when a baseline couldn't be resolved.
     public private(set) var baseRefLabel: String?
+    /// Diffs with the whole file as context instead of only the changed hunks.
+    public private(set) var showsFullFile = false
 
     public var totalAdded: Int { files.reduce(0) { $0 + ($1.linesAdded ?? 0) } }
     public var totalRemoved: Int { files.reduce(0) { $0 + ($1.linesRemoved ?? 0) } }
@@ -86,6 +88,12 @@ public final class ChangesOverlayStore {
         guard newMode != mode else { return }
         mode = newMode
         Task { await refresh() }
+    }
+
+    public func setShowsFullFile(_ newValue: Bool) {
+        guard newValue != showsFullFile else { return }
+        showsFullFile = newValue
+        Task { await loadDiff() }
     }
 
     /// No-op if already selected, or if `path` is a folder row's id (folders have no diff of their own).
@@ -187,12 +195,12 @@ public final class ChangesOverlayStore {
                 case .all, .uncommitted:
                     let ref = baseRefLabel ?? "HEAD"
                     diff = try await GitCLI.workingTreeDiff(
-                        for: selectedPath, origPath: file.origPath, against: ref, at: worktreeURL
+                        for: selectedPath, origPath: file.origPath, against: ref, fullFile: showsFullFile, at: worktreeURL
                     )
                 case .committed:
                     guard let baseline = baseRefLabel else { return }
                     diff = try await GitCLI.branchDiff(
-                        for: selectedPath, origPath: file.origPath, since: baseline, at: worktreeURL
+                        for: selectedPath, origPath: file.origPath, since: baseline, fullFile: showsFullFile, at: worktreeURL
                     )
                 }
             }

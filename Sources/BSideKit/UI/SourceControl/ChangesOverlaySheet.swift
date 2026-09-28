@@ -51,10 +51,10 @@ struct ChangesOverlaySheet: View {
         .onDisappear { store.dismiss() }
     }
 
-    private static let minSize = CGSize(width: 900, height: 600)
+    private static let minSize = CGSize(width: 1000, height: 600)
     private static var idealSize: CGSize {
-        guard let frame = NSScreen.main?.visibleFrame else { return CGSize(width: 1200, height: 800) }
-        return CGSize(width: max(minSize.width, frame.width * 0.8), height: max(minSize.height, frame.height * 0.8))
+        guard let frame = NSScreen.main?.visibleFrame else { return CGSize(width: 1400, height: 800) }
+        return CGSize(width: max(minSize.width, frame.width * 0.92), height: max(minSize.height, frame.height * 0.8))
     }
 
     // MARK: - Header
@@ -319,6 +319,12 @@ struct ChangesOverlaySheet: View {
                     .foregroundStyle(theme.palette.textSecondary)
             }
             Spacer()
+            Toggle(
+                "Full File",
+                isOn: Binding(get: { store.showsFullFile }, set: { store.setShowsFullFile($0) })
+            )
+            .toggleStyle(.checkbox)
+            .help("Show the entire file, not just the changed lines")
             if let onOpenInEditor {
                 Button("Open in Editor") { onOpenInEditor(file.path) }
                     .buttonStyle(.bordered)
@@ -326,8 +332,7 @@ struct ChangesOverlaySheet: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(file.path), \(SourceControlRowView.kindDescription(file.kind))")
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder
