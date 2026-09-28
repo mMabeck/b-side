@@ -14,13 +14,15 @@ struct UnifiedDiffRendererTests {
     index 1234567..89abcde 100644
     --- a/foo.swift
     +++ b/foo.swift
-    @@ -1,3 +1,3 @@
+    @@ -1,2 +1,2 @@
      let unchanged = 1
     -let removed = 2
     +let added = 2
-    @@ -10,2 +10,3 @@ func bar() {
+    @@ -10,3 +10,4 @@ func bar() {
      let tail = 1
     +let inserted = 2
+    --- old comment
+    +++ new thing
      let last = 3
     """
 
@@ -31,11 +33,15 @@ struct UnifiedDiffRendererTests {
         (rowIndex: 3, kind: UnifiedDiffRenderer.RowKind.separator, old: nil, new: nil, text: "⋯ func bar() {"),
         (rowIndex: 4, kind: UnifiedDiffRenderer.RowKind.context, old: 10, new: 10, text: "let tail = 1"),
         (rowIndex: 5, kind: UnifiedDiffRenderer.RowKind.added, old: nil, new: 11, text: "let inserted = 2"),
-        (rowIndex: 6, kind: UnifiedDiffRenderer.RowKind.context, old: 11, new: 12, text: "let last = 3"),
+        // A removed/added line whose content itself looks like a "---"/"+++" metadata
+        // header must still be parsed as diff content, not dropped or misnumbered.
+        (rowIndex: 6, kind: UnifiedDiffRenderer.RowKind.removed, old: 11, new: nil, text: "-- old comment"),
+        (rowIndex: 7, kind: UnifiedDiffRenderer.RowKind.added, old: nil, new: 12, text: "++ new thing"),
+        (rowIndex: 8, kind: UnifiedDiffRenderer.RowKind.context, old: 12, new: 13, text: "let last = 3"),
     ])
     private func parsedRow(rowIndex: Int, kind: UnifiedDiffRenderer.RowKind, old: Int?, new: Int?, text: String) {
         let rows = UnifiedDiffRenderer.parse(sampleDiff)
-        #expect(rows.count == 7)
+        #expect(rows.count == 9)
         let row = rows[rowIndex]
         #expect(row.kind == kind)
         #expect(row.oldLineNumber == old)
@@ -95,7 +101,7 @@ struct DiffTextViewLayoutTests {
         diff --git a/foo.swift b/foo.swift
         --- a/foo.swift
         +++ b/foo.swift
-        @@ -1,1 +1,1 @@
+        @@ -1,1 +1,2 @@
         -let removed = 2
         +let added = 2
         """ + "\n+" + String(repeating: "x", count: 500)
@@ -118,5 +124,15 @@ struct DiffTextViewLayoutTests {
         let usedRect = layoutManager.usedRect(for: textContainer)
         #expect(usedRect.width > 0)
         #expect(usedRect.height > 0)
+
+        let diffScrollView = try #require(scrollView as? DiffScrollView)
+        let gutter = try #require(diffScrollView.gutterView)
+        #expect(gutter.frame.height == diffScrollView.bounds.height)
+        #expect(gutter.frame.height > 0)
+
+        window.setContentSize(NSSize(width: 800, height: 700))
+        try await waitUntil { gutter.frame.height == diffScrollView.bounds.height && gutter.frame.height > 0 }
+        #expect(gutter.frame.height == diffScrollView.bounds.height)
+        #expect(gutter.frame.height > 0)
     }
 }

@@ -43,22 +43,39 @@ enum UnifiedDiffRenderer {
         var rows: [Row] = []
         var oldLine = 0
         var newLine = 0
+        var oldRemaining = 0
+        var newRemaining = 0
         var isFirstHunk = true
 
         diff.enumerateLines { line, _ in
-            if isMetadataLine(line) { return }
-            if line.hasPrefix("\\ No newline") { return }
+            let inHunk = oldRemaining > 0 || newRemaining > 0
 
-            if line.hasPrefix("@@") {
-                guard let hunk = parseHunkHeader(line) else { return }
-                oldLine = hunk.oldStart
-                newLine = hunk.newStart
-                let isFileStart = isFirstHunk && hunk.oldStart <= 1 && hunk.newStart <= 1
-                if !isFileStart {
-                    let label = hunk.trailingContext.isEmpty ? "⋯" : "⋯ \(hunk.trailingContext)"
-                    rows.append(Row(kind: .separator, oldLineNumber: nil, newLineNumber: nil, text: label))
+            // Metadata and hunk headers only mean what they look like between hunks;
+            // a removed/added line's content can itself start with "--- "/"+++ ".
+            if !inHunk {
+                if isMetadataLine(line) { return }
+                if line.hasPrefix("\\ No newline") { return }
+
+                if line.hasPrefix("@@") {
+                    guard let hunk = parseHunkHeader(line) else {
+                        rows.append(Row(kind: .separator, oldLineNumber: nil, newLineNumber: nil, text: "⋯"))
+                        isFirstHunk = false
+                        return
+                    }
+                    oldLine = hunk.oldStart
+                    newLine = hunk.newStart
+                    oldRemaining = hunk.oldCount
+                    newRemaining = hunk.newCount
+                    let isFileStart = isFirstHunk && hunk.oldStart <= 1 && hunk.newStart <= 1
+                    if !isFileStart {
+                        let label = hunk.trailingContext.isEmpty ? "⋯" : "⋯ \(hunk.trailingContext)"
+                        rows.append(Row(kind: .separator, oldLineNumber: nil, newLineNumber: nil, text: label))
+                    }
+                    isFirstHunk = false
+                    return
                 }
-                isFirstHunk = false
+
+                // Outside any recognised hunk and not metadata/a header: nothing to render.
                 return
             }
 
@@ -66,18 +83,24 @@ enum UnifiedDiffRenderer {
             case "+":
                 rows.append(Row(kind: .added, oldLineNumber: nil, newLineNumber: newLine, text: String(line.dropFirst())))
                 newLine += 1
+                newRemaining = max(0, newRemaining - 1)
             case "-":
                 rows.append(Row(kind: .removed, oldLineNumber: oldLine, newLineNumber: nil, text: String(line.dropFirst())))
                 oldLine += 1
+                oldRemaining = max(0, oldRemaining - 1)
             case " ":
                 rows.append(Row(kind: .context, oldLineNumber: oldLine, newLineNumber: newLine, text: String(line.dropFirst())))
                 oldLine += 1
                 newLine += 1
+                oldRemaining = max(0, oldRemaining - 1)
+                newRemaining = max(0, newRemaining - 1)
             default:
-                // Outside any recognised hunk (e.g. a stray blank line): show it verbatim as context.
+                // A stray line inside a hunk with no marker: show it verbatim as context.
                 rows.append(Row(kind: .context, oldLineNumber: oldLine, newLineNumber: newLine, text: line))
                 oldLine += 1
                 newLine += 1
+                oldRemaining = max(0, oldRemaining - 1)
+                newRemaining = max(0, newRemaining - 1)
             }
         }
 
@@ -167,12 +190,14 @@ enum UnifiedDiffRenderer {
 
     private struct HunkHeader {
         let oldStart: Int
+        let oldCount: Int
         let newStart: Int
+        let newCount: Int
         let trailingContext: String
     }
 
     private static let hunkHeaderRegex = try! NSRegularExpression(
-        pattern: #"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$"#
+        pattern: #"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$"#
     )
 
     private static func parseHunkHeader(_ line: String) -> HunkHeader? {
@@ -182,9 +207,12 @@ enum UnifiedDiffRenderer {
             guard let stringRange = Range(match.range(at: index), in: line) else { return nil }
             return String(line[stringRange])
         }
-        guard let oldString = group(1), let newString = group(2),
+        // A hunk header's count is omitted when it's 1 (e.g. `@@ -5 +5,2 @@`).
+        guard let oldString = group(1), let newString = group(3),
               let oldStart = Int(oldString), let newStart = Int(newString) else { return nil }
-        return HunkHeader(oldStart: oldStart, newStart: newStart, trailingContext: group(3) ?? "")
+        let oldCount = group(2).flatMap(Int.init) ?? 1
+        let newCount = group(4).flatMap(Int.init) ?? 1
+        return HunkHeader(oldStart: oldStart, oldCount: oldCount, newStart: newStart, newCount: newCount, trailingContext: group(5) ?? "")
     }
 }
 
@@ -263,6 +291,8 @@ private final class DiffGutterView: NSView {
         diffTextView = textView
         self.scrollView = scrollView
         super.init(frame: .zero)
+        // Line numbers/markers are exposed to VoiceOver via a rotor on the text view instead.
+        setAccessibilityElement(false)
         NotificationCenter.default.addObserver(
             self, selector: #selector(scrollPositionDidChange),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
@@ -292,7 +322,9 @@ private final class DiffGutterView: NSView {
         NSColor(palette.surfaceBackground).setFill()
         bounds.fill()
 
-        let visibleRect = scrollView.contentView.bounds
+        var visibleRect = scrollView.contentView.bounds
+        visibleRect.origin.x -= textView.textContainerOrigin.x
+        visibleRect.origin.y -= textView.textContainerOrigin.y
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: Self.font,
@@ -341,14 +373,63 @@ private final class DiffGutterView: NSView {
 /// to do this, but didn't move the clip view's frame in practice here, so `tile()` does it by hand.
 final class DiffScrollView: NSScrollView {
     var gutterLeftInset: CGFloat = 0
+    weak var gutterView: NSView?
+    /// Keeps `NSAccessibilityCustomRotor.itemSearchDelegate` (a weak reference) alive.
+    var rotorSearchDelegates: [NSObject] = []
 
     override func tile() {
         super.tile()
         guard gutterLeftInset > 0 else { return }
+        let width = gutterLeftInset.rounded()
         var clipFrame = contentView.frame
-        clipFrame.origin.x = gutterLeftInset
-        clipFrame.size.width = max(0, bounds.width - gutterLeftInset)
+        clipFrame.origin.x = width
+        clipFrame.size.width = max(0, bounds.width - width)
         contentView.frame = clipFrame
+        gutterView?.frame = NSRect(x: 0, y: 0, width: width, height: bounds.height)
+    }
+}
+
+/// Backs a VoiceOver rotor ("Added lines"/"Removed lines") by walking `.diffLineInfo`
+/// runs in the text storage on demand — the +/- markers only live in the gutter, which
+/// is itself hidden from accessibility, so this is how VoiceOver tells the kinds apart.
+@MainActor
+private final class DiffLineKindRotorDelegate: NSObject, @MainActor NSAccessibilityCustomRotorItemSearchDelegate {
+    private weak var textView: NSTextView?
+    private let kind: UnifiedDiffRenderer.DiffLineGutterInfo.Kind
+
+    init(textView: NSTextView, kind: UnifiedDiffRenderer.DiffLineGutterInfo.Kind) {
+        self.textView = textView
+        self.kind = kind
+    }
+
+    func rotor(
+        _ rotor: NSAccessibilityCustomRotor,
+        resultFor searchParameters: NSAccessibilityCustomRotor.SearchParameters
+    ) -> NSAccessibilityCustomRotor.ItemResult? {
+        guard let textView, let textStorage = textView.textStorage else { return nil }
+        let length = textStorage.length
+        guard length > 0 else { return nil }
+
+        let forward = searchParameters.searchDirection == .next
+        var index: Int
+        if let currentRange = searchParameters.currentItem?.targetRange, currentRange.location != NSNotFound {
+            index = forward ? NSMaxRange(currentRange) : currentRange.location - 1
+        } else {
+            index = forward ? 0 : length - 1
+        }
+
+        while index >= 0, index < length {
+            var effectiveRange = NSRange(location: 0, length: 0)
+            let info = textStorage.attribute(.diffLineInfo, at: index, effectiveRange: &effectiveRange)
+                as? UnifiedDiffRenderer.DiffLineGutterInfo
+            if info?.kind == kind {
+                let result = NSAccessibilityCustomRotor.ItemResult(targetElement: textView)
+                result.targetRange = effectiveRange
+                return result
+            }
+            index = forward ? NSMaxRange(effectiveRange) : effectiveRange.location - 1
+        }
+        return nil
     }
 }
 
@@ -396,10 +477,17 @@ struct DiffTextView: NSViewRepresentable {
         let gutterWidth = DiffGutterView.preferredWidth
         scrollView.gutterLeftInset = gutterWidth
         let gutter = DiffGutterView(textView: textView, scrollView: scrollView)
-        gutter.frame = NSRect(x: 0, y: 0, width: gutterWidth, height: scrollView.bounds.height)
-        gutter.autoresizingMask = [.height]
+        scrollView.gutterView = gutter
         scrollView.addSubview(gutter)
         scrollView.tile()
+
+        let addedDelegate = DiffLineKindRotorDelegate(textView: textView, kind: .added)
+        let removedDelegate = DiffLineKindRotorDelegate(textView: textView, kind: .removed)
+        scrollView.rotorSearchDelegates = [addedDelegate, removedDelegate]
+        textView.setAccessibilityCustomRotors([
+            NSAccessibilityCustomRotor(label: "Added lines", itemSearchDelegate: addedDelegate),
+            NSAccessibilityCustomRotor(label: "Removed lines", itemSearchDelegate: removedDelegate),
+        ])
 
         apply(palette: palette, to: textView, scrollView: scrollView, gutter: gutter)
         textView.textStorage?.setAttributedString(attributedText)
