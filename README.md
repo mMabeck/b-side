@@ -2,23 +2,41 @@
 
 # B-Side
 
-A macOS-only Swift app for running Pi agent sessions. Native AppKit/SwiftUI,
-libghostty for terminals, git worktrees as the organising principle.
+A native macOS app for running several [Pi](https://github.com/earendil-works/pi)
+coding agents side by side without them stepping on each other.
+
+Every task gets its own git branch and worktree, and its own Pi session in a
+real terminal (libghostty). Switch between tasks from the sidebar and each one
+picks up where you left it: the terminal keeps running in the background, and
+reopening the app resumes the same Pi session instead of starting over.
 
 ![B-Side with sample projects and a fresh Pi session](docs/screenshots/pi.png)
 
-Apple Silicon only — the libghostty XCFramework is arm64.
+## What it does
 
-Requires Xcode (not just the Command Line Tools) — the Command Line Tools
-toolchain ships without the Swift Testing frameworks, so `swift test` cannot
-link against it. Check the right one is selected with `xcode-select -p`; it
-should print a path inside `Xcode.app`.
-
-## Screenshots
-
-Subagents a session starts show up as live cards above its terminal:
+- **Projects and tasks.** Add a git repository as a project; each new task
+  branches from it into a separate worktree, so parallel agents never share a
+  working copy.
+- **Pi in a real terminal.** Sessions run in embedded Ghostty terminals and
+  follow your Ghostty theme and font, or a theme you pick in Settings.
+- **Subagents at a glance.** When a session starts subagents, they appear as
+  live cards above its terminal, showing what each one is doing; click a card to
+  watch that agent's own terminal.
+- **Source control built in.** A sidebar shows the task's changes, with
+  staging, commit and push, and a full diff view.
+- **Notifications.** A sound and a macOS notification when Pi finishes or needs
+  an answer, so you can leave it running in the background.
 
 ![A task with two subagents running](docs/screenshots/subagents.png)
+
+## Requirements
+
+macOS 26 on Apple Silicon only — the libghostty XCFramework is arm64.
+
+Building requires Xcode (not just the Command Line Tools) — the Command Line
+Tools toolchain ships without the Swift Testing frameworks, so `swift test`
+cannot link against it. Check the right one is selected with `xcode-select -p`;
+it should print a path inside `Xcode.app`.
 
 ## Build
 
