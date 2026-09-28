@@ -70,7 +70,7 @@ enum TaskTitleGeneratorRealModelAvailability {
         guard binaryCandidates.contains(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return false
         }
-        let modelPath = ("~/Claude/title-gen/models/gguf/qwen3-0.6b-title-Q8_0.gguf" as NSString).expandingTildeInPath
+        let modelPath = ("~/Claude/title-gen/models/gguf/qwen3.5-0.8b-title-Q8_0.gguf" as NSString).expandingTildeInPath
         return FileManager.default.fileExists(atPath: modelPath)
     }
 }

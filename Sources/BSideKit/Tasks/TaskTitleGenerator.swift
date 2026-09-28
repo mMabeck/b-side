@@ -3,7 +3,7 @@ import OSLog
 
 /// Generates a short task title from a user's first pi prompt by running a
 /// fine-tuned local title model (llama.cpp's `llama-completion` binary over
-/// a small Qwen3 gguf), for `ProjectsStore.applyAutoRename` to prefer over
+/// a small Qwen3.5 gguf), for `ProjectsStore.applyAutoRename` to prefer over
 /// `TaskAutoRenameService.deriveTitle`'s heuristic. Every failure mode —
 /// missing binary, missing model file, a slow or crashed process, or output
 /// that doesn't look like a title — is distinguished internally as a
@@ -15,7 +15,7 @@ public enum TaskTitleGenerator {
     /// UserDefaults key overriding the default model path below.
     public static let modelPathDefaultsKey = "settings.titleModel.path"
 
-    private static let defaultModelPath = "~/Claude/title-gen/models/gguf/qwen3-0.6b-title-Q8_0.gguf"
+    private static let defaultModelPath = "~/Claude/title-gen/models/gguf/qwen3.5-0.8b-title-Q8_0.gguf"
 
     /// Probed in order: a GUI app's `PATH` typically excludes Homebrew, so
     /// the well-known install prefixes are checked before falling back to
