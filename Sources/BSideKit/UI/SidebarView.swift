@@ -36,7 +36,7 @@ struct SidebarView: View {
                         Section("Active") {
                             ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
-                                    .tag(SidebarRowID.task(entry.taskID))
+                                    .tag(SidebarRowID.activeTask(entry.taskID))
                             }
                         }
                     }
@@ -116,23 +116,34 @@ struct SidebarView: View {
         }
     }
 
+    // A task shows in both Active and its project; distinct tags keep the two rows
+    // from sharing a selection identity, which left the native highlight stuck.
     private enum SidebarRowID: Hashable {
         case project(Int64)
         case task(Int64)
+        case activeTask(Int64)
     }
+
+    @State private var lastSelectedRow: SidebarRowID?
 
     /// Round-trips `store.selectedProjectID`/`selectedTaskID` through a single tagged
     /// selection so `List` drives the same selection state the rest of the app reads.
     private var selectionBinding: Binding<SidebarRowID?> {
         Binding(
             get: {
-                if let taskID = store.selectedTaskID { return .task(taskID) }
+                if let taskID = store.selectedTaskID {
+                    if lastSelectedRow == .task(taskID) || lastSelectedRow == .activeTask(taskID) {
+                        return lastSelectedRow
+                    }
+                    return store.openTerminalTaskIDs.contains(taskID) ? .activeTask(taskID) : .task(taskID)
+                }
                 if let projectID = store.selectedProjectID { return .project(projectID) }
                 return nil
             },
             set: { newValue in
+                if newValue != nil { lastSelectedRow = newValue }
                 switch newValue {
-                case .task(let id):
+                case .task(let id), .activeTask(let id):
                     if let match = store.taskAndProject(forID: id) {
                         store.selectTask(match.task, project: match.project)
                     }
@@ -266,6 +277,7 @@ struct SidebarView: View {
                 .foregroundStyle(primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .padding(.leading, 4)
             Spacer()
             addTaskButton(for: project)
             Text("\(taskCount)")
