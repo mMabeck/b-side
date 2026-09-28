@@ -2,8 +2,7 @@
 
 macOS-only native Swift app that runs Pi agent sessions in
 embedded libghostty terminals, one per task, organised around git branches and
-worktrees. The authoritative spec is [`docs/native-rewrite.md`](docs/native-rewrite.md);
-visual identity is in [`docs/brand.md`](docs/brand.md). Formerly "Dash Native".
+worktrees. Visual identity is in [`docs/brand.md`](docs/brand.md). Formerly "Dash Native".
 
 ## Stack
 
@@ -90,7 +89,7 @@ swift test --filter GitCLITests
 - **Only `Terminal/GhosttyBridge.swift` may `import GhosttyTerminal`.** All
   libghostty interop stays there.
 - **Don't bump libghostty-spm incidentally.** Its embedding API is unstable
-  upstream (spec §12); a bump is a deliberate, reviewed change.
+  upstream; a bump is a deliberate, reviewed change.
 - **Never relaunch, replace, or quit a running B-Side** — it may host the Pi
   session doing the work. Rebuild and let the user reopen it.
 - **Ghostty sees shortcuts before the AppKit menu.** A new app shortcut that

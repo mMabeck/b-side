@@ -6,7 +6,7 @@ import SwiftUI
 /// state, chosen by `ProjectsStore.mainSelection`.
 ///
 /// Task terminals are cached by task id in `hostsByTaskID` and never torn
-/// down on selection change, only hidden (per native-rewrite.md §6):
+/// down on selection change, only hidden:
 /// destroying a `TerminalSurfaceHost` kills its pty. Hosts are only ever
 /// removed from the cache in `purgeHosts`, once their task is actually gone.
 ///

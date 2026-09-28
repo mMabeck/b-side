@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Right sidebar: Source Control (subagent activity lives in each task's
 /// `SubagentStripView`). Modelled on VS Code's SCM view, scoped to the
-/// selected task's worktree — see native-rewrite.md §7.
+/// selected task's worktree.
 struct RightSidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared

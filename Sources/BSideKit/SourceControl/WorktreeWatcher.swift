@@ -1,8 +1,8 @@
 import CoreServices
 import Foundation
 
-/// FSEvents-backed watcher behind the Source Control sidebar's live refresh
-/// (native-rewrite.md §7). Watches the worktree root (for tracked/untracked
+/// FSEvents-backed watcher behind the Source Control sidebar's live refresh.
+/// Watches the worktree root (for tracked/untracked
 /// edits, ignoring its own `.git`) and the real git directory, restricted to
 /// `index`/`HEAD`/`refs/**` — the only paths that change git status/branch
 /// output. Both streams coalesce bursts into one refresh roughly every 300ms (`debounceInterval`).

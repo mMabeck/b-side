@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Real View-menu commands for the three collapsible chrome regions, per
-/// native-rewrite.md \u00a78 ("a real menu bar with real key equivalents") rather
+/// Real View-menu commands for the three collapsible chrome regions, rather
 /// than invisible global key handlers. Titles flip between Show/Hide so the
 /// menu always reflects current state, and every toggle goes through
 /// ``WindowLayoutState/shared`` \u2014 the same object the toolbar buttons drive \u2014

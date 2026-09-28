@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
         // Pinned exactly, not a range: the embedding API is explicitly unstable
-        // upstream (see docs/native-rewrite.md §12). Bumping this is a deliberate,
+        // upstream. Bumping this is a deliberate,
         // reviewed step, not an incidental `swift package update`.
         .package(url: "https://github.com/Lakr233/libghostty-spm", exact: "1.6.20260922"),
         // highlight.js via JavaScriptCore, no WebView — used to colour the Changes diff.

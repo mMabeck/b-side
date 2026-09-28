@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// Scratch shells for the user's own commands, one per task (or project), hidden
-/// rather than torn down on selection change or collapse (native-rewrite.md §6) so
+/// rather than torn down on selection change or collapse so
 /// a running command survives; `ContentView` keeps this mounted at zero height.
 struct TerminalDrawerView: View {
     enum DrawerKey: Hashable {

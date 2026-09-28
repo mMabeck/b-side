@@ -343,7 +343,7 @@ public final class ProjectsStore {
     /// Each task's current "batch" of runs for the subagent strip — see `SubagentStripBatchTracker`.
     public let subagentStripBatches = SubagentStripBatchTracker()
 
-    /// The local HTTP endpoint agent processes report to (native-rewrite.md §5, §6). `nil` until `start()` binds it.
+    /// The local HTTP endpoint agent processes report to. `nil` until `start()` binds it.
     public private(set) var subagentServer: SubagentEventServer?
 
     /// What `SubagentSwapNavigation` steps through. A headless card-only child never appears: there is nothing to swap to.

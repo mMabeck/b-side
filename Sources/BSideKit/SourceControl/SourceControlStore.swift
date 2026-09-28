@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Observation
 
-/// Drives the Source Control sidebar (native-rewrite.md §7) for whichever
+/// Drives the Source Control sidebar for whichever
 /// task is selected. One instance, retargeted (not recreated) via `setTask`.
 ///
 /// Status loads first and publishes immediately; per-file line counts are a

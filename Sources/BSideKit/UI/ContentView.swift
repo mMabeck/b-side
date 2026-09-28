@@ -56,7 +56,7 @@ public struct ContentView: View {
                     Rectangle().fill(theme.palette.separator).frame(height: 1)
                 }
                 // Always mounted, collapsed to zero height: removing it would
-                // deinit its surface instead of marking it not-visible (native-rewrite.md §6).
+                // deinit its surface instead of marking it not-visible.
                 TerminalDrawerView(store: store, isCollapsed: layout.terminalDrawerCollapsed)
                     .frame(
                         maxWidth: .infinity,

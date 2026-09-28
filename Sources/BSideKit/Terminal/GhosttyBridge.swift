@@ -7,7 +7,7 @@ import OSLog
 import SwiftUI
 
 /// The single seam between BSideKit and libghostty: no other file may import
-/// `GhosttyKit`/`GhosttyTerminal` (native-rewrite.md §12), since the embedding
+/// `GhosttyKit`/`GhosttyTerminal`, since the embedding
 /// API is unstable upstream. Uses the SwiftUI surface (`TerminalSurfaceView`
 /// + `TerminalViewState`), never `TerminalSurfaceViewDelegate` — so this app
 /// never falsely claims to have handled an action (title, close, bell,
@@ -40,8 +40,7 @@ public enum GhosttyBridge {
     }
 
     /// `libghostty-spm` rejects the *entire* config if `theme = <name>` fails
-    /// to resolve, even against this package's own catalog (native-rewrite.md
-    /// §6). This pulls the `theme` line out before libghostty sees it and
+    /// to resolve, even against this package's own catalog. This pulls the `theme` line out before libghostty sees it and
     /// reapplies it as individual colour directives once resolved; everything
     /// else in the file passes through untouched.
     static func extractThemeDirective(from contents: String) -> (sanitized: String, directive: ThemeDirective?) {
@@ -237,7 +236,7 @@ public final class GhosttyResolvedTheme: ObservableObject {
 }
 
 /// One libghostty surface: a real pty running a login shell, owned by the
-/// `.exec` backend (see native-rewrite.md §6).
+/// `.exec` backend.
 @MainActor
 public final class TerminalSurfaceHost: ObservableObject {
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "terminal")
@@ -328,7 +327,7 @@ public final class TerminalSurfaceHost: ObservableObject {
         state.configuration = TerminalSurfaceOptions(backend: .inMemory(inMemorySession))
     }
 
-    /// A hidden surface is marked not-visible rather than torn down (native-rewrite.md §6): grid, scrollback and session persist.
+    /// A hidden surface is marked not-visible rather than torn down: grid, scrollback and session persist.
     public var isVisible: Bool {
         get { state.isSurfaceVisible }
         set { state.isSurfaceVisible = newValue }
