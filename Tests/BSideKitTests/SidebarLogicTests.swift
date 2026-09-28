@@ -66,6 +66,27 @@ struct SidebarLogicTests {
         #expect(expanded == tasks)
     }
 
+    // MARK: - Selection reconciliation
+
+    @Test(
+        "reconciledRow leaves a current row untouched when it already represents the store selection, and only re-derives it otherwise",
+        arguments: [
+            (current: SidebarView.SidebarRowID.task(1) as SidebarView.SidebarRowID?, selectedTaskID: Int64?.some(1), selectedProjectID: Int64?.some(9), openTaskIDs: [Int64](), expected: SidebarView.SidebarRowID.task(1) as SidebarView.SidebarRowID?),
+            (current: SidebarView.SidebarRowID.task(1), selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.task(1)),
+            (current: SidebarView.SidebarRowID.activeTask(1), selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [], expected: SidebarView.SidebarRowID.activeTask(1)),
+            (current: SidebarView.SidebarRowID.project(9), selectedTaskID: nil, selectedProjectID: 9, openTaskIDs: [], expected: SidebarView.SidebarRowID.project(9)),
+            (current: nil, selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.activeTask(1)),
+            (current: nil, selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [], expected: SidebarView.SidebarRowID.task(1)),
+            (current: SidebarView.SidebarRowID.activeTask(1), selectedTaskID: nil, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.project(9)),
+            (current: SidebarView.SidebarRowID.task(2), selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.activeTask(1)),
+            (current: SidebarView.SidebarRowID.project(9), selectedTaskID: nil, selectedProjectID: nil, openTaskIDs: [], expected: nil),
+        ] as [(current: SidebarView.SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64], expected: SidebarView.SidebarRowID?)]
+    )
+    func reconciledRowCases(current: SidebarView.SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64], expected: SidebarView.SidebarRowID?) {
+        let result = SidebarView.reconciledRow(current: current, selectedTaskID: selectedTaskID, selectedProjectID: selectedProjectID, openTaskIDs: openTaskIDs)
+        #expect(result == expected)
+    }
+
     // MARK: - Branch-sync summary formatting
 
     @Test("Branch sync summary formatting")

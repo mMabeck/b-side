@@ -39,13 +39,13 @@ struct SidebarView: View {
             if store.projects.isEmpty {
                 emptyProjectsState
             } else {
-                List(selection: selectionBinding) {
-                    if !activeTaskEntries.isEmpty {
+                List(selection: $selection) {
+                    if !activeTaskRows.isEmpty {
                         Section("Active") {
                             // A second reorder landing before NSTableView's row-move
                             // animation settles composites one row's content under another's.
-                            ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
-                                activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
+                            ForEach(activeTaskRows) { entry in
+                                activeTaskRow(entry.task, project: entry.project, shortcutIndex: entry.shortcutIndex)
                                     .tag(SidebarRowID.activeTask(entry.taskID))
                             }
                             .transaction { $0.animation = nil }
@@ -78,9 +78,9 @@ struct SidebarView: View {
                                         expanded: isExpanded,
                                         selectedTaskID: store.selectedTaskID
                                     )
-                                    ForEach(visible) { task in
-                                        taskRow(task, project: project)
-                                            .tag(SidebarRowID.task(task.id ?? -1))
+                                    ForEach(visible.map(TaskRowEntry.init)) { entry in
+                                        taskRow(entry.task, project: project)
+                                            .tag(SidebarRowID.task(entry.task.id ?? -1))
                                     }
                                     if isExpandable, let projectID = project.id {
                                         if isExpanded {
@@ -103,6 +103,52 @@ struct SidebarView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .onAppear {
+                    selection = Self.reconciledRow(
+                        current: selection,
+                        selectedTaskID: store.selectedTaskID,
+                        selectedProjectID: store.selectedProjectID,
+                        openTaskIDs: store.openTerminalTaskIDs
+                    )
+                }
+                .onChange(of: selection) { _, newValue in
+                    guard let newValue, !Self.matches(newValue, selectedTaskID: store.selectedTaskID, selectedProjectID: store.selectedProjectID) else { return }
+                    switch newValue {
+                    case .task(let id), .activeTask(let id):
+                        if let match = store.taskAndProject(forID: id) {
+                            store.selectTask(match.task, project: match.project)
+                        }
+                    case .project(let id):
+                        if let project = store.projects.first(where: { $0.id == id }) {
+                            store.selectProject(project)
+                        }
+                    }
+                }
+                .onChange(of: store.selectedTaskID) { _, _ in
+                    selection = Self.reconciledRow(
+                        current: selection,
+                        selectedTaskID: store.selectedTaskID,
+                        selectedProjectID: store.selectedProjectID,
+                        openTaskIDs: store.openTerminalTaskIDs
+                    )
+                }
+                .onChange(of: store.selectedProjectID) { _, _ in
+                    selection = Self.reconciledRow(
+                        current: selection,
+                        selectedTaskID: store.selectedTaskID,
+                        selectedProjectID: store.selectedProjectID,
+                        openTaskIDs: store.openTerminalTaskIDs
+                    )
+                }
+                .onChange(of: store.openTerminalTaskIDs) { _, newIDs in
+                    guard case .activeTask(let id) = selection, !newIDs.contains(id) else { return }
+                    selection = Self.reconciledRow(
+                        current: selection,
+                        selectedTaskID: store.selectedTaskID,
+                        selectedProjectID: store.selectedProjectID,
+                        openTaskIDs: newIDs
+                    )
+                }
             }
 
             Divider()
@@ -144,52 +190,61 @@ struct SidebarView: View {
 
     // A task shows in both Active and its project; distinct tags keep the two rows
     // from sharing a selection identity, which left the native highlight stuck.
-    private enum SidebarRowID: Hashable {
+    enum SidebarRowID: Hashable {
         case project(Int64)
         case task(Int64)
         case activeTask(Int64)
     }
 
-    @State private var lastSelectedRow: SidebarRowID?
+    @State private var selection: SidebarRowID?
 
-    /// Round-trips `store.selectedProjectID`/`selectedTaskID` through a single tagged
-    /// selection so `List` drives the same selection state the rest of the app reads.
-    private var selectionBinding: Binding<SidebarRowID?> {
-        Binding(
-            get: {
-                if let taskID = store.selectedTaskID {
-                    if lastSelectedRow == .task(taskID) || lastSelectedRow == .activeTask(taskID) {
-                        return lastSelectedRow
-                    }
-                    return store.openTerminalTaskIDs.contains(taskID) ? .activeTask(taskID) : .task(taskID)
-                }
-                if let projectID = store.selectedProjectID { return .project(projectID) }
-                return nil
-            },
-            set: { newValue in
-                if newValue != nil { lastSelectedRow = newValue }
-                switch newValue {
-                case .task(let id), .activeTask(let id):
-                    if let match = store.taskAndProject(forID: id) {
-                        store.selectTask(match.task, project: match.project)
-                    }
-                case .project(let id):
-                    if let project = store.projects.first(where: { $0.id == id }) {
-                        store.selectProject(project)
-                    }
-                case nil:
-                    break
-                }
-            }
-        )
+    /// Whether `row` already represents the store's current selection, so pushing it back
+    /// to the store or re-deriving it from the store would be a no-op.
+    static func matches(_ row: SidebarRowID, selectedTaskID: Int64?, selectedProjectID: Int64?) -> Bool {
+        switch row {
+        case .task(let id), .activeTask(let id):
+            return id == selectedTaskID
+        case .project(let id):
+            return selectedTaskID == nil && id == selectedProjectID
+        }
+    }
+
+    /// Derives the row `List` should highlight from the store's selection, preferring to
+    /// leave `current` untouched when it already represents that selection — the List's own
+    /// selection state must never be re-derived from `openTaskIDs` alone, or opening a
+    /// terminal for the selected task silently moves the highlight to the Active row.
+    static func reconciledRow(current: SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64]) -> SidebarRowID? {
+        if let current, matches(current, selectedTaskID: selectedTaskID, selectedProjectID: selectedProjectID) {
+            return current
+        }
+        if let selectedTaskID {
+            return openTaskIDs.contains(selectedTaskID) ? .activeTask(selectedTaskID) : .task(selectedTaskID)
+        }
+        if let selectedProjectID {
+            return .project(selectedProjectID)
+        }
+        return nil
+    }
+
+    private struct TaskRowEntry: Identifiable {
+        let task: TaskRecord
+        var id: SidebarRowID { .task(task.id ?? -1) }
+    }
+
+    private struct ActiveTaskEntry: Identifiable {
+        let taskID: Int64
+        let task: TaskRecord
+        let project: Project
+        let shortcutIndex: Int
+        var id: SidebarRowID { .activeTask(taskID) }
     }
 
     /// Same order `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes
     /// into, so a row's position always matches its ⌘-digit. An archived/deleted
     /// task's entry resolves to `nil` and is dropped, normally momentary at most.
-    private var activeTaskEntries: [(taskID: Int64, task: TaskRecord, project: Project)] {
-        store.openTerminalTaskIDs.compactMap { id in
-            store.taskAndProject(forID: id).map { (taskID: id, task: $0.task, project: $0.project) }
+    private var activeTaskRows: [ActiveTaskEntry] {
+        store.openTerminalTaskIDs.enumerated().compactMap { index, id in
+            store.taskAndProject(forID: id).map { ActiveTaskEntry(taskID: id, task: $0.task, project: $0.project, shortcutIndex: index) }
         }
     }
 
