@@ -61,6 +61,20 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <false/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <!-- UTType(exportedAs:) in SidebarView; undeclared, project drag-reorder silently fails. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>dev.mabeck.bside.project-id</string>
+            <key>UTTypeDescription</key>
+            <string>B-Side Project</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST
