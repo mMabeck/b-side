@@ -5,7 +5,7 @@ import SwiftUI
 /// `String`/`Bool` inputs and a bare callback — no git types — so it can be
 /// previewed and unit tested (via ``UnifiedDiffRenderer``) without a
 /// repository. Themed like the rest of the app's chrome; see
-/// `TaskCreationView` for the same `.themedWindow`/`themedButton` convention.
+/// `TaskCreationView` for the same `.themedWindow` convention.
 struct DiffSheet: View {
     let title: String
     /// "Staged", "Unstaged", or "Committed on branch".

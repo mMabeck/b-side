@@ -445,7 +445,7 @@ struct SidebarView: View {
         .accessibilityLabel(BranchSyncSummary.accessibilityLabel(ahead: ahead, hasUncommittedChanges: hasUncommittedChanges) ?? "")
     }
 
-    /// Pinned below the list via `.safeAreaInset`, not a `List` row, so it never scrolls out of view.
+    /// Pinned below the list, not a `List` row, so it never scrolls out of view.
     private var addProjectFooter: some View {
         Button {
             ProjectCreation.addProject(store: store)
