@@ -1,6 +1,15 @@
 #!/bin/bash
 # Builds BSide in release mode and assembles a real "B-Side.app" under dist/.
+# --install also copies it to /Applications (Spotlight, Raycast, Launchpad).
 set -euo pipefail
+
+INSTALL=0
+for arg in "$@"; do
+    case "$arg" in
+        --install) INSTALL=1 ;;
+        *) echo "usage: $0 [--install]" >&2; exit 2 ;;
+    esac
+done
 
 cd "$(dirname "$0")/.."
 
@@ -102,3 +111,18 @@ codesign --force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP_DIR"
 codesign --verify --strict "$APP_DIR"
 
 echo "Built $APP_DIR"
+
+if [ "$INSTALL" = 1 ]; then
+    INSTALL_DIR="/Applications/$APP_NAME.app"
+    STAGED="/Applications/.$APP_NAME.app.new"
+    OLD="/Applications/.$APP_NAME.app.old"
+    rm -rf "$STAGED" "$OLD"
+    ditto "$APP_DIR" "$STAGED"
+    # Swap by rename so a running copy keeps its open inodes instead of
+    # having files rewritten underneath it.
+    [ -e "$INSTALL_DIR" ] && mv "$INSTALL_DIR" "$OLD"
+    mv "$STAGED" "$INSTALL_DIR"
+    rm -rf "$OLD"
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$INSTALL_DIR"
+    echo "Installed $INSTALL_DIR"
+fi
