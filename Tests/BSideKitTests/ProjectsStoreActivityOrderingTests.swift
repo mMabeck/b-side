@@ -48,6 +48,18 @@ struct ProjectsStoreActivityOrderingTests {
         #expect(ProjectsStore.movingToFront(9, in: []) == [])
     }
 
+    @Test("openTerminalTaskIDs mutators never introduce duplicate ids")
+    func openTerminalMutatorsNeverDuplicate() {
+        var ids = ProjectsStore.addingOpenTerminal(1, to: [])
+        ids = ProjectsStore.addingOpenTerminal(2, to: ids)
+        ids = ProjectsStore.addingOpenTerminal(1, to: ids)
+        ids = ProjectsStore.movingToFront(2, in: ids)
+        ids = ProjectsStore.movingToFront(2, in: ids)
+        #expect(ids.count == Set(ids).count)
+        ids = ProjectsStore.removingOpenTerminals([1], from: ids)
+        #expect(ids.count == Set(ids).count)
+    }
+
     @Test("setTaskBusy moves the task to the top of its project list and open terminals")
     func setTaskBusyBumpsOrdering() async throws {
         let (store, project, taskA, taskB) = try await makeStore()

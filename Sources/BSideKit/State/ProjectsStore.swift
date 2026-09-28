@@ -205,8 +205,17 @@ public final class ProjectsStore {
 
     /// Persists `lastActivityAt` asynchronously and moves `id` to the front
     /// of `openTerminalTaskIDs` if open. Called only for real agent events, never for mere selection.
+    ///
+    /// Runs with animations disabled: agent activity can reorder the Active
+    /// section several times a second, and `List`'s implicit row-move
+    /// animation can't always settle between bumps, leaving one row's content
+    /// composited under another's mid-transition.
     public func bumpTaskActivity(_ id: Int64) {
-        openTerminalTaskIDs = Self.movingToFront(id, in: openTerminalTaskIDs)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            openTerminalTaskIDs = Self.movingToFront(id, in: openTerminalTaskIDs)
+        }
         Task { [database] in
             try? await database.dbQueue.write { db in
                 guard var task = try TaskRecord.fetchOne(db, key: id) else { return }
