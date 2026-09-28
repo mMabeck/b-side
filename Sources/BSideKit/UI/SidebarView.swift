@@ -24,7 +24,15 @@ struct SidebarView: View {
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
     @AppStorage("sidebarCollapsedProjectIDs") private var collapseState = SidebarCollapseState()
 
+    /// Which projects show all their tasks instead of just the 5 most recent. Session-only:
+    /// unlike `collapseState`, there's no expectation this survives a relaunch.
+    @State private var expandedTaskListProjectIDs: Set<Int64> = []
+
     @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
+
+    /// How many of a project's most-recent tasks (`tasksByProject` is already
+    /// sorted that way) show before the "Show more" row.
+    private static let collapsedTaskLimit = 5
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,9 +67,24 @@ struct SidebarView: View {
                                         .padding(.leading, TaskRowLayout.statusDotColumnWidth + 6)
                                         .padding(.vertical, 6)
                                 } else {
-                                    ForEach(tasks) { task in
+                                    let isExpandable = tasks.count > Self.collapsedTaskLimit
+                                    let isExpanded = project.id.map { expandedTaskListProjectIDs.contains($0) } ?? false
+                                    let visible = Self.visibleTasks(
+                                        tasks,
+                                        limit: Self.collapsedTaskLimit,
+                                        expanded: isExpanded,
+                                        selectedTaskID: store.selectedTaskID
+                                    )
+                                    ForEach(visible) { task in
                                         taskRow(task, project: project)
                                             .tag(SidebarRowID.task(task.id ?? -1))
+                                    }
+                                    if isExpandable, let projectID = project.id {
+                                        if isExpanded {
+                                            showLessRow(projectID: projectID)
+                                        } else {
+                                            showMoreRow(hiddenCount: tasks.count - visible.count, projectID: projectID)
+                                        }
                                     }
                                 }
                             } label: {
@@ -338,6 +361,44 @@ struct SidebarView: View {
     static func folderName(of project: Project) -> String {
         let name = URL(fileURLWithPath: project.path).lastPathComponent
         return name.isEmpty || name == "/" ? project.displayName : name
+    }
+
+    /// `tasks` is already ordered most-recent-first. Collapsed shows the first
+    /// `limit`, plus the selected task appended if it would otherwise be
+    /// hidden, so switching projects never hides the task you're looking at.
+    static func visibleTasks(_ tasks: [TaskRecord], limit: Int, expanded: Bool, selectedTaskID: Int64?) -> [TaskRecord] {
+        guard !expanded, tasks.count > limit else { return tasks }
+        var visible = Array(tasks.prefix(limit))
+        if let selectedTaskID, !visible.contains(where: { $0.id == selectedTaskID }),
+            let selectedTask = tasks.first(where: { $0.id == selectedTaskID }) {
+            visible.append(selectedTask)
+        }
+        return visible
+    }
+
+    /// Standard disclosure affordance for a project's overflowed tasks, not a nested `DisclosureGroup`, so it reads as one extra row rather than another collapsible section.
+    private func showMoreRow(hiddenCount: Int, projectID: Int64) -> some View {
+        Button {
+            expandedTaskListProjectIDs.insert(projectID)
+        } label: {
+            Text("Show \(hiddenCount) More")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+                .padding(.leading, TaskRowLayout.statusDotColumnWidth + 6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func showLessRow(projectID: Int64) -> some View {
+        Button {
+            expandedTaskListProjectIDs.remove(projectID)
+        } label: {
+            Text("Show Less")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.palette.textSecondary)
+                .padding(.leading, TaskRowLayout.statusDotColumnWidth + 6)
+        }
+        .buttonStyle(.plain)
     }
 
     /// The leading status-dot column is reserved at a fixed width even with no dot, so every title starts at the same x.

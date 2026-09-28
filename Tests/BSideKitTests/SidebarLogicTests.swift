@@ -4,6 +4,7 @@ import Testing
 
 @testable import BSideKit
 
+@MainActor
 @Suite("Sidebar pure logic")
 struct SidebarLogicTests {
     // MARK: - Collapse-state persistence
@@ -34,6 +35,35 @@ struct SidebarLogicTests {
         #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: false, isUnread: false) == .inactive)
         #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: true) == .unread)
         #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false) == .read)
+    }
+
+    // MARK: - Per-project task overflow
+
+    private func task(_ id: Int64) -> TaskRecord {
+        TaskRecord(
+            id: id, projectId: 1, name: "Task \(id)", branchName: "b\(id)",
+            worktreePath: "/tmp/\(id)", harness: "claude", permissionLevel: "default"
+        )
+    }
+
+    @Test("visibleTasks shows all tasks under the limit, and only the first `limit` over it")
+    func visibleTasksRespectsLimit() {
+        let tasks = (1...5).map(task)
+        #expect(SidebarView.visibleTasks(tasks, limit: 5, expanded: false, selectedTaskID: nil) == tasks)
+
+        let overflowing = (1...7).map(task)
+        let visible = SidebarView.visibleTasks(overflowing, limit: 5, expanded: false, selectedTaskID: nil)
+        #expect(visible.map(\.id) == [1, 2, 3, 4, 5])
+    }
+
+    @Test("visibleTasks keeps the selected task visible even past the limit, and shows everything when expanded")
+    func visibleTasksKeepsSelectionAndExpands() {
+        let tasks = (1...7).map(task)
+        let visible = SidebarView.visibleTasks(tasks, limit: 5, expanded: false, selectedTaskID: 7)
+        #expect(visible.map(\.id) == [1, 2, 3, 4, 5, 7])
+
+        let expanded = SidebarView.visibleTasks(tasks, limit: 5, expanded: true, selectedTaskID: nil)
+        #expect(expanded == tasks)
     }
 
     // MARK: - Branch-sync summary formatting
