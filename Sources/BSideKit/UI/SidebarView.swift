@@ -103,14 +103,7 @@ struct SidebarView: View {
                     }
                 }
                 .listStyle(.sidebar)
-                .onAppear {
-                    selection = Self.reconciledRow(
-                        current: selection,
-                        selectedTaskID: store.selectedTaskID,
-                        selectedProjectID: store.selectedProjectID,
-                        openTaskIDs: store.openTerminalTaskIDs
-                    )
-                }
+                .onAppear { syncSelectionFromStore() }
                 .onChange(of: selection) { _, newValue in
                     guard let newValue, !Self.matches(newValue, selectedTaskID: store.selectedTaskID, selectedProjectID: store.selectedProjectID) else { return }
                     switch newValue {
@@ -124,30 +117,11 @@ struct SidebarView: View {
                         }
                     }
                 }
-                .onChange(of: store.selectedTaskID) { _, _ in
-                    selection = Self.reconciledRow(
-                        current: selection,
-                        selectedTaskID: store.selectedTaskID,
-                        selectedProjectID: store.selectedProjectID,
-                        openTaskIDs: store.openTerminalTaskIDs
-                    )
-                }
-                .onChange(of: store.selectedProjectID) { _, _ in
-                    selection = Self.reconciledRow(
-                        current: selection,
-                        selectedTaskID: store.selectedTaskID,
-                        selectedProjectID: store.selectedProjectID,
-                        openTaskIDs: store.openTerminalTaskIDs
-                    )
-                }
+                .onChange(of: store.selectedTaskID) { syncSelectionFromStore() }
+                .onChange(of: store.selectedProjectID) { syncSelectionFromStore() }
                 .onChange(of: store.openTerminalTaskIDs) { _, newIDs in
                     guard case .activeTask(let id) = selection, !newIDs.contains(id) else { return }
-                    selection = Self.reconciledRow(
-                        current: selection,
-                        selectedTaskID: store.selectedTaskID,
-                        selectedProjectID: store.selectedProjectID,
-                        openTaskIDs: newIDs
-                    )
+                    syncSelectionFromStore()
                 }
             }
 
@@ -209,10 +183,8 @@ struct SidebarView: View {
         }
     }
 
-    /// Derives the row `List` should highlight from the store's selection, preferring to
-    /// leave `current` untouched when it already represents that selection — the List's own
-    /// selection state must never be re-derived from `openTaskIDs` alone, or opening a
-    /// terminal for the selected task silently moves the highlight to the Active row.
+    /// Keeps `current` whenever it still represents the store's selection: re-deriving it when
+    /// a terminal opens would move the highlight mid-insert and leave a stale row drawn selected.
     static func reconciledRow(current: SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64]) -> SidebarRowID? {
         if let current, matches(current, selectedTaskID: selectedTaskID, selectedProjectID: selectedProjectID) {
             return current
@@ -226,6 +198,16 @@ struct SidebarView: View {
         return nil
     }
 
+    private func syncSelectionFromStore() {
+        selection = Self.reconciledRow(
+            current: selection,
+            selectedTaskID: store.selectedTaskID,
+            selectedProjectID: store.selectedProjectID,
+            openTaskIDs: store.openTerminalTaskIDs
+        )
+    }
+
+    // Row ids must be unique across the whole List, not just per ForEach.
     private struct TaskRowEntry: Identifiable {
         let task: TaskRecord
         var id: SidebarRowID { .task(task.id ?? -1) }
