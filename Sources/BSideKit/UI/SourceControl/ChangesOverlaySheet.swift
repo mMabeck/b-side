@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 /// File tree on the left, selected file's diff on the right. Unlike `DiffSheet`
@@ -370,22 +371,33 @@ struct ChangesOverlaySheet: View {
 
     // MARK: - Open Diff in VS Code
 
+    private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "changes-overlay")
+
     private func openDiffInVSCode(file: ChangesTreeFile, codePath: String) {
         guard let baseRefLabel = store.baseRefLabel else { return }
         let worktreeURL = URL(fileURLWithPath: task.worktreePath)
         let fileName = (file.path as NSString).lastPathComponent
+        let mode = store.mode
         Task {
             let baseContent: Data?
             if file.kind == .added || file.kind == .untracked {
                 baseContent = nil
             } else {
-                baseContent = try? await GitCLI.fileContent(file.origPath ?? file.path, at: baseRefLabel, in: worktreeURL)
+                do {
+                    baseContent = try await GitCLI.fileContent(file.origPath ?? file.path, at: baseRefLabel, in: worktreeURL)
+                } catch {
+                    Self.logger.error("Failed to load base content for \(file.path, privacy: .public) at \(baseRefLabel, privacy: .public): \(error, privacy: .public)")
+                    return
+                }
             }
             let currentContent: Data?
-            if file.kind == .deleted {
+            switch VSCodeDiffLauncher.currentSideSource(mode: mode, kind: file.kind) {
+            case .none:
                 currentContent = nil
-            } else {
+            case .worktreeFile:
                 currentContent = try? Data(contentsOf: worktreeURL.appendingPathComponent(file.path))
+            case .gitRef(let ref):
+                currentContent = try? await GitCLI.fileContent(file.path, at: ref, in: worktreeURL)
             }
             try? vsCodeDiffLauncher.openDiff(fileName: fileName, baseContent: baseContent, currentContent: currentContent, codePath: codePath)
         }

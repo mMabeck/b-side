@@ -4,37 +4,21 @@ import Testing
 @testable import BSideKit
 
 struct VSCodeDiffLauncherTests {
-    @Test("Resolves `code` from the first PATH directory that has it")
-    func resolvesFromPath() {
+    @Test(
+        "Resolves `code` from PATH, then known fallback install locations, else nil",
+        arguments: [
+            ("/opt/homebrew/bin/code", "/opt/homebrew/bin/code"),
+            ("/usr/local/bin/code", "/usr/local/bin/code"),
+            ("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code", "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"),
+            ("nonexistent", nil),
+        ] as [(String, String?)]
+    )
+    func resolvesCodePath(existingPath: String, expected: String?) {
         let launcher = VSCodeDiffLauncher(
             environment: { ["PATH": "/usr/bin:/opt/homebrew/bin:/usr/local/bin"] },
-            fileExists: { $0 == "/opt/homebrew/bin/code" }
+            fileExists: { $0 == existingPath }
         )
-        #expect(launcher.resolveCodePath() == "/opt/homebrew/bin/code")
-    }
-
-    @Test("Falls back to /usr/local/bin/code when PATH has no match")
-    func fallsBackToUsrLocalBin() {
-        let launcher = VSCodeDiffLauncher(
-            environment: { ["PATH": "/usr/bin"] },
-            fileExists: { $0 == "/usr/local/bin/code" }
-        )
-        #expect(launcher.resolveCodePath() == "/usr/local/bin/code")
-    }
-
-    @Test("Falls back to the VS Code app bundle's CLI when nothing else matches")
-    func fallsBackToAppBundle() {
-        let launcher = VSCodeDiffLauncher(
-            environment: { ["PATH": "/usr/bin"] },
-            fileExists: { $0 == "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" }
-        )
-        #expect(launcher.resolveCodePath() == "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
-    }
-
-    @Test("Returns nil when `code` isn't found anywhere")
-    func returnsNilWhenNotFound() {
-        let launcher = VSCodeDiffLauncher(environment: { ["PATH": "/usr/bin"] }, fileExists: { _ in false })
-        #expect(launcher.resolveCodePath() == nil)
+        #expect(launcher.resolveCodePath() == expected)
     }
 
     @Test("Writes base/current temp files named after the original file, empty for a nil side")
@@ -58,5 +42,20 @@ struct VSCodeDiffLauncherTests {
         let currentURL = dir.appendingPathComponent("current/Example.swift")
         #expect(try Data(contentsOf: baseURL).isEmpty)
         #expect(try Data(contentsOf: currentURL) == Data("hello".utf8))
+    }
+
+    @Test(
+        "Current side reads HEAD in Committed mode, the worktree file otherwise, none when deleted",
+        arguments: [
+            (ChangesOverlayStore.Mode.all, GitCLI.FileChange.Kind.modified, VSCodeDiffLauncher.CurrentSideSource.worktreeFile),
+            (.uncommitted, .modified, .worktreeFile),
+            (.committed, .modified, .gitRef("HEAD")),
+            (.all, .deleted, .none),
+            (.uncommitted, .deleted, .none),
+            (.committed, .deleted, .none),
+        ] as [(ChangesOverlayStore.Mode, GitCLI.FileChange.Kind, VSCodeDiffLauncher.CurrentSideSource)]
+    )
+    func currentSideSource(mode: ChangesOverlayStore.Mode, kind: GitCLI.FileChange.Kind, expected: VSCodeDiffLauncher.CurrentSideSource) {
+        #expect(VSCodeDiffLauncher.currentSideSource(mode: mode, kind: kind) == expected)
     }
 }
