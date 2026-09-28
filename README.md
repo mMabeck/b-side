@@ -3,6 +3,8 @@
 A macOS-only Swift app for running Pi agent sessions. Native AppKit/SwiftUI,
 libghostty for terminals, git worktrees as the organising principle.
 
+![B-Side with several projects, a task's Pi session and its uncommitted changes](docs/screenshots/overview.png)
+
 The authoritative spec is [`docs/native-rewrite.md`](docs/native-rewrite.md).
 
 Apple Silicon only — the libghostty XCFramework is arm64.
@@ -11,6 +13,16 @@ Requires Xcode (not just the Command Line Tools) — the Command Line Tools
 toolchain ships without the Swift Testing frameworks, so `swift test` cannot
 link against it. Check the right one is selected with `xcode-select -p`; it
 should print a path inside `Xcode.app`.
+
+## Screenshots
+
+Each task gets its own worktree, branch and Pi session:
+
+![A Pi session in a task](docs/screenshots/pi.png)
+
+Subagents a session starts show up as live cards above its terminal:
+
+![A task with two subagents running](docs/screenshots/subagents.png)
 
 ## Build
 
