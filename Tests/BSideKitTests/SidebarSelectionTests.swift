@@ -38,6 +38,7 @@ struct SidebarSelectionTests {
             return (project, alpha, beta)
         }
         store.start()
+        defer { store.stop() }
         try await waitUntil { (store.tasksByProject[project.id!]?.count ?? 0) == 2 }
 
         let window = NSWindow(
@@ -48,7 +49,10 @@ struct SidebarSelectionTests {
         window.setIsVisible(true)
         try await waitUntil { self.findTableView(in: window.contentView!) != nil }
         let table = try #require(findTableView(in: window.contentView!))
-        defer { window.orderOut(nil) }
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
 
         // `List` renders a header row per `Section`, which occupies a real NSTableView row
         // index; `nil` marks those so selection lookups only ever match a real content row.
