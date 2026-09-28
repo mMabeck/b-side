@@ -80,6 +80,8 @@ struct DiffTextView: NSViewRepresentable {
 
         // scrollableTextView() wraps to the container width by default; a
         // diff needs horizontal scrolling for long lines instead.
+        // `maxSize` defaults to the initial viewport width, which would cap the frame and disable horizontal scrolling.
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isHorizontallyResizable = true
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = false

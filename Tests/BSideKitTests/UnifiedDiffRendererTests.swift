@@ -108,7 +108,8 @@ struct DiffTextViewLayoutTests {
         return nil
     }
 
-    @Test func diffTextViewLaysOutNonEmptyGlyphsAtARealSize() async throws {
+    @Test("DiffTextView lays out glyphs and scrolls horizontally instead of wrapping long lines")
+    func diffTextViewLaysOutAndScrollsHorizontally() async throws {
         let diff = """
         diff --git a/foo.swift b/foo.swift
         --- a/foo.swift
@@ -116,7 +117,7 @@ struct DiffTextViewLayoutTests {
         @@ -1,1 +1,1 @@
         -let removed = 2
         +let added = 2
-        """
+        """ + "\n+" + String(repeating: "x", count: 500)
         let window = makeHostedWindow(diff: diff)
         defer { window.orderOut(nil) }
 
@@ -126,9 +127,9 @@ struct DiffTextViewLayoutTests {
             return scrollView != nil
         }
         let textView = try #require(scrollView?.documentView as? NSTextView)
-        try await waitUntil { textView.frame.width > 0 && textView.frame.height > 0 }
-
-        #expect(textView.frame.width > 0)
+        let viewportWidth = try #require(scrollView).contentView.bounds.width
+        try await waitUntil { textView.frame.width > viewportWidth && textView.frame.height > 0 }
+        #expect(textView.frame.width > viewportWidth)
         #expect(textView.frame.height > 0)
 
         let layoutManager = try #require(textView.layoutManager)
