@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="B-Side app icon"></p>
+
 # B-Side
 
 A macOS-only Swift app for running Pi agent sessions. Native AppKit/SwiftUI,
