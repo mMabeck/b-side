@@ -4,23 +4,10 @@ import Testing
 
 @testable import BSideKit
 
-/// Pure renderer tests: no window, no view hierarchy, no palette resolution
+/// Pure parser/renderer tests: no window, no view hierarchy, no palette resolution
 /// from a live Ghostty theme.
 struct UnifiedDiffRendererTests {
     private let palette = BSidePalette.fallback
-
-    private func color(at index: Int, in attributed: NSAttributedString) -> NSColor {
-        let value = attributed.attribute(.foregroundColor, at: index, effectiveRange: nil)
-        return (value as? NSColor) ?? .clear
-    }
-
-    private func sameColor(_ a: NSColor, _ b: Color) -> Bool {
-        guard let deviceA = a.usingColorSpace(.deviceRGB),
-              let deviceB = NSColor(b).usingColorSpace(.deviceRGB) else { return false }
-        return abs(deviceA.redComponent - deviceB.redComponent) < 0.001
-            && abs(deviceA.greenComponent - deviceB.greenComponent) < 0.001
-            && abs(deviceA.blueComponent - deviceB.blueComponent) < 0.001
-    }
 
     private let sampleDiff = """
     diff --git a/foo.swift b/foo.swift
@@ -31,35 +18,29 @@ struct UnifiedDiffRendererTests {
      let unchanged = 1
     -let removed = 2
     +let added = 2
+    @@ -10,2 +10,3 @@ func bar() {
+     let tail = 1
+    +let inserted = 2
+     let last = 3
     """
 
-    private enum ExpectedRole { case dimmed, accent, primary, added, removed }
-
-    @Test("Each diff line kind is coloured distinctly: git/index/file headers dimmed, hunk header accented, +/- lines success/error, context primary", arguments: [
-        (lineIndex: 0, prefix: "diff --git", role: ExpectedRole.dimmed),
-        (lineIndex: 1, prefix: "index ", role: ExpectedRole.dimmed),
-        (lineIndex: 2, prefix: "--- ", role: ExpectedRole.dimmed),
-        (lineIndex: 3, prefix: "+++ ", role: ExpectedRole.dimmed),
-        (lineIndex: 4, prefix: "@@", role: ExpectedRole.accent),
-        (lineIndex: 5, prefix: " let unchanged", role: ExpectedRole.primary),
-        (lineIndex: 6, prefix: "-let removed", role: ExpectedRole.removed),
-        (lineIndex: 7, prefix: "+let added", role: ExpectedRole.added),
+    @Test("Parsing produces the right row kind and old/new line numbers across two hunks", arguments: [
+        (rowIndex: 0, kind: UnifiedDiffRenderer.RowKind.context, old: 1, new: 1, text: "let unchanged = 1"),
+        (rowIndex: 1, kind: UnifiedDiffRenderer.RowKind.removed, old: 2, new: nil, text: "let removed = 2"),
+        (rowIndex: 2, kind: UnifiedDiffRenderer.RowKind.added, old: nil, new: 2, text: "let added = 2"),
+        (rowIndex: 3, kind: UnifiedDiffRenderer.RowKind.separator, old: nil, new: nil, text: "⋯ func bar() {"),
+        (rowIndex: 4, kind: UnifiedDiffRenderer.RowKind.context, old: 10, new: 10, text: "let tail = 1"),
+        (rowIndex: 5, kind: UnifiedDiffRenderer.RowKind.added, old: nil, new: 11, text: "let inserted = 2"),
+        (rowIndex: 6, kind: UnifiedDiffRenderer.RowKind.context, old: 11, new: 12, text: "let last = 3"),
     ])
-    private func lineColour(lineIndex: Int, prefix: String, role: ExpectedRole) {
-        let attributed = UnifiedDiffRenderer.render(sampleDiff, palette: palette)
-        let lines = sampleDiff.components(separatedBy: "\n")
-        let lineStart = lines[0..<lineIndex].reduce(0) { $0 + $1.count + 1 }
-        let expectedColor: Color
-        switch role {
-        case .dimmed: expectedColor = palette.textDisabled
-        case .accent: expectedColor = palette.accent
-        case .primary: expectedColor = palette.textPrimary
-        case .added: expectedColor = palette.statusSuccess
-        case .removed: expectedColor = palette.statusError
-        }
-
-        #expect(lines[lineIndex].hasPrefix(prefix))
-        #expect(sameColor(color(at: lineStart, in: attributed), expectedColor))
+    private func parsedRow(rowIndex: Int, kind: UnifiedDiffRenderer.RowKind, old: Int?, new: Int?, text: String) {
+        let rows = UnifiedDiffRenderer.parse(sampleDiff)
+        #expect(rows.count == 7)
+        let row = rows[rowIndex]
+        #expect(row.kind == kind)
+        #expect(row.oldLineNumber == old)
+        #expect(row.newLineNumber == new)
+        #expect(row.text == text)
     }
 
     @Test("A 10k-line diff renders under a reasonable time bound")
