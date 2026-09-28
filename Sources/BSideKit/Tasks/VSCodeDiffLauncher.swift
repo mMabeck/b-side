@@ -2,16 +2,42 @@ import Foundation
 
 /// Resolves the `code` CLI and opens a two-file diff (`code --diff base current`)
 /// for the Changes overlay's "Open Diff in VS Code" button. Content, not a patch:
-/// `code --diff` compares two real files, so the base side is written to a temp
-/// file at the diff's base revision and the current side is the worktree file.
+/// `code --diff` compares two real files, so each side is written to a temp file
+/// at its own revision (see `currentSideSource` for which revision the current
+/// side reads from).
 public struct VSCodeDiffLauncher {
     public typealias EnvironmentProvider = () -> [String: String]
     public typealias FileExistsCheck = (String) -> Bool
 
-    static let fallbackPaths = [
-        "/usr/local/bin/code",
-        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-    ]
+    static var fallbackPaths: [String] {
+        [
+            "/usr/local/bin/code",
+            "/opt/homebrew/bin/code",
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Applications/Visual Studio Code.app/Contents/Resources/app/bin/code").path,
+        ]
+    }
+
+    /// Where to read the "current" (right-hand) side of the diff from. Committed
+    /// mode compares the base against HEAD, not the worktree, so its current side
+    /// must come from HEAD too — otherwise uncommitted edits leak in, or a file
+    /// deleted only on disk (but still in HEAD) shows up empty.
+    public enum CurrentSideSource: Equatable, Sendable {
+        case none
+        case worktreeFile
+        case gitRef(String)
+    }
+
+    public static func currentSideSource(mode: ChangesOverlayStore.Mode, kind: GitCLI.FileChange.Kind) -> CurrentSideSource {
+        guard kind != .deleted else { return .none }
+        switch mode {
+        case .committed:
+            return .gitRef("HEAD")
+        case .all, .uncommitted:
+            return .worktreeFile
+        }
+    }
 
     private let environment: EnvironmentProvider
     private let fileExists: FileExistsCheck
