@@ -42,10 +42,13 @@ struct SidebarView: View {
                 List(selection: selectionBinding) {
                     if !activeTaskEntries.isEmpty {
                         Section("Active") {
+                            // A second reorder landing before NSTableView's row-move
+                            // animation settles composites one row's content under another's.
                             ForEach(Array(activeTaskEntries.enumerated()), id: \.element.taskID) { index, entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: index)
                                     .tag(SidebarRowID.activeTask(entry.taskID))
                             }
+                            .transaction { $0.animation = nil }
                         }
                     }
 

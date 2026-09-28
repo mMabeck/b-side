@@ -113,4 +113,23 @@ struct ProjectsStoreActivityOrderingTests {
         #expect(store.openTerminalTaskIDs == orderBeforeNoOpClear)
     }
 
+    @Test("Repeated setTaskBusy pings for an already-busy task don't re-bump ordering")
+    func setTaskBusyDoesNotRebumpWhileAlreadyBusy() async throws {
+        let (store, _, taskA, taskB) = try await makeStore()
+        let idA = try #require(taskA.id)
+        let idB = try #require(taskB.id)
+        store.noteTerminalOpened(taskID: idA)
+        store.noteTerminalOpened(taskID: idB)
+
+        store.setTaskBusy(idB)
+        #expect(store.openTerminalTaskIDs == [idB, idA])
+
+        store.setTaskBusy(idA)
+        #expect(store.openTerminalTaskIDs == [idA, idB])
+
+        // idA is already busy; a repeated ping must not move it again.
+        store.setTaskBusy(idA)
+        #expect(store.openTerminalTaskIDs == [idA, idB])
+    }
+
 }
