@@ -1,6 +1,6 @@
 # Native Rewrite Plan
 
-A from-scratch, macOS-only, Swift rewrite of Dash Pi. Native AppKit/SwiftUI throughout,
+A macOS-only Swift app for running Pi agent sessions. Native AppKit/SwiftUI throughout,
 libghostty for terminals, git worktrees as the organising principle.
 
 This document describes **what the app does**, not how it looks. It deliberately contains no

@@ -1,6 +1,6 @@
 # B-Side
 
-A from-scratch, macOS-only, Swift rewrite of Dash Pi. Native AppKit/SwiftUI,
+A macOS-only Swift app for running Pi agent sessions. Native AppKit/SwiftUI,
 libghostty for terminals, git worktrees as the organising principle.
 
 The authoritative spec is [`docs/native-rewrite.md`](docs/native-rewrite.md).

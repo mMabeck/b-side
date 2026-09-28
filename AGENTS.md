@@ -1,6 +1,6 @@
 # B-Side
 
-macOS-only Swift rewrite of Dash Pi: a native app that runs Pi agent sessions in
+macOS-only native Swift app that runs Pi agent sessions in
 embedded libghostty terminals, one per task, organised around git branches and
 worktrees. The authoritative spec is [`docs/native-rewrite.md`](docs/native-rewrite.md);
 visual identity is in [`docs/brand.md`](docs/brand.md). Formerly "Dash Native".

@@ -172,8 +172,8 @@ struct PiSessionServiceTests {
     @Test("sessions subdirectory naming collapses non-alphanumerics and wraps in --")
     func sessionsSubdirectoryNamingMatchesObservedRule() throws {
         #expect(
-            PiSessionService.sessionsSubdirectoryName(forCWD: "/Users/magnusmabeck/Claude/worktrees/new-task-078")
-                == "--Users-magnusmabeck-Claude-worktrees-new-task-078--"
+            PiSessionService.sessionsSubdirectoryName(forCWD: "/Users/me/Code/worktrees/new-task-078")
+                == "--Users-me-Code-worktrees-new-task-078--"
         )
     }
 

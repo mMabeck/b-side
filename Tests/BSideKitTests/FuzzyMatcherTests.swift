@@ -11,8 +11,8 @@ struct FuzzyMatcherTests {
     }
 
     @Test("Prefix beats contiguous, contiguous beats scattered, and word-boundary beats mid-word", arguments: [
-        (query: "dash", higher: "dash-pi", lower: "b-side-dash-fork"),
-        (query: "side", higher: "b-side", lower: "synsforum-internal-dashboard-editor"),
+        (query: "note", higher: "notes-app", lower: "b-side-notes-fork"),
+        (query: "side", higher: "b-side", lower: "docs-internal-dashboard-editor"),
         (query: "s", higher: "a-side", lower: "aside"),
     ])
     func matchQualityOutranks(query: String, higher: String, lower: String) throws {
@@ -23,8 +23,8 @@ struct FuzzyMatcherTests {
 
     @Test("rank drops non-matching items and orders the rest best-first")
     func rankOrdersByScore() {
-        let items = ["b-side-dash-fork", "dash-pi", "synsforum"]
-        let ranked = FuzzyMatcher.rank(query: "dash", items: items) { [$0] }
-        #expect(ranked == ["dash-pi", "b-side-dash-fork"])
+        let items = ["b-side-notes-fork", "notes-app", "website"]
+        let ranked = FuzzyMatcher.rank(query: "note", items: items) { [$0] }
+        #expect(ranked == ["notes-app", "b-side-notes-fork"])
     }
 }
