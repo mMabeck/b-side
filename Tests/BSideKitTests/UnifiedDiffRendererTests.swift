@@ -17,6 +17,7 @@ struct UnifiedDiffRendererTests {
     @@ -1,2 +1,2 @@
      let unchanged = 1
     -let removed = 2
+    \\ No newline at end of file
     +let added = 2
     @@ -10,3 +10,4 @@ func bar() {
      let tail = 1

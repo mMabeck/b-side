@@ -48,13 +48,14 @@ enum UnifiedDiffRenderer {
         var isFirstHunk = true
 
         diff.enumerateLines { line, _ in
+            // Git places this marker inside a hunk, between a changed last line's -/+ pair.
+            if line.hasPrefix("\\ No newline") { return }
             let inHunk = oldRemaining > 0 || newRemaining > 0
 
             // Metadata and hunk headers only mean what they look like between hunks;
             // a removed/added line's content can itself start with "--- "/"+++ ".
             if !inHunk {
                 if isMetadataLine(line) { return }
-                if line.hasPrefix("\\ No newline") { return }
 
                 if line.hasPrefix("@@") {
                     guard let hunk = parseHunkHeader(line) else {
