@@ -4,9 +4,10 @@ import Testing
 
 @testable import BSideKit
 
-/// Regression for a List-selection bug: `selectionBinding` used to re-derive its value from
-/// `store.openTerminalTaskIDs`, so opening a terminal for the selected task silently moved the
-/// highlight from the project row to the newly inserted Active row in the same table update.
+/// Regression for List-selection bugs: opening a terminal for the selected task must not
+/// silently move the highlight from the project row to the newly inserted Active row in the
+/// same table update, and the List clearing its selection to `nil` must not leave every row
+/// unhighlighted.
 @MainActor
 @Suite("Sidebar selection stability")
 struct SidebarSelectionTests {
@@ -131,6 +132,11 @@ struct SidebarSelectionTests {
         // (d) a programmatic select (⌘-digit style) of an already-open task highlights the
         // Active row directly.
         store.selectTask(alpha, project: project)
+        try await expectSelection(.activeTask(alpha.id!))
+
+        // (e) the List clearing its selection (empty-space click, ⌘-click the selected row)
+        // must restore the highlight rather than leave the table unselected.
+        table.deselectAll(nil)
         try await expectSelection(.activeTask(alpha.id!))
     }
 }

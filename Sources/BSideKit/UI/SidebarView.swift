@@ -105,7 +105,13 @@ struct SidebarView: View {
                 .listStyle(.sidebar)
                 .onAppear { syncSelectionFromStore() }
                 .onChange(of: selection) { _, newValue in
-                    guard let newValue, !Self.matches(newValue, selectedTaskID: store.selectedTaskID, selectedProjectID: store.selectedProjectID) else { return }
+                    // The List clears selection to nil when clicking empty space or
+                    // \u2318-clicking the selected row; treat that as a revert, not a deselect.
+                    guard let newValue else {
+                        syncSelectionFromStore()
+                        return
+                    }
+                    guard !Self.matches(newValue, selectedTaskID: store.selectedTaskID, selectedProjectID: store.selectedProjectID) else { return }
                     switch newValue {
                     case .task(let id), .activeTask(let id):
                         if let match = store.taskAndProject(forID: id) {
@@ -119,10 +125,6 @@ struct SidebarView: View {
                 }
                 .onChange(of: store.selectedTaskID) { syncSelectionFromStore() }
                 .onChange(of: store.selectedProjectID) { syncSelectionFromStore() }
-                .onChange(of: store.openTerminalTaskIDs) { _, newIDs in
-                    guard case .activeTask(let id) = selection, !newIDs.contains(id) else { return }
-                    syncSelectionFromStore()
-                }
             }
 
             Divider()
