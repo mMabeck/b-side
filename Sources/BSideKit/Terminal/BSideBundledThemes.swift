@@ -9,9 +9,9 @@ enum BSideBundledThemes {
         name: "B-Side",
         background: "16141c",
         foreground: "ede7d8",
-        cursorColor: "ff6c2f",
+        cursorColor: "765ab2",
         cursorText: "16141c",
-        selectionBackground: "3f2417",
+        selectionBackground: "332949",
         selectionForeground: "f3eee2",
         palette: [
             0: "2a2732", 1: "f03c3e", 2: "68a84a", 3: "ffe028",
@@ -25,9 +25,9 @@ enum BSideBundledThemes {
         name: "B-Side Paper",
         background: "f3eee2",
         foreground: "26283e",
-        cursorColor: "ff6c2f",
+        cursorColor: "765ab2",
         cursorText: "f3eee2",
-        selectionBackground: "ffd9c4",
+        selectionBackground: "ddd3ec",
         selectionForeground: "1a1820",
         palette: [
             0: "1a1820", 1: "d02c2e", 2: "4d8a33", 3: "b8880a",
