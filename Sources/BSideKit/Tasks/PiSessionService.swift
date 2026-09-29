@@ -1,13 +1,9 @@
 import Foundation
 
-/// Resolves and launches `pi` CLI sessions for a task's agent terminal, so
-/// reopening a task resumes the same pi session instead of a fresh one.
+/// Resolves and launches `pi` sessions so reopening a task resumes the same one.
 public enum PiSessionService {
-    /// Every field is a plain value/closure so tests can substitute a temp directory/PATH answer.
     public struct Locations: Sendable {
-        /// `~/.pi/agent/bin/pi`, if that file exists.
         public var bundledBinaryPath: String?
-        /// `~/.pi/agent/sessions`, where transcript JSONL files live.
         public var sessionsRoot: URL
         public var pathBinaryFinder: @Sendable () -> String?
 
@@ -60,9 +56,6 @@ public enum PiSessionService {
         UUID().uuidString
     }
 
-    /// Resumes `transcriptPath` when known, else targets `sessionID` via
-    /// `--session-id` (which `pi` creates if absent). Falls back to a plain
-    /// login shell when no `pi` binary is found, so the terminal still opens.
     public static func launchCommand(
         locations: Locations,
         sessionID: String,
@@ -83,8 +76,7 @@ public enum PiSessionService {
         return "\(shellQuote(binary)) \(sessionFlag) --name \(shellQuote(taskName))"
     }
 
-    /// `BSIDE_SUBAGENT_ENDPOINT` is set only if the server is already
-    /// listening; the Pi-side spawner otherwise reads `ProjectsStore`'s address file.
+    /// `BSIDE_SUBAGENT_ENDPOINT` is set only if the server is listening; otherwise Pi reads the address file.
     public static func launchEnvironment(taskId: Int64, subagentEndpoint: String?) -> [String: String] {
         var environment = ["BSIDE_TASK_ID": String(taskId)]
         if let subagentEndpoint, !subagentEndpoint.isEmpty {
@@ -93,22 +85,17 @@ public enum PiSessionService {
         return environment
     }
 
-    /// The drawer's default command; also `launchCommand`'s fallback when no `pi` binary is found.
     public static func loginShellFallbackCommand(
         shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
     ) -> String {
         "\(shell) -l"
     }
 
-    /// POSIX single-quote escaping, safe for any path regardless of shell metacharacters.
     static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    // MARK: - Transcript lookup
-
-    /// Pi lays transcripts out as `<sessionsRoot>/<slugified-cwd>/<ts>_<uuid>.jsonl`,
-    /// so this walks every subdirectory rather than reimplementing pi's slugifier.
+    /// Walks every subdirectory rather than reimplementing pi's slugifier.
     public static func locateTranscript(sessionID: String, locations: Locations) -> URL? {
         let fileManager = FileManager.default
         guard let enumerator = fileManager.enumerator(
@@ -130,7 +117,7 @@ public enum PiSessionService {
     static func parseSessionID(atFirstLineOf url: URL) -> String? {
         guard let handle = FileHandle(forReadingAtPath: url.path) else { return nil }
         defer { try? handle.close() }
-        // 64 KiB is generous headroom without reading an entire (potentially long-running) transcript.
+        // Headroom without reading a whole long-running transcript.
         let data = handle.readData(ofLength: 64 * 1024)
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         guard let firstLine = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first else {
@@ -154,22 +141,8 @@ public enum PiSessionService {
         return header.id
     }
 
-    // MARK: - Resume-time transcript repair
-
-    /// `pi` refuses to resume a transcript whose header `cwd` no longer
-    /// exists ("Stored session working directory does not exist", exit 1).
-    /// Only fires for tasks renamed before `TaskAutoRenameService.applyRename`
-    /// stopped moving worktrees, kept so resuming those older tasks still works.
-    ///
-    /// Compares paths with symlinks resolved (macOS reports `/tmp/x` as
-    /// `/private/tmp/x`, pi stores the resolved form). No-op if the header
-    /// already matches, or its stored `cwd` differs but still exists on disk
-    /// (a genuinely different, valid directory — not the moved-worktree case).
-    /// Otherwise rewrites only the header's `cwd` field and relocates the
-    /// file (see `sessionsSubdirectoryName(forCWD:)`).
-    ///
-    /// `nil` means no usable transcript (missing, unreadable, or unparseable
-    /// header) — callers should fall back to a fresh session.
+    /// `pi` refuses to resume a transcript whose header `cwd` no longer exists; this rewrites it and relocates the file.
+    /// Paths compare with symlinks resolved: macOS reports `/tmp/x` as `/private/tmp/x`, pi stores the latter.
     public static func repairTranscriptForResume(
         transcriptPath: String,
         currentWorkingDirectory: String,
@@ -204,9 +177,7 @@ public enum PiSessionService {
         let resolvedExisting = URL(fileURLWithPath: existingCWD).resolvingSymlinksInPath().path
         let resolvedCurrent = URL(fileURLWithPath: currentWorkingDirectory).resolvingSymlinksInPath().path
         guard resolvedExisting != resolvedCurrent else { return transcriptPath }
-        // Only repair when the stored directory has genuinely vanished; a
-        // still-real directory means this isn't the moved-worktree case, and
-        // rewriting a healthy transcript would wrongly relocate it.
+        // A still-real directory isn't the moved-worktree case; rewriting would wrongly relocate it.
         guard !fileManager.fileExists(atPath: resolvedExisting) else { return transcriptPath }
 
         header["cwd"] = resolvedCurrent
@@ -235,28 +206,12 @@ public enum PiSessionService {
         return destinationURL.path
     }
 
-    // MARK: - Resume-time transcript resolution
-
     public struct ResolvedTranscript: Equatable, Sendable {
-        /// `nil` means launch with `--session-id` instead.
         public let transcriptPathForLaunch: String?
-        /// The path to persist via `ProjectsStore.recordTranscriptPath`. `nil` if unchanged.
         public let transcriptPathToPersist: String?
     }
 
-    /// Resolves which transcript to resume `conversation` from, repairing a
-    /// stale stored `cwd` along the way. Always falls back to a full
-    /// `locateTranscript` scan — by session id, ignoring a stored
-    /// `transcriptPath` that's empty or fails to repair — rather than
-    /// trusting `resolveTranscriptPath`'s best-effort polling loop (bounded
-    /// to ~10s, easily outlived by a reopened task).
-    ///
-    /// `transcriptPathForLaunch: nil` (i.e. `--session-id`) is the last
-    /// resort, not a safe default: `pi --session-id <id>` run from a
-    /// different directory than the session was created in does not find it
-    /// by id, and silently starts a brand-new *empty* session (exit 0),
-    /// discarding the whole prior conversation. Do not "simplify" this back
-    /// to always using `--session-id` — it fails silently.
+    /// Never fall back to `--session-id` alone: from another cwd pi silently starts an empty session (exit 0), discarding the conversation.
     public static func resolveTranscriptForResume(
         conversation: Conversation,
         currentWorkingDirectory: String,
@@ -287,10 +242,7 @@ public enum PiSessionService {
         return ResolvedTranscript(transcriptPathForLaunch: nil, transcriptPathToPersist: nil)
     }
 
-    /// Pi's sessions-subdirectory naming rule, observed empirically:
-    /// non-alphanumeric runs collapsed to `-`, wrapped in `--`, e.g.
-    /// `/Users/me/worktrees/task-1` → `--Users-me-worktrees-task-1--`. Only
-    /// used to *relocate* a repaired transcript; `locateTranscript` never trusts this to find one.
+    /// Pi's observed naming: non-alphanumeric runs become `-`, wrapped in `--`. Only used to relocate a repaired transcript.
     static func sessionsSubdirectoryName(forCWD cwd: String) -> String {
         var result = ""
         var lastWasHyphen = true

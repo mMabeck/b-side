@@ -49,8 +49,7 @@ public struct TitleGenerationSettings: Equatable, Sendable {
     }
 
     public static let promptPlaceholder = "{prompt}"
-    /// The wording the local title models were fine-tuned on; changing it can
-    /// degrade their titles.
+    /// The wording the local title models were fine-tuned on; changing it can degrade titles.
     public static let defaultPromptTemplate = """
         Write a short English title (2-5 words) for the question below. \
         The question may be in Danish; the title is always in English. Reply with the title only.
@@ -66,7 +65,6 @@ public struct TitleGenerationSettings: Equatable, Sendable {
 
     public var mode: TitleGenerationMode = .localModel
     public var claudeModel = defaultClaudeModel
-    /// Empty means Codex's own configured default model.
     public var codexModel = ""
     public var modelSource: TitleModelSource = .huggingFace
     public var huggingFaceRepo = defaultHuggingFaceRepo
@@ -74,7 +72,6 @@ public struct TitleGenerationSettings: Equatable, Sendable {
     public var modelFilePath = defaultModelFilePath
     public var openAIBaseURL = defaultOpenAIBaseURL
     public var openAIModel = ""
-    /// Read from the Keychain, and only when `mode` is `.openAICompatible`.
     public var openAIKey = ""
     public var promptTemplate = defaultPromptTemplate
 
@@ -99,7 +96,6 @@ public struct TitleGenerationSettings: Equatable, Sendable {
         return settings
     }
 
-    /// Where the local model is expected, whether or not it exists yet.
     public var localModelURL: URL {
         switch modelSource {
         case .file:

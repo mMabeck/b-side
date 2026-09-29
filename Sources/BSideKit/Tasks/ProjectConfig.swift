@@ -1,10 +1,7 @@
 import Foundation
 import OSLog
 
-/// Per-project configuration: a small file in the repo (`.bside/config.json`)
-/// holding setup/teardown commands and task defaults. Read from disk on demand —
-/// it is source-controlled project state, not app state, so it isn't cached in
-/// the database.
+/// Read from disk on demand: source-controlled project state, not cached in the database.
 public struct ProjectConfig: Codable, Equatable, Sendable {
     public struct TaskDefaults: Codable, Equatable, Sendable {
         public var baseRef: String
@@ -18,9 +15,7 @@ public struct ProjectConfig: Codable, Equatable, Sendable {
         }
     }
 
-    /// Runs once in a fresh worktree before the agent starts, e.g. dependency install.
     public var setupCommand: String?
-    /// Runs once before a worktree is removed, e.g. tearing down containers it started.
     public var teardownCommand: String?
     public var taskDefaults: TaskDefaults
 
@@ -32,13 +27,10 @@ public struct ProjectConfig: Codable, Equatable, Sendable {
 
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "project-config")
 
-    /// The path this config would live at for a project rooted at `projectPath`.
     public static func configFileURL(forProjectAt projectPath: URL) -> URL {
         projectPath.appendingPathComponent(".bside/config.json")
     }
 
-    /// Loads `.bside/config.json` from the project, falling back to defaults if the
-    /// file is missing or malformed.
     public static func load(forProjectAt projectPath: URL) -> ProjectConfig {
         let url = configFileURL(forProjectAt: projectPath)
         guard let data = try? Data(contentsOf: url) else {

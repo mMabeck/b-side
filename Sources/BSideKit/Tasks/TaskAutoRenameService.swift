@@ -1,17 +1,10 @@
 import Foundation
 import OSLog
 
-/// A task created with a blank name (`TaskRecord.awaitingAutoRename`) is
-/// renamed once its first prompt is typed, and its app-created branch is
-/// renamed to match. The worktree directory is never moved — moving it out
-/// from under a live pi process breaks pi's tools (stale cwd) and transcript
-/// lookup — so it stays put for the task's lifetime, like Claude Desktop/Codex.
-/// `deriveTitle` is the heuristic fallback when `TaskTitleGenerator` returns nil.
+/// The worktree directory is never moved: that breaks a live pi process's cwd and transcript lookup.
 
 public enum TaskAutoRenameService {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-auto-rename")
-
-    // MARK: - Transcript parsing
 
     /// Every other line type (`session`, `session_info`, ...) fails to decode `message` and is skipped.
     private struct TranscriptLine: Decodable {
@@ -44,7 +37,6 @@ public enum TaskAutoRenameService {
         let text: String?
     }
 
-    /// `nil` if none sent yet. Only a `{"type":"message","message":{"role":"user",...}}` line counts.
     public static func firstUserPromptText(inTranscriptLines lines: [String]) -> String? {
         let decoder = JSONDecoder()
         for line in lines {
@@ -64,11 +56,6 @@ public enum TaskAutoRenameService {
         return nil
     }
 
-    // MARK: - Title derivation
-
-    /// Collapsed to one line, stripped of markdown markers and leading
-    /// punctuation, truncated at a word boundary. `nil` for empty/all-punctuation
-    /// input, so callers can leave "New Task" instead of renaming to nothing.
     public static func deriveTitle(fromPrompt prompt: String, maxLength: Int = 48) -> String? {
         var text = prompt
         text.removeAll { "`*_#".contains($0) }
@@ -94,11 +81,6 @@ public enum TaskAutoRenameService {
         return truncated
     }
 
-    // MARK: - Applying the rename
-
-    /// Renames the branch too when the task has its own app-created branch,
-    /// deduping like `TaskWorktreeService.createWorktree`; never touches
-    /// `task.worktreePath`. Runs name-only (no git calls) otherwise.
     public static func applyRename(task: TaskRecord, project: Project, newName: String) async -> TaskRecord {
         var updated = task
         updated.name = newName

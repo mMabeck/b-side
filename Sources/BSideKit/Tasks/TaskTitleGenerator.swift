@@ -1,18 +1,11 @@
 import Foundation
 import OSLog
 
-/// Generates a short task title from a user's first pi prompt, for
-/// `ProjectsStore.applyAutoRename` to prefer over
-/// `TaskAutoRenameService.deriveTitle`'s heuristic. The backend (a local
-/// llama.cpp model, or the Claude/Codex CLI) comes from
-/// `TitleGenerationSettings`. Every failure is logged as a distinct
-/// `TitleGenerationFailure` and then collapsed to `nil` so the caller can
-/// fall back unconditionally.
+/// Every failure is logged as a `TitleGenerationFailure`, then collapsed to `nil` so callers can fall back.
 public enum TaskTitleGenerator {
     fileprivate static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-title-generator")
 
-    /// A GUI app's `PATH` typically excludes Homebrew and user-local
-    /// installs, so these are probed before whatever `PATH` the process has.
+    /// A GUI app's `PATH` omits Homebrew and user-local installs, so these are probed first.
     private static var binaryDirectories: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
@@ -27,8 +20,6 @@ public enum TaskTitleGenerator {
 
     private static let localTimeout: TimeInterval = 15
     private static let cliTimeout: TimeInterval = 30
-    /// How long a SIGTERM'd (or cancelled) child is given to exit on its own
-    /// before escalating to SIGKILL.
     private static let terminationGracePeriod: TimeInterval = 1
     private static let maxTitleWords = 8
     private static let maxTitleLength = 60
@@ -45,8 +36,6 @@ public enum TaskTitleGenerator {
         }
     }
 
-    /// Runs the configured backend and reports why it failed, for the
-    /// Settings "Test" button. `.firstWords` always fails with `.disabled`.
     public static func generateResult(
         fromPrompt prompt: String,
         settings: TitleGenerationSettings,
@@ -88,10 +77,6 @@ public enum TaskTitleGenerator {
         }
     }
 
-    /// Testable core for the local model: takes already-resolved paths and
-    /// explicit timing, so tests can point it at fake `#!/bin/sh` scripts
-    /// and short timeouts. `onLaunch` is called once with the child's pid
-    /// right after a successful `Process.run()`.
     static func generateResult(
         fromPrompt prompt: String,
         binaryPath: String?,
@@ -132,8 +117,7 @@ public enum TaskTitleGenerator {
         let instruction = instruction(template: settings.promptTemplate, prompt: prompt)
         switch settings.mode {
         case .claude:
-            // No tools, MCP servers, skills, settings files or saved session:
-            // a bare one-shot completion.
+            // Bare one-shot completion: no tools, MCP servers, skills, settings or session.
             return [
                 "-p",
                 "--model", settings.claudeModel,
@@ -159,8 +143,6 @@ public enum TaskTitleGenerator {
         }
     }
 
-    /// Substitutes the first `maxQuestionLength` characters of `prompt` for
-    /// `{prompt}`, or appends them when the template lacks the placeholder.
     public static func instruction(template: String, prompt: String) -> String {
         let question = String(prompt.prefix(maxQuestionLength))
         guard template.contains(TitleGenerationSettings.promptPlaceholder) else {
@@ -169,14 +151,12 @@ public enum TaskTitleGenerator {
         return template.replacingOccurrences(of: TitleGenerationSettings.promptPlaceholder, with: question)
     }
 
-    /// The exact text the configured backend receives.
     public static func modelInput(for settings: TitleGenerationSettings, prompt: String) -> String {
         let instruction = instruction(template: settings.promptTemplate, prompt: prompt)
         return settings.mode == .localModel ? chatFormatted(instruction) : instruction
     }
 
-    /// The Qwen chat format with an empty think block, as the title models
-    /// were fine-tuned on.
+    /// Qwen chat format with an empty think block, as the title models were fine-tuned on.
     private static func chatFormatted(_ instruction: String) -> String {
         """
         <|im_start|>user
@@ -185,7 +165,6 @@ public enum TaskTitleGenerator {
         <think>
 
         </think>
-
 
         """
     }
@@ -199,8 +178,7 @@ public enum TaskTitleGenerator {
 
     // MARK: - OpenAI-compatible endpoint
 
-    /// Accepts the `/v1` base, with or without a trailing slash, or a pasted
-    /// full `.../chat/completions` URL.
+    /// Accepts the `/v1` base with or without a trailing slash, or a full `.../chat/completions` URL.
     static func chatCompletionsURL(baseURL: String) -> URL? {
         var text = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasSuffix("/") { text.removeLast() }
@@ -233,8 +211,6 @@ public enum TaskTitleGenerator {
         return .success(request)
     }
 
-    /// Extracts `choices[0].message.content`, drops `<think>` blocks, and
-    /// cleans the rest like the other backends' output.
     static func parseChatResponse(_ data: Data) -> Result<String, TitleGenerationFailure> {
         guard
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -272,8 +248,7 @@ public enum TaskTitleGenerator {
 
     // MARK: - Failure logging
 
-    /// Missing binaries/models are expected on machines without them
-    /// installed, so they log at `.notice`; everything else is `.error`.
+    /// Missing binaries/models are expected, so they log at `.notice`.
     private static func log(_ failure: TitleGenerationFailure) {
         switch failure {
         case .disabled, .binaryNotFound, .modelNotFound, .cancelled:
@@ -292,12 +267,6 @@ public enum TaskTitleGenerator {
 
     // MARK: - Output cleanup/validation
 
-    /// Cleans the generator's output into a single-line title, or
-    /// `nil` if the result doesn't look like one: everything from the
-    /// `[end of text]` marker onward is dropped, the first non-empty line
-    /// is trimmed of surrounding quotes and trailing punctuation, and the
-    /// result is rejected if it's empty, over `maxTitleLength` characters,
-    /// or more than `maxTitleWords` words.
     static func cleanTitle(fromRawOutput raw: String) -> String? {
         var text = raw
         if let markerRange = text.range(of: endOfTextMarker) {
@@ -333,11 +302,6 @@ public enum TaskTitleGenerator {
 
     // MARK: - Process execution
 
-    /// Runs `binaryPath` with `arguments` (no shell) via `ProcessRunner`,
-    /// which owns the SIGTERM→SIGKILL escalation on timeout/cancellation and
-    /// guarantees the continuation resumes exactly once, only after the
-    /// child has actually exited (or been killed and reaped) or failed to
-    /// launch.
     static func runProcess(
         binaryPath: String,
         arguments: [String],
@@ -355,9 +319,7 @@ public enum TaskTitleGenerator {
     }
 }
 
-/// Every distinguishable way title generation can fail. `Error` reasons are
-/// captured as their description rather than the `Error` itself so this
-/// stays `Sendable`.
+/// `Error` reasons are stored as their description to stay `Sendable`.
 public enum TitleGenerationFailure: Error, Sendable, CustomStringConvertible {
     case disabled
     case binaryNotFound(String)
@@ -395,10 +357,7 @@ public enum TitleGenerationFailure: Error, Sendable, CustomStringConvertible {
     }
 }
 
-/// Accumulates a process's output bytes across reads on a background
-/// dispatch source, mirroring `LineBuffer`'s lock pattern since closures
-/// crossing into `Process`'s callback queues aren't `Sendable` under Swift 6
-/// strict concurrency.
+/// Locks like `LineBuffer`; closures crossing into `Process` callbacks aren't `Sendable` under Swift 6.
 private final class OutputBox: @unchecked Sendable {
     private var data = Data()
     private let lock = NSLock()
@@ -416,21 +375,9 @@ private final class OutputBox: @unchecked Sendable {
     }
 }
 
-/// Runs a single child process to completion, separating stdout from a
-/// drained (never `nullDevice`) stderr pipe so a chatty child can't block on
-/// a full stderr buffer, and resuming its continuation exactly once: on a
-/// launch failure, on the process actually terminating, or — after a
-/// timeout or the awaiting `Task` being cancelled — once the SIGTERM→SIGKILL
-/// escalation has actually reaped it. `Process.terminate()`/`kill()` are
-/// only ever called after a successful `run()`, since calling them before
-/// launch is undefined behavior.
+/// Resumes its continuation exactly once; `terminate()`/`kill()` run only after a successful `run()` (undefined before launch).
 private final class ProcessRunner: @unchecked Sendable {
-    /// How long to wait, once the child has terminated (or been SIGKILLed),
-    /// for both output pipes to hit EOF before forcing completion anyway. A
-    /// grandchild that inherited stdout/stderr (e.g. a leaked background
-    /// process) keeps the write end of a pipe open long after the child we
-    /// actually launched has exited; without this bound `run()` would wait
-    /// on that grandchild indefinitely.
+    /// Bound on waiting for pipe EOF after exit: a grandchild inheriting stdout/stderr can hold it open indefinitely.
     private static let drainDeadline: TimeInterval = 0.75
 
     private let process = Process()
@@ -461,9 +408,7 @@ private final class ProcessRunner: @unchecked Sendable {
         self.outputFile = outputFile
         process.executableURL = URL(fileURLWithPath: binaryPath)
         process.arguments = arguments
-        // A neutral cwd keeps the CLIs from picking up a project's
-        // CLAUDE.md/AGENTS.md; the PATH lets npm-installed `#!/usr/bin/env node`
-        // shims find node from a GUI launch.
+        // Neutral cwd keeps CLIs from reading a project's CLAUDE.md/AGENTS.md; PATH lets `#!/usr/bin/env node` shims work from a GUI launch.
         process.currentDirectoryURL = FileManager.default.temporaryDirectory
         var environment = ProcessInfo.processInfo.environment
         let binaryDirectory = (binaryPath as NSString).deletingLastPathComponent
@@ -491,11 +436,7 @@ private final class ProcessRunner: @unchecked Sendable {
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
 
-            // See GitCLI.run/StreamingProcessRunner: don't resolve until both
-            // pipes have hit EOF and the process has terminated, or the
-            // final chunk of output can race process exit. Each leave is
-            // guarded so a forced drain (see scheduleDrain) and a genuine
-            // EOF/termination racing each other can't double-leave the group.
+            // Wait for both pipes' EOF and termination, or the final chunk races exit. Leaves are guarded so a forced drain can't double-leave.
             group.enter()  // stdout EOF
             group.enter()  // stderr EOF
             group.enter()  // termination
@@ -537,11 +478,7 @@ private final class ProcessRunner: @unchecked Sendable {
             lock.unlock()
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
 
-            // Checked again right before actually spawning: `cancel()` may
-            // have run concurrently with the setup above. If so, the
-            // process never launches, so none of stdout EOF, stderr EOF or
-            // termination will ever leave the group; `abandonUnlaunchedProcess`
-            // balances it.
+            // `cancel()` may have raced the setup above; `abandonUnlaunchedProcess` balances the group since no EOF/termination will fire.
             lock.lock()
             let cancelledBeforeRun = cancelRequested
             lock.unlock()
@@ -570,11 +507,7 @@ private final class ProcessRunner: @unchecked Sendable {
         }
     }
 
-    /// Tears down pipes/handlers for a process that was set up but never
-    /// actually `run()` (launch failure or cancellation before launch), and
-    /// balances the `DispatchGroup`'s three outstanding `enter()`s — none of
-    /// stdout EOF, stderr EOF, or termination will ever fire naturally since
-    /// the process never started.
+    /// Balances the group's three `enter()`s, which never fire for a process that didn't start.
     private func abandonUnlaunchedProcess() {
         lock.lock()
         abandoned = true
@@ -592,10 +525,6 @@ private final class ProcessRunner: @unchecked Sendable {
         leaveTermination()
     }
 
-    /// Terminates the child if the awaiting `Task` is cancelled, escalating
-    /// the same way a timeout does. Safe to call before the process has
-    /// launched (`run()` then completes with `.cancelled` without spawning
-    /// anything) or after it has already finished.
     func cancel(gracePeriod: TimeInterval) {
         lock.lock()
         cancelRequested = true
@@ -652,10 +581,6 @@ private final class ProcessRunner: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Starts the drain deadline the first time the child has terminated or
-    /// been SIGKILLed. If a grandchild is still holding either pipe open by
-    /// the time it fires, `forceDrain` cuts the wait short instead of
-    /// blocking on EOF that may never come.
     private func scheduleDrain() {
         lock.lock()
         guard !drainScheduled else {
@@ -725,17 +650,8 @@ private final class ProcessRunner: @unchecked Sendable {
         drainWorkItem?.cancel()
         lock.unlock()
 
-        // The process was never actually run (cancelled before launch, or
-        // failed to launch): `abandonUnlaunchedProcess` already tore things
-        // down; `run()` resumes with the right failure itself. `terminationReason`/
-        // `terminationStatus` are undefined on a `Process` that never ran.
-        // Guarding on `abandoned` (set synchronously before `run()` even
-        // leaves the group) rather than `hasLaunched` (set only after
-        // `process.run()` returns) closes a race: if the child terminates
-        // and both pipes hit EOF before `hasLaunched` is flipped, `finish()`
-        // must still proceed — by the time `group.notify` fires here, the
-        // termination handler has already run, so reading
-        // `terminationStatus`/`terminationReason` is safe regardless.
+        // Guard on `abandoned` (set before `run()` leaves the group), not `hasLaunched`, which flips only after `run()` returns and would
+        // skip finish() for a child that exits first. Status is undefined on a Process that never ran.
         guard !isAbandoned else { return }
 
         process.terminationHandler = nil
