@@ -11,6 +11,9 @@ struct TitleGenerationSettingsTab: View {
     @AppStorage(Keys.huggingFaceRepo) private var huggingFaceRepo = TitleGenerationSettings.defaultHuggingFaceRepo
     @AppStorage(Keys.huggingFaceQuant) private var huggingFaceQuant = TitleGenerationSettings.defaultHuggingFaceQuant
     @AppStorage(Keys.modelFilePath) private var modelFilePath = TitleGenerationSettings.defaultModelFilePath
+    @AppStorage(Keys.openAIBaseURL) private var openAIBaseURL = TitleGenerationSettings.defaultOpenAIBaseURL
+    @AppStorage(Keys.openAIModel) private var openAIModel = ""
+    @State private var openAIKey = TitleAPIKeychain.read() ?? ""
     @AppStorage(Keys.promptTemplate) private var promptTemplate = TitleGenerationSettings.defaultPromptTemplate
 
     @ObservedObject private var downloader = TitleModelDownloader.shared
@@ -58,6 +61,14 @@ struct TitleGenerationSettingsTab: View {
                 }
             case .localModel:
                 localModelSection
+            case .openAICompatible:
+                Section("API") {
+                    TextField("Base URL", text: $openAIBaseURL, prompt: Text(TitleGenerationSettings.defaultOpenAIBaseURL))
+                    TextField("Model", text: $openAIModel, prompt: Text("Required"))
+                    SecureField("API Key", text: $openAIKey, prompt: Text("Optional"))
+                        .onSubmit { TitleAPIKeychain.write(openAIKey) }
+                        .onChange(of: openAIKey) { TitleAPIKeychain.write(openAIKey) }
+                }
             }
 
             if mode != .firstWords {
@@ -75,6 +86,7 @@ struct TitleGenerationSettingsTab: View {
         case .firstWords: "Titles are the first words of the prompt. Nothing leaves this Mac."
         case .claude: "Sends the first prompt to Claude through the `claude` CLI and your existing login."
         case .codex: "Sends the first prompt to OpenAI through the `codex` CLI and your existing login."
+        case .openAICompatible: "Sends the first prompt to any OpenAI-compatible `/chat/completions` endpoint — Ollama, LM Studio, llama-server, vLLM, OpenRouter, OpenAI."
         case .localModel: "Runs a GGUF model on this Mac with llama.cpp's `llama-completion`."
         }
     }
@@ -197,7 +209,7 @@ struct TitleGenerationSettingsTab: View {
                 LabeledContent("Time", value: testRun.duration.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated, fractionalPart: .show(length: 2))))
                 LabeledContent("Peak Memory") {
                     Text(testRun.peakMemory.map { $0.formatted(.byteCount(style: .memory)) } ?? "—")
-                        .help(mode == .localModel ? "" : "Only the local CLI process; the model itself runs remotely.")
+                        .help(helpForPeakMemory)
                 }
                 DisclosureGroup("Sent to Model") {
                     Text(testRun.modelInput)
@@ -206,6 +218,14 @@ struct TitleGenerationSettingsTab: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+
+    private var helpForPeakMemory: String {
+        switch mode {
+        case .localModel: ""
+        case .openAICompatible: "Not measured; the request runs inside B-Side and the model runs on the endpoint."
+        default: "Only the local CLI process; the model itself runs remotely."
         }
     }
 

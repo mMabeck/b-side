@@ -473,3 +473,32 @@ private final class LaunchedSignal: @unchecked Sendable {
         }
     }
 }
+
+@Suite("TaskTitleGenerator OpenAI-compatible backend")
+struct TaskTitleGeneratorOpenAITests {
+    @Test("builds the chat request and parses the reply without think blocks")
+    func requestAndResponse() throws {
+        var settings = TitleGenerationSettings()
+        settings.mode = .openAICompatible
+        settings.openAIModel = "qwen3"
+        settings.openAIBaseURL = "http://localhost:11434/v1/"
+
+        let request = try TaskTitleGenerator.chatRequest(settings: settings, prompt: "fix login").get()
+        #expect(request.url?.absoluteString == "http://localhost:11434/v1/chat/completions")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        let data = try #require(request.httpBody)
+        let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["model"] as? String == "qwen3")
+        #expect(body["stream"] as? Bool == false)
+
+        settings.openAIKey = "sk-test"
+        settings.openAIBaseURL = "https://example.com/v1/chat/completions"
+        let keyed = try TaskTitleGenerator.chatRequest(settings: settings, prompt: "fix login").get()
+        #expect(keyed.url?.absoluteString == "https://example.com/v1/chat/completions")
+        #expect(keyed.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test")
+
+        let reply = #"{"choices":[{"message":{"content":"<think>\nhmm\n</think>\n\"Fix login bug.\""}}]}"#
+        #expect(try TaskTitleGenerator.parseChatResponse(Data(reply.utf8)).get() == "Fix login bug")
+        if case .success = TaskTitleGenerator.parseChatResponse(Data("{}".utf8)) { Issue.record("expected failure") }
+    }
+}
