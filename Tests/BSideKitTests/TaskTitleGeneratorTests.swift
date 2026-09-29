@@ -53,8 +53,13 @@ struct TaskTitleGeneratorCleanupTests {
 struct TaskTitleGeneratorRealModelTests {
     @Test("generates a short usable title from a real prompt")
     func generatesATitleFromARealPrompt() async throws {
-        let title = await TaskTitleGenerator.generate(fromPrompt: "the login page throws a 500 error, please fix it")
-        let unwrapped = try #require(title)
+        var settings = TitleGenerationSettings()
+        settings.modelSource = .file
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "the login page throws a 500 error, please fix it",
+            settings: settings
+        )
+        let unwrapped = try result.get()
         #expect(!unwrapped.isEmpty)
         #expect(unwrapped.split(separator: " ").count <= 8)
     }
@@ -191,6 +196,34 @@ struct TaskTitleGeneratorProcessTests {
                 Issue.record("expected launchFailed, got \(failure)")
                 return
             }
+        }
+    }
+
+    @Test("with an output file, the title is read from it rather than stdout")
+    func outputFile() async throws {
+        let script = try makeScript(
+            """
+            echo "session banner and reasoning noise"
+            echo "Fix Login Bug" > "$1"
+            """
+        )
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("title-out-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: script)
+            try? FileManager.default.removeItem(at: output)
+        }
+
+        let result = await TaskTitleGenerator.runProcess(
+            binaryPath: script.path,
+            arguments: [output.path],
+            outputFile: output,
+            timeout: 5,
+            gracePeriod: 1,
+            onLaunch: nil
+        )
+        guard case .success("Fix Login Bug") = result else {
+            Issue.record("expected the output file's title, got \(result)")
+            return
         }
     }
 
