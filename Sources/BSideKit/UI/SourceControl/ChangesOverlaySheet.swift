@@ -82,23 +82,23 @@ struct ChangesOverlaySheet: View {
         HStack(spacing: 8) {
             if let branchName = store.branchName {
                 Text(branchName)
-                    .font(.body.weight(.medium))
+                    .font(.callout.weight(.medium))
             }
             if let baseRefLabel = store.baseRefLabel {
                 Text("vs \(Self.shortRef(baseRefLabel))")
-                    .font(.body)
+                    .font(.callout)
             }
             Spacer()
             if !store.files.isEmpty {
                 Text("\(store.files.count) file\(store.files.count == 1 ? "" : "s"), +\(store.totalAdded) \u{2212}\(store.totalRemoved)")
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(.callout, design: .monospaced))
             }
         }
         .foregroundStyle(theme.palette.textSecondary)
         // Leading inset matches the system title's indent past the window's traffic lights.
         .padding(.leading, 80)
         .padding(.trailing, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .contain)
     }
 
@@ -157,12 +157,70 @@ struct ChangesOverlaySheet: View {
     // MARK: - Tree
 
     private var treeList: some View {
-        List(selection: selectionBinding) {
-            OutlineGroup(store.tree, children: \.children) { node in
-                treeRow(node).tag(node.id)
+        VStack(spacing: 0) {
+            treeHeader
+            List(selection: selectionBinding) {
+                ForEach(store.visibleRows) { row in
+                    treeRow(row)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 8 + CGFloat(row.depth) * 12, bottom: 0, trailing: 10))
+                        .listRowSeparator(.hidden)
+                }
             }
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, ChangesRowStyle.rowHeight)
+            .scrollContentBackground(.hidden)
         }
-        .listStyle(.sidebar)
+        .background(theme.palette.surfaceBackground)
+    }
+
+    @ViewBuilder
+    private func treeRow(_ row: ChangesTreeRow) -> some View {
+        switch row.node {
+        case .file(let file):
+            ChangesFileRow(file: file, palette: theme.palette)
+                .tag(file.id)
+        case .folder(let folder):
+            ChangesFolderRow(
+                folder: folder,
+                isExpanded: !store.collapsedFolderIDs.contains(folder.id),
+                palette: theme.palette
+            ) { store.toggleFolder(folder.id) }
+        }
+    }
+
+    private var treeHeader: some View {
+        HStack(spacing: 6) {
+            Text("CHANGES")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.palette.textSecondary)
+            Text("\(store.files.count)")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.palette.textPrimary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(theme.palette.separator))
+                .accessibilityLabel("\(store.files.count) changed files")
+            Spacer()
+            iconButton("Expand All", systemImage: "arrow.up.left.and.arrow.down.right") { store.expandAllFolders() }
+            iconButton("Collapse All", systemImage: "arrow.down.right.and.arrow.up.left") { store.collapseAllFolders() }
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .frame(height: 28)
+        .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.separator).frame(height: 1) }
+    }
+
+    private func iconButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11))
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(theme.palette.textSecondary)
+        .help(title)
+        .accessibilityLabel(title)
     }
 
     /// Plain `Divider()` with a drag gesture, not `HSplitView` (`updateConstraints` crash); global coordinates keep the drag in sync.
@@ -201,98 +259,6 @@ struct ChangesOverlaySheet: View {
         resizeCursorPushed = wanted
     }
 
-    @ViewBuilder
-    private func treeRow(_ node: ChangesTreeNode) -> some View {
-        switch node {
-        case .file(let file):
-            fileRow(file)
-        case .folder(let folder):
-            folderRow(folder)
-        }
-    }
-
-    private func fileRow(_ file: ChangesTreeFile) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "doc")
-                .font(.body)
-                .foregroundStyle(theme.palette.textSecondary)
-            Text(SourceControlRowView.badgeLetter(file.kind))
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundStyle(SourceControlRowView.badgeColor(file.kind, palette: theme.palette))
-                .frame(width: 16, alignment: .center)
-            Text((file.path as NSString).lastPathComponent)
-                .font(.body)
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            fileCounts(file)
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel(for: file))
-    }
-
-    @ViewBuilder
-    private func fileCounts(_ file: ChangesTreeFile) -> some View {
-        if file.isBinary {
-            Text("bin")
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(theme.palette.textDisabled)
-        } else {
-            HStack(spacing: 4) {
-                if let added = file.linesAdded, added > 0 {
-                    Text("+\(added)").foregroundStyle(theme.palette.statusSuccess)
-                }
-                if let removed = file.linesRemoved, removed > 0 {
-                    Text("\u{2212}\(removed)").foregroundStyle(theme.palette.statusError)
-                }
-            }
-            .font(.system(.callout, design: .monospaced))
-        }
-    }
-
-    private func accessibilityLabel(for file: ChangesTreeFile) -> String {
-        var parts = ["\(file.path), \(SourceControlRowView.kindDescription(file.kind).lowercased())"]
-        if file.isBinary {
-            parts.append("binary")
-        } else {
-            if let added = file.linesAdded, added > 0 {
-                parts.append("\(added) addition\(added == 1 ? "" : "s")")
-            }
-            if let removed = file.linesRemoved, removed > 0 {
-                parts.append("\(removed) deletion\(removed == 1 ? "" : "s")")
-            }
-        }
-        return parts.joined(separator: ", ")
-    }
-
-    private func folderRow(_ folder: ChangesTreeNode.Folder) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "folder")
-                .font(.body)
-                .foregroundStyle(theme.palette.textSecondary)
-            Text(folder.displayName)
-                .font(.body.weight(.medium))
-                .foregroundStyle(theme.palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            HStack(spacing: 4) {
-                if folder.linesAdded > 0 {
-                    Text("+\(folder.linesAdded)").foregroundStyle(theme.palette.statusSuccess)
-                }
-                if folder.linesRemoved > 0 {
-                    Text("\u{2212}\(folder.linesRemoved)").foregroundStyle(theme.palette.statusError)
-                }
-            }
-            .font(.system(.callout, design: .monospaced))
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(folder.displayName), folder, \(folder.linesAdded) additions, \(folder.linesRemoved) deletions")
-    }
-
     // MARK: - Diff pane
 
     @ViewBuilder
@@ -309,35 +275,45 @@ struct ChangesOverlaySheet: View {
     }
 
     private func diffHeader(for file: ChangesTreeFile) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(file.path)
-                    .font(.headline)
-                    .foregroundStyle(theme.palette.textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(SourceControlRowView.kindDescription(file.kind))
-                    .font(.subheadline)
+        let directory = (file.path as NSString).deletingLastPathComponent
+        return HStack(spacing: 8) {
+            Text((file.path as NSString).lastPathComponent)
+                .font(.callout.weight(.semibold))
+                .strikethrough(file.kind == .deleted)
+                .foregroundStyle(ChangesRowStyle.statusColor(file.kind, palette: theme.palette))
+                .lineLimit(1)
+            if !directory.isEmpty {
+                Text(directory)
+                    .font(.caption)
                     .foregroundStyle(theme.palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
             }
-            Spacer()
-            Toggle(
-                "Full File",
-                isOn: Binding(get: { store.showsFullFile }, set: { store.setShowsFullFile($0) })
-            )
-            .toggleStyle(.checkbox)
+            Text(SourceControlRowView.kindDescription(file.kind))
+                .font(.caption2)
+                .foregroundStyle(theme.palette.textDisabled)
+                .layoutPriority(1)
+            Spacer(minLength: 8)
+            Toggle(isOn: Binding(get: { store.showsFullFile }, set: { store.setShowsFullFile($0) })) {
+                Label("Full File", systemImage: "doc.plaintext")
+                    .labelStyle(.iconOnly)
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
             .help("Show the entire file, not just the changed lines")
             if let vsCodePath {
-                Button("Open Diff in VS Code") { openDiffInVSCode(file: file, codePath: vsCodePath) }
-                    .buttonStyle(.bordered)
+                iconButton("Open Diff in VS Code", systemImage: "rectangle.split.2x1") {
+                    openDiffInVSCode(file: file, codePath: vsCodePath)
+                }
             }
             if let onOpenInEditor {
-                Button("Open in Editor") { onOpenInEditor(file.path) }
-                    .buttonStyle(.bordered)
+                iconButton("Open in Editor", systemImage: "square.and.pencil") { onOpenInEditor(file.path) }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .frame(height: 28)
+        .background(theme.palette.surfaceBackground)
         .accessibilityElement(children: .contain)
     }
 
