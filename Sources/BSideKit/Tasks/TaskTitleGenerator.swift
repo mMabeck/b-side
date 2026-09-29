@@ -49,7 +49,8 @@ public enum TaskTitleGenerator {
     /// Settings "Test" button. `.firstWords` always fails with `.disabled`.
     public static func generateResult(
         fromPrompt prompt: String,
-        settings: TitleGenerationSettings
+        settings: TitleGenerationSettings,
+        onLaunch: (@Sendable (pid_t) -> Void)? = nil
     ) async -> Result<String, TitleGenerationFailure> {
         switch settings.mode {
         case .firstWords:
@@ -60,8 +61,10 @@ public enum TaskTitleGenerator {
                 fromPrompt: prompt,
                 binaryPath: resolveBinary(named: "llama-completion"),
                 modelPath: FileManager.default.fileExists(atPath: modelURL.path) ? modelURL.path : nil,
+                template: settings.promptTemplate,
                 timeout: localTimeout,
-                gracePeriod: terminationGracePeriod
+                gracePeriod: terminationGracePeriod,
+                onLaunch: onLaunch
             )
         case .claude, .codex:
             let binaryName = settings.mode == .claude ? "claude" : "codex"
@@ -78,7 +81,7 @@ public enum TaskTitleGenerator {
                 outputFile: settings.mode == .codex ? outputFile : nil,
                 timeout: cliTimeout,
                 gracePeriod: terminationGracePeriod,
-                onLaunch: nil
+                onLaunch: onLaunch
             )
         }
     }
@@ -91,26 +94,14 @@ public enum TaskTitleGenerator {
         fromPrompt prompt: String,
         binaryPath: String?,
         modelPath: String?,
+        template: String = TitleGenerationSettings.defaultPromptTemplate,
         timeout: TimeInterval,
         gracePeriod: TimeInterval,
         onLaunch: (@Sendable (pid_t) -> Void)? = nil
     ) async -> Result<String, TitleGenerationFailure> {
         guard let binaryPath else { return .failure(.binaryNotFound("llama-completion")) }
         guard let modelPath else { return .failure(.modelNotFound) }
-
-        let question = String(prompt.prefix(maxQuestionLength))
-        let fullPrompt = """
-            <|im_start|>user
-            Write a short English title (2-5 words) for the question below. The question may be in Danish; the title is always in English. Reply with the title only.
-
-            Question: \(question)<|im_end|>
-            <|im_start|>assistant
-            <think>
-
-            </think>
-
-
-            """
+        let fullPrompt = chatFormatted(instruction(template: template, prompt: prompt))
 
         let arguments = [
             "-m", modelPath,
@@ -136,14 +127,7 @@ public enum TaskTitleGenerator {
     }
 
     static func cliArguments(for settings: TitleGenerationSettings, prompt: String, outputFile: URL) -> [String] {
-        let question = String(prompt.prefix(maxQuestionLength))
-        let instruction = """
-            Write a short English title (2-5 words) for the coding request below. \
-            The request may be in Danish; the title is always in English. \
-            Reply with the title only, no quotes or punctuation.
-
-            Request: \(question)
-            """
+        let instruction = instruction(template: settings.promptTemplate, prompt: prompt)
         switch settings.mode {
         case .claude:
             // No tools, MCP servers, skills, settings files or saved session:
@@ -171,6 +155,37 @@ public enum TaskTitleGenerator {
         case .firstWords, .localModel:
             return []
         }
+    }
+
+    /// Substitutes the first `maxQuestionLength` characters of `prompt` for
+    /// `{prompt}`, or appends them when the template lacks the placeholder.
+    public static func instruction(template: String, prompt: String) -> String {
+        let question = String(prompt.prefix(maxQuestionLength))
+        guard template.contains(TitleGenerationSettings.promptPlaceholder) else {
+            return template + "\n\n" + question
+        }
+        return template.replacingOccurrences(of: TitleGenerationSettings.promptPlaceholder, with: question)
+    }
+
+    /// The exact text the configured backend receives.
+    public static func modelInput(for settings: TitleGenerationSettings, prompt: String) -> String {
+        let instruction = instruction(template: settings.promptTemplate, prompt: prompt)
+        return settings.mode == .localModel ? chatFormatted(instruction) : instruction
+    }
+
+    /// The Qwen chat format with an empty think block, as the title models
+    /// were fine-tuned on.
+    private static func chatFormatted(_ instruction: String) -> String {
+        """
+        <|im_start|>user
+        \(instruction)<|im_end|>
+        <|im_start|>assistant
+        <think>
+
+        </think>
+
+
+        """
     }
 
     public static func resolveBinary(named name: String) -> String? {

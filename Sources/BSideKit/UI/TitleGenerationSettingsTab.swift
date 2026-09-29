@@ -11,11 +11,19 @@ struct TitleGenerationSettingsTab: View {
     @AppStorage(Keys.huggingFaceRepo) private var huggingFaceRepo = TitleGenerationSettings.defaultHuggingFaceRepo
     @AppStorage(Keys.huggingFaceQuant) private var huggingFaceQuant = TitleGenerationSettings.defaultHuggingFaceQuant
     @AppStorage(Keys.modelFilePath) private var modelFilePath = TitleGenerationSettings.defaultModelFilePath
+    @AppStorage(Keys.promptTemplate) private var promptTemplate = TitleGenerationSettings.defaultPromptTemplate
 
     @ObservedObject private var downloader = TitleModelDownloader.shared
     @State private var samplePrompt = "the login page throws a 500 error, please fix it"
-    @State private var testResult: Result<String, TitleGenerationFailure>?
+    @State private var testRun: TestRun?
     @State private var isTesting = false
+
+    private struct TestRun {
+        let result: Result<String, TitleGenerationFailure>
+        let duration: Duration
+        let peakMemory: UInt64?
+        let modelInput: String
+    }
 
     private var mode: TitleGenerationMode { TitleGenerationMode(rawValue: modeRaw) ?? .localModel }
     private var source: TitleModelSource { TitleModelSource(rawValue: sourceRaw) ?? .huggingFace }
@@ -28,6 +36,7 @@ struct TitleGenerationSettingsTab: View {
                         Text(mode.label).tag(mode.rawValue)
                     }
                 }
+                .pickerStyle(.radioGroup)
             } footer: {
                 Text(LocalizedStringKey(footer))
                     .font(.footnote)
@@ -52,12 +61,13 @@ struct TitleGenerationSettingsTab: View {
             }
 
             if mode != .firstWords {
+                promptSection
                 testSection
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 480, alignment: .top)
-        .onChange(of: modeRaw) { testResult = nil }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: modeRaw) { testRun = nil }
     }
 
     private var footer: String {
@@ -135,12 +145,37 @@ struct TitleGenerationSettingsTab: View {
         }
     }
 
+    private var promptSection: some View {
+        Section {
+            TextEditor(text: $promptTemplate)
+                .font(.body.monospaced())
+                .frame(minHeight: 120)
+                .accessibilityLabel("Prompt Template")
+            Button("Reset to Default") {
+                promptTemplate = TitleGenerationSettings.defaultPromptTemplate
+            }
+            .disabled(promptTemplate == TitleGenerationSettings.defaultPromptTemplate)
+        } header: {
+            Text("Prompt")
+        } footer: {
+            Text(promptFooter)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var promptFooter: String {
+        let base = "{prompt} is replaced by the task's first prompt (up to 1,000 characters)."
+        guard mode == .localModel else { return base }
+        return base + " The local model gets it in the Qwen chat format; the bundled models were trained on the default wording."
+    }
+
     private var testSection: some View {
         Section("Test") {
             TextField("Prompt", text: $samplePrompt)
             LabeledContent("Title") {
                 HStack {
-                    switch testResult {
+                    switch testRun?.result {
                     case nil:
                         EmptyView()
                     case .success(let title):
@@ -158,6 +193,19 @@ struct TitleGenerationSettingsTab: View {
                         .disabled(isTesting || samplePrompt.isEmpty)
                 }
             }
+            if let testRun {
+                LabeledContent("Time", value: testRun.duration.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated, fractionalPart: .show(length: 2))))
+                LabeledContent("Peak Memory") {
+                    Text(testRun.peakMemory.map { $0.formatted(.byteCount(style: .memory)) } ?? "—")
+                        .help(mode == .localModel ? "" : "Only the local CLI process; the model itself runs remotely.")
+                }
+                DisclosureGroup("Sent to Model") {
+                    Text(testRun.modelInput)
+                        .font(.callout.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         }
     }
 
@@ -168,11 +216,22 @@ struct TitleGenerationSettingsTab: View {
 
     private func runTest() {
         isTesting = true
-        testResult = nil
+        testRun = nil
         let prompt = samplePrompt
         let settings = TitleGenerationSettings.load()
+        let sampler = ProcessMemorySampler()
         Task {
-            testResult = await TaskTitleGenerator.generateResult(fromPrompt: prompt, settings: settings)
+            let clock = ContinuousClock()
+            let start = clock.now
+            let result = await TaskTitleGenerator.generateResult(fromPrompt: prompt, settings: settings) { pid in
+                sampler.start(pid: pid)
+            }
+            testRun = TestRun(
+                result: result,
+                duration: clock.now - start,
+                peakMemory: sampler.stop(),
+                modelInput: TaskTitleGenerator.modelInput(for: settings, prompt: prompt)
+            )
             isTesting = false
         }
     }

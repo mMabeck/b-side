@@ -41,7 +41,18 @@ public struct TitleGenerationSettings: Equatable, Sendable {
         public static let huggingFaceRepo = "settings.titleGeneration.huggingFaceRepo"
         public static let huggingFaceQuant = "settings.titleGeneration.huggingFaceQuant"
         public static let modelFilePath = "settings.titleModel.path"
+        public static let promptTemplate = "settings.titleGeneration.promptTemplate"
     }
+
+    public static let promptPlaceholder = "{prompt}"
+    /// The wording the local title models were fine-tuned on; changing it can
+    /// degrade their titles.
+    public static let defaultPromptTemplate = """
+        Write a short English title (2-5 words) for the question below. \
+        The question may be in Danish; the title is always in English. Reply with the title only.
+
+        Question: {prompt}
+        """
 
     public static let defaultClaudeModel = "haiku"
     public static let defaultHuggingFaceRepo = "Mabeck/qwen3.5-0.8b-kth8-titles"
@@ -56,6 +67,7 @@ public struct TitleGenerationSettings: Equatable, Sendable {
     public var huggingFaceRepo = defaultHuggingFaceRepo
     public var huggingFaceQuant = defaultHuggingFaceQuant
     public var modelFilePath = defaultModelFilePath
+    public var promptTemplate = defaultPromptTemplate
 
     public init() {}
 
@@ -71,6 +83,7 @@ public struct TitleGenerationSettings: Equatable, Sendable {
         if let value = string(Keys.huggingFaceRepo) { settings.huggingFaceRepo = value }
         if let value = string(Keys.huggingFaceQuant) { settings.huggingFaceQuant = value }
         if let value = string(Keys.modelFilePath) { settings.modelFilePath = value }
+        if let value = string(Keys.promptTemplate) { settings.promptTemplate = value }
         return settings
     }
 
