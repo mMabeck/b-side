@@ -194,6 +194,34 @@ struct TaskTitleGeneratorProcessTests {
         }
     }
 
+    @Test("with an output file, the title is read from it rather than stdout")
+    func outputFile() async throws {
+        let script = try makeScript(
+            """
+            echo "session banner and reasoning noise"
+            echo "Fix Login Bug" > "$1"
+            """
+        )
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("title-out-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: script)
+            try? FileManager.default.removeItem(at: output)
+        }
+
+        let result = await TaskTitleGenerator.runProcess(
+            binaryPath: script.path,
+            arguments: [output.path],
+            outputFile: output,
+            timeout: 5,
+            gracePeriod: 1,
+            onLaunch: nil
+        )
+        guard case .success("Fix Login Bug") = result else {
+            Issue.record("expected the output file's title, got \(result)")
+            return
+        }
+    }
+
     @Test("binaryNotFound is reported when no binary path is resolved")
     func binaryNotFound() async {
         let result = await TaskTitleGenerator.generateResult(

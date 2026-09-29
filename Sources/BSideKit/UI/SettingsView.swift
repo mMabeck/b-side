@@ -1,7 +1,7 @@
 import GhosttyTheme
 import SwiftUI
 
-/// Standard macOS `Settings` scene content: General, Agent, Git, Terminal, Notifications.
+/// Standard macOS `Settings` scene content: General, Appearance, Agent, Titles, Git, Terminal, Notifications.
 public struct SettingsView: View {
     @ObservedObject private var theme = GhosttyResolvedTheme.shared
 
@@ -15,6 +15,8 @@ public struct SettingsView: View {
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
             AgentSettingsTab()
                 .tabItem { Label("Agent", systemImage: "cpu") }
+            TitleGenerationSettingsTab()
+                .tabItem { Label("Titles", systemImage: "character.cursor.ibeam") }
             GitSettingsTab()
                 .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
             TerminalSettingsTab()

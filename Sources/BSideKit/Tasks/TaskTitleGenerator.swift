@@ -1,31 +1,32 @@
 import Foundation
 import OSLog
 
-/// Generates a short task title from a user's first pi prompt by running a
-/// fine-tuned local title model (llama.cpp's `llama-completion` binary over
-/// a small Qwen3.5 gguf), for `ProjectsStore.applyAutoRename` to prefer over
-/// `TaskAutoRenameService.deriveTitle`'s heuristic. Every failure mode —
-/// missing binary, missing model file, a slow or crashed process, or output
-/// that doesn't look like a title — is distinguished internally as a
-/// `TitleGenerationFailure`, logged, and then collapsed to `nil` for the
-/// public API so the caller can fall back unconditionally.
+/// Generates a short task title from a user's first pi prompt, for
+/// `ProjectsStore.applyAutoRename` to prefer over
+/// `TaskAutoRenameService.deriveTitle`'s heuristic. The backend (a local
+/// llama.cpp model, or the Claude/Codex CLI) comes from
+/// `TitleGenerationSettings`. Every failure is logged as a distinct
+/// `TitleGenerationFailure` and then collapsed to `nil` so the caller can
+/// fall back unconditionally.
 public enum TaskTitleGenerator {
     fileprivate static let logger = Logger(subsystem: "dev.mabeck.bside", category: "task-title-generator")
 
-    /// UserDefaults key overriding the default model path below.
-    public static let modelPathDefaultsKey = "settings.titleModel.path"
+    /// A GUI app's `PATH` typically excludes Homebrew and user-local
+    /// installs, so these are probed before whatever `PATH` the process has.
+    private static var binaryDirectories: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.bun/bin",
+            "\(home)/.volta/bin",
+        ]
+    }
 
-    private static let defaultModelPath = "~/Claude/title-gen/models/gguf/qwen3.5-0.8b-title-Q8_0.gguf"
-
-    /// Probed in order: a GUI app's `PATH` typically excludes Homebrew, so
-    /// the well-known install prefixes are checked before falling back to
-    /// whatever `PATH` the process does have.
-    private static let binaryCandidates = [
-        "/opt/homebrew/bin/llama-completion",
-        "/usr/local/bin/llama-completion",
-    ]
-
-    private static let timeout: TimeInterval = 15
+    private static let localTimeout: TimeInterval = 15
+    private static let cliTimeout: TimeInterval = 30
     /// How long a SIGTERM'd (or cancelled) child is given to exit on its own
     /// before escalating to SIGKILL.
     private static let terminationGracePeriod: TimeInterval = 1
@@ -34,20 +35,8 @@ public enum TaskTitleGenerator {
     private static let endOfTextMarker = "[end of text]"
     private static let maxQuestionLength = 1000
 
-    /// Runs the title model on the first 1000 characters of `prompt` and
-    /// returns a cleaned single-line title, or `nil` for any failure —
-    /// see `TitleGenerationFailure`, which is logged distinctly before
-    /// being collapsed here. Runs off the main actor.
     public static func generate(fromPrompt prompt: String) async -> String? {
-        let result = await generateResult(
-            fromPrompt: prompt,
-            binaryPath: resolveBinaryPath(),
-            modelPath: resolveModelPath(),
-            timeout: timeout,
-            gracePeriod: terminationGracePeriod
-        )
-
-        switch result {
+        switch await generateResult(fromPrompt: prompt, settings: .load()) {
         case .success(let title):
             return title
         case .failure(let failure):
@@ -56,12 +45,48 @@ public enum TaskTitleGenerator {
         }
     }
 
-    /// Testable core: takes already-resolved paths (rather than probing the
-    /// filesystem/`UserDefaults` itself) and explicit timing, so tests can
-    /// point it at fake `#!/bin/sh` scripts and short timeouts. `onLaunch`,
-    /// when provided, is called once with the child's pid right after a
-    /// successful `Process.run()`, letting tests confirm the process is gone
-    /// once this returns.
+    /// Runs the configured backend and reports why it failed, for the
+    /// Settings "Test" button. `.firstWords` always fails with `.disabled`.
+    public static func generateResult(
+        fromPrompt prompt: String,
+        settings: TitleGenerationSettings
+    ) async -> Result<String, TitleGenerationFailure> {
+        switch settings.mode {
+        case .firstWords:
+            return .failure(.disabled)
+        case .localModel:
+            let modelURL = settings.localModelURL
+            return await generateResult(
+                fromPrompt: prompt,
+                binaryPath: resolveBinary(named: "llama-completion"),
+                modelPath: FileManager.default.fileExists(atPath: modelURL.path) ? modelURL.path : nil,
+                timeout: localTimeout,
+                gracePeriod: terminationGracePeriod
+            )
+        case .claude, .codex:
+            let binaryName = settings.mode == .claude ? "claude" : "codex"
+            guard let binaryPath = resolveBinary(named: binaryName) else {
+                return .failure(.binaryNotFound(binaryName))
+            }
+            let outputFile = FileManager.default.temporaryDirectory
+                .appendingPathComponent("bside-title-\(UUID().uuidString).txt")
+            defer { try? FileManager.default.removeItem(at: outputFile) }
+            let arguments = cliArguments(for: settings, prompt: prompt, outputFile: outputFile)
+            return await runProcess(
+                binaryPath: binaryPath,
+                arguments: arguments,
+                outputFile: settings.mode == .codex ? outputFile : nil,
+                timeout: cliTimeout,
+                gracePeriod: terminationGracePeriod,
+                onLaunch: nil
+            )
+        }
+    }
+
+    /// Testable core for the local model: takes already-resolved paths and
+    /// explicit timing, so tests can point it at fake `#!/bin/sh` scripts
+    /// and short timeouts. `onLaunch` is called once with the child's pid
+    /// right after a successful `Process.run()`.
     static func generateResult(
         fromPrompt prompt: String,
         binaryPath: String?,
@@ -70,7 +95,7 @@ public enum TaskTitleGenerator {
         gracePeriod: TimeInterval,
         onLaunch: (@Sendable (pid_t) -> Void)? = nil
     ) async -> Result<String, TitleGenerationFailure> {
-        guard let binaryPath else { return .failure(.binaryNotFound) }
+        guard let binaryPath else { return .failure(.binaryNotFound("llama-completion")) }
         guard let modelPath else { return .failure(.modelNotFound) }
 
         let question = String(prompt.prefix(maxQuestionLength))
@@ -103,65 +128,80 @@ public enum TaskTitleGenerator {
         return await runProcess(
             binaryPath: binaryPath,
             arguments: arguments,
+            outputFile: nil,
             timeout: timeout,
             gracePeriod: gracePeriod,
             onLaunch: onLaunch
         )
     }
 
-    // MARK: - Binary/model resolution
+    static func cliArguments(for settings: TitleGenerationSettings, prompt: String, outputFile: URL) -> [String] {
+        let question = String(prompt.prefix(maxQuestionLength))
+        let instruction = """
+            Write a short English title (2-5 words) for the coding request below. \
+            The request may be in Danish; the title is always in English. \
+            Reply with the title only, no quotes or punctuation.
 
-    private static func resolveBinaryPath() -> String? {
-        if let found = binaryCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return found
+            Request: \(question)
+            """
+        switch settings.mode {
+        case .claude:
+            // No tools, MCP servers, skills, settings files or saved session:
+            // a bare one-shot completion.
+            return [
+                "-p",
+                "--model", settings.claudeModel,
+                "--tools", "",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--setting-sources", "",
+                "--no-session-persistence",
+                instruction,
+            ]
+        case .codex:
+            var arguments = [
+                "exec",
+                "--skip-git-repo-check",
+                "--sandbox", "read-only",
+                "--color", "never",
+                "--output-last-message", outputFile.path,
+            ]
+            if !settings.codexModel.isEmpty { arguments += ["--model", settings.codexModel] }
+            return arguments + [instruction]
+        case .firstWords, .localModel:
+            return []
         }
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        return path.split(separator: ":").lazy.map { "\($0)/llama-completion" }
-            .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     }
 
-    private static func resolveModelPath() -> String? {
-        let configured = UserDefaults.standard.string(forKey: modelPathDefaultsKey)
-        let expanded = ((configured ?? defaultModelPath) as NSString).expandingTildeInPath
-        guard FileManager.default.fileExists(atPath: expanded) else { return nil }
-        return expanded
+    public static func resolveBinary(named name: String) -> String? {
+        let pathDirectories = ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? []
+        return (binaryDirectories + pathDirectories).lazy
+            .map { "\($0)/\(name)" }
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     }
 
     // MARK: - Failure logging
 
-    /// Logs each `TitleGenerationFailure` distinctly. `binaryNotFound` and
-    /// `modelNotFound` are expected on machines without the model installed,
-    /// so they log at `.notice`; everything else is `.error`. Prompt/output
-    /// content is `.private`; the failure reason and any exit status are
-    /// `.public`.
+    /// Missing binaries/models are expected on machines without them
+    /// installed, so they log at `.notice`; everything else is `.error`.
     private static func log(_ failure: TitleGenerationFailure) {
         switch failure {
-        case .binaryNotFound:
-            logger.notice("title model skipped: llama-completion binary not found")
-        case .modelNotFound:
-            logger.notice("title model skipped: model file not found")
-        case .launchFailed(let reason):
-            logger.error("title model failed to launch: \(reason, privacy: .public)")
-        case .cancelled:
-            logger.notice("title model run was cancelled before it could launch")
-        case .timedOut:
-            logger.error("title model timed out or was cancelled and its process was terminated")
+        case .disabled, .binaryNotFound, .modelNotFound, .cancelled:
+            logger.notice("title generation skipped: \(failure.description, privacy: .public)")
         case .nonZeroExit(let status, let stderrTail):
             logger.error(
-                "title model exited with status \(status, privacy: .public), stderr: \(stderrTail, privacy: .private)"
+                "title generator exited with status \(status, privacy: .public), stderr: \(stderrTail, privacy: .private)"
             )
-        case .signaled(let signal):
-            logger.error("title model was killed by signal \(signal, privacy: .public)")
-        case .undecodableOutput:
-            logger.error("title model produced output that could not be decoded as UTF-8")
         case .rejectedOutput(let raw):
-            logger.error("title model output failed validation: \(raw, privacy: .private)")
+            logger.error("title generator output failed validation: \(raw, privacy: .private)")
+        case .launchFailed, .timedOut, .signaled, .undecodableOutput:
+            logger.error("title generation failed: \(failure.description, privacy: .public)")
         }
     }
 
     // MARK: - Output cleanup/validation
 
-    /// Cleans `llama-completion`'s stdout into a single-line title, or
+    /// Cleans the generator's output into a single-line title, or
     /// `nil` if the result doesn't look like one: everything from the
     /// `[end of text]` marker onward is dropped, the first non-empty line
     /// is trimmed of surrounding quotes and trailing punctuation, and the
@@ -207,14 +247,15 @@ public enum TaskTitleGenerator {
     /// guarantees the continuation resumes exactly once, only after the
     /// child has actually exited (or been killed and reaped) or failed to
     /// launch.
-    private static func runProcess(
+    static func runProcess(
         binaryPath: String,
         arguments: [String],
+        outputFile: URL?,
         timeout: TimeInterval,
         gracePeriod: TimeInterval,
         onLaunch: (@Sendable (pid_t) -> Void)?
     ) async -> Result<String, TitleGenerationFailure> {
-        let runner = ProcessRunner(binaryPath: binaryPath, arguments: arguments)
+        let runner = ProcessRunner(binaryPath: binaryPath, arguments: arguments, outputFile: outputFile)
         return await withTaskCancellationHandler {
             await runner.run(timeout: timeout, gracePeriod: gracePeriod, onLaunch: onLaunch)
         } onCancel: {
@@ -223,12 +264,12 @@ public enum TaskTitleGenerator {
     }
 }
 
-/// Every distinguishable way title generation can fail, so
-/// `TaskTitleGenerator.generate` can log a specific reason before collapsing
-/// to `nil` for its caller. `Error` reasons are captured as their
-/// description rather than the `Error` itself so this stays `Sendable`.
-enum TitleGenerationFailure: Error, Sendable {
-    case binaryNotFound
+/// Every distinguishable way title generation can fail. `Error` reasons are
+/// captured as their description rather than the `Error` itself so this
+/// stays `Sendable`.
+public enum TitleGenerationFailure: Error, Sendable, CustomStringConvertible {
+    case disabled
+    case binaryNotFound(String)
     case modelNotFound
     case launchFailed(String)
     case cancelled
@@ -237,6 +278,22 @@ enum TitleGenerationFailure: Error, Sendable {
     case signaled(signal: Int32)
     case undecodableOutput
     case rejectedOutput(raw: String)
+
+    public var description: String {
+        switch self {
+        case .disabled: "No model is configured."
+        case .binaryNotFound(let name): "`\(name)` was not found."
+        case .modelNotFound: "The model file does not exist."
+        case .launchFailed(let reason): "Failed to launch: \(reason)"
+        case .cancelled: "Cancelled."
+        case .timedOut: "Timed out."
+        case .nonZeroExit(let status, let stderrTail):
+            "Exited with status \(status). \(stderrTail.trimmingCharacters(in: .whitespacesAndNewlines).suffix(300))"
+        case .signaled(let signal): "Killed by signal \(signal)."
+        case .undecodableOutput: "Output was not valid UTF-8."
+        case .rejectedOutput(let raw): "Output didn't look like a title: \(raw.prefix(120))"
+        }
+    }
 }
 
 /// Accumulates a process's output bytes across reads on a background
@@ -299,9 +356,21 @@ private final class ProcessRunner: @unchecked Sendable {
     private var killWorkItem: DispatchWorkItem?
     private var drainWorkItem: DispatchWorkItem?
 
-    init(binaryPath: String, arguments: [String]) {
+    private let outputFile: URL?
+
+    init(binaryPath: String, arguments: [String], outputFile: URL?) {
+        self.outputFile = outputFile
         process.executableURL = URL(fileURLWithPath: binaryPath)
         process.arguments = arguments
+        // A neutral cwd keeps the CLIs from picking up a project's
+        // CLAUDE.md/AGENTS.md; the PATH lets npm-installed `#!/usr/bin/env node`
+        // shims find node from a GUI launch.
+        process.currentDirectoryURL = FileManager.default.temporaryDirectory
+        var environment = ProcessInfo.processInfo.environment
+        let binaryDirectory = (binaryPath as NSString).deletingLastPathComponent
+        environment["PATH"] = [binaryDirectory, "/opt/homebrew/bin", "/usr/local/bin", environment["PATH"] ?? "/usr/bin:/bin"]
+            .joined(separator: ":")
+        process.environment = environment
     }
 
     func run(
@@ -449,7 +518,7 @@ private final class ProcessRunner: @unchecked Sendable {
 
         let pid = process.processIdentifier
         TaskTitleGenerator.logger.error(
-            "title model \(reason, privacy: .public); sending SIGTERM (pid \(pid, privacy: .public))"
+            "title generator \(reason, privacy: .public); sending SIGTERM (pid \(pid, privacy: .public))"
         )
         process.terminate()
 
@@ -472,7 +541,7 @@ private final class ProcessRunner: @unchecked Sendable {
 
         let pid = process.processIdentifier
         TaskTitleGenerator.logger.error(
-            "title model still running after grace period; sending SIGKILL (pid \(pid, privacy: .public))"
+            "title generator still running after grace period; sending SIGKILL (pid \(pid, privacy: .public))"
         )
         kill(pid, SIGKILL)
         scheduleDrain()
@@ -584,7 +653,7 @@ private final class ProcessRunner: @unchecked Sendable {
         } else if process.terminationStatus != 0 {
             let stderrTail = String((stderrBox.decodedString() ?? "").suffix(500))
             result = .failure(.nonZeroExit(status: process.terminationStatus, stderrTail: stderrTail))
-        } else if let rawOutput = stdoutBox.decodedString() {
+        } else if let rawOutput = outputFile.map({ try? String(contentsOf: $0, encoding: .utf8) }) ?? stdoutBox.decodedString() {
             if let title = TaskTitleGenerator.cleanTitle(fromRawOutput: rawOutput) {
                 result = .success(title)
             } else {
