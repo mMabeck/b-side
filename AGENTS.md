@@ -2,7 +2,7 @@
 
 macOS-only native Swift app that runs Pi agent sessions in
 embedded libghostty terminals, one per task, organised around git branches and
-worktrees. Visual identity is in [`docs/brand.md`](docs/brand.md). Formerly "Dash Native".
+worktrees. Visual identity is in [`docs/brand.md`](docs/brand.md).
 
 ## Stack
 
