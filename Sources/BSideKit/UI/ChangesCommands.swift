@@ -8,6 +8,7 @@ import SwiftUI
 /// about what's shown or leave two sheets fighting over presentation.
 public struct ChangesCommands: Commands {
     private var store: ProjectsStore
+    @ObservedObject private var focus = TaskWindowFocus.shared
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -15,13 +16,16 @@ public struct ChangesCommands: Commands {
 
     public var body: some Commands {
         CommandGroup(after: .toolbar) {
-            Button("Show All Changes") {
-                if case .task(let task, _) = store.mainSelection {
-                    store.pendingChangesOverlayTask = task
+            Group {
+                Button("Show All Changes") {
+                    if case .task(let task, _) = store.mainSelection {
+                        store.pendingChangesOverlayTask = task
+                    }
                 }
+                .keyboardShortcut(ChangesOverlayShortcut.showAllChanges)
+                .disabled(!isTaskSelected)
             }
-            .keyboardShortcut(ChangesOverlayShortcut.showAllChanges)
-            .disabled(!isTaskSelected)
+            .disabled(!focus.isTaskWindowInFront)
         }
     }
 

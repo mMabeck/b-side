@@ -30,7 +30,7 @@ extension View {
 }
 
 /// SwiftUI has no direct window accessor; places an invisible `NSView` and reads `.window` once attached.
-private struct WindowAccessor: NSViewRepresentable {
+struct WindowAccessor: NSViewRepresentable {
     let configure: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> NSView {

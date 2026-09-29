@@ -8,27 +8,31 @@ import SwiftUI
 /// so there is one source of truth, not parallel state.
 public struct WindowLayoutCommands: Commands {
     @ObservedObject private var layout = WindowLayoutState.shared
+    @ObservedObject private var focus = TaskWindowFocus.shared
 
     public init() {}
 
     public var body: some Commands {
         CommandGroup(replacing: .sidebar) {
-            Button(layout.leftSidebarCollapsed ? "Show Left Sidebar" : "Hide Left Sidebar") {
-                // AppKit's own toggle survives rapid repeats; flipping SwiftUI state races
-                // the split view's animation and its stale visibility write-back.
-                NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
-            }
-            .keyboardShortcut(WindowLayoutShortcut.leftSidebar)
+            Group {
+                Button(layout.leftSidebarCollapsed ? "Show Left Sidebar" : "Hide Left Sidebar") {
+                    // AppKit's own toggle survives rapid repeats; flipping SwiftUI state races
+                    // the split view's animation and its stale visibility write-back.
+                    NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: nil)
+                }
+                .keyboardShortcut(WindowLayoutShortcut.leftSidebar)
 
-            Button(layout.rightSidebarCollapsed ? "Show Right Sidebar" : "Hide Right Sidebar") {
-                layout.toggleRightSidebar()
-            }
-            .keyboardShortcut(WindowLayoutShortcut.rightSidebar)
+                Button(layout.rightSidebarCollapsed ? "Show Right Sidebar" : "Hide Right Sidebar") {
+                    layout.toggleRightSidebar()
+                }
+                .keyboardShortcut(WindowLayoutShortcut.rightSidebar)
 
-            Button(layout.terminalDrawerCollapsed ? "Show Terminal" : "Hide Terminal") {
-                layout.toggleTerminalDrawer()
+                Button(layout.terminalDrawerCollapsed ? "Show Terminal" : "Hide Terminal") {
+                    layout.toggleTerminalDrawer()
+                }
+                .keyboardShortcut(WindowLayoutShortcut.terminalDrawer)
             }
-            .keyboardShortcut(WindowLayoutShortcut.terminalDrawer)
+            .disabled(!focus.isTaskWindowInFront)
         }
     }
 }

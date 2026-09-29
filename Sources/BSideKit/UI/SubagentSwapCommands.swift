@@ -8,6 +8,7 @@ import SwiftUI
 /// Ghostty's default keybind table has no `ctrl+cmd+*` bindings to unbind.
 public struct SubagentSwapCommands: Commands {
     private var store: ProjectsStore
+    @ObservedObject private var focus = TaskWindowFocus.shared
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -15,42 +16,45 @@ public struct SubagentSwapCommands: Commands {
 
     public var body: some Commands {
         CommandMenu("Subagents") {
-            Button("Show Main Terminal") {
-                withSelectedTask { store.subagentSwap.showMain(forTask: $0) }
-            }
-            .keyboardShortcut(SubagentSwapShortcut.showMain)
-
-            Divider()
-
-            ForEach(0..<SubagentSwapShortcut.digitCount, id: \.self) { index in
-                Button("Show Subagent \(index + 1)") {
-                    withSelectedTask { taskId in
-                        let strip = store.stripChildIDsWithLiveSurface(forTask: taskId)
-                        guard let childId = SubagentSwapNavigation.childID(atIndex: index, strip: strip) else { return }
-                        store.subagentSwap.show(childId: childId, forTask: taskId)
-                    }
+            Group {
+                Button("Show Main Terminal") {
+                    withSelectedTask { store.subagentSwap.showMain(forTask: $0) }
                 }
-                .keyboardShortcut(SubagentSwapShortcut.showChild(atIndex: index))
+                .keyboardShortcut(SubagentSwapShortcut.showMain)
+
+                Divider()
+
+                ForEach(0..<SubagentSwapShortcut.digitCount, id: \.self) { index in
+                    Button("Show Subagent \(index + 1)") {
+                        withSelectedTask { taskId in
+                            let strip = store.stripChildIDsWithLiveSurface(forTask: taskId)
+                            guard let childId = SubagentSwapNavigation.childID(atIndex: index, strip: strip) else { return }
+                            store.subagentSwap.show(childId: childId, forTask: taskId)
+                        }
+                    }
+                    .keyboardShortcut(SubagentSwapShortcut.showChild(atIndex: index))
+                }
+
+                Divider()
+
+                Button("Next Subagent") { advance(next: true) }
+                    .keyboardShortcut(SubagentSwapShortcut.next)
+
+                Button("Previous Subagent") { advance(next: false) }
+                    .keyboardShortcut(SubagentSwapShortcut.previous)
+
+                // Arrow-key equivalents, hidden from the menu so "Next"/"Previous"
+                // aren't listed twice, but still registered so `MainMenuKeyRouter`
+                // dispatches them — `⌃⌘[`/`⌃⌘]` need ⌥ on a Danish keyboard.
+                Button("Next Subagent (Arrow)") { advance(next: true) }
+                    .keyboardShortcut(SubagentSwapShortcut.nextArrow)
+                    .hidden()
+
+                Button("Previous Subagent (Arrow)") { advance(next: false) }
+                    .keyboardShortcut(SubagentSwapShortcut.previousArrow)
+                    .hidden()
             }
-
-            Divider()
-
-            Button("Next Subagent") { advance(next: true) }
-                .keyboardShortcut(SubagentSwapShortcut.next)
-
-            Button("Previous Subagent") { advance(next: false) }
-                .keyboardShortcut(SubagentSwapShortcut.previous)
-
-            // Arrow-key equivalents, hidden from the menu so "Next"/"Previous"
-            // aren't listed twice, but still registered so `MainMenuKeyRouter`
-            // dispatches them — `⌃⌘[`/`⌃⌘]` need ⌥ on a Danish keyboard.
-            Button("Next Subagent (Arrow)") { advance(next: true) }
-                .keyboardShortcut(SubagentSwapShortcut.nextArrow)
-                .hidden()
-
-            Button("Previous Subagent (Arrow)") { advance(next: false) }
-                .keyboardShortcut(SubagentSwapShortcut.previousArrow)
-                .hidden()
+            .disabled(!focus.isTaskWindowInFront)
         }
     }
 

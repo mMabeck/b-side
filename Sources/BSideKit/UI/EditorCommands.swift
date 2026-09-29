@@ -5,6 +5,7 @@ import SwiftUI
 /// `targetFolder` resolution, so the two triggers can never disagree.
 public struct EditorCommands: Commands {
     private var store: ProjectsStore
+    @ObservedObject private var focus = TaskWindowFocus.shared
     private let launcher = EditorLauncher()
 
     public init(store: ProjectsStore) {
@@ -13,13 +14,16 @@ public struct EditorCommands: Commands {
 
     public var body: some Commands {
         CommandGroup(after: .newItem) {
-            Button("Open in VS Code") {
-                if let folder = Self.targetFolder(selection: store.mainSelection) {
-                    launcher.openFolder(folder)
+            Group {
+                Button("Open in VS Code") {
+                    if let folder = Self.targetFolder(selection: store.mainSelection) {
+                        launcher.openFolder(folder)
+                    }
                 }
+                .keyboardShortcut(EditorShortcut.openInEditor)
+                .disabled(Self.targetFolder(selection: store.mainSelection) == nil)
             }
-            .keyboardShortcut(EditorShortcut.openInEditor)
-            .disabled(Self.targetFolder(selection: store.mainSelection) == nil)
+            .disabled(!focus.isTaskWindowInFront)
         }
     }
 
