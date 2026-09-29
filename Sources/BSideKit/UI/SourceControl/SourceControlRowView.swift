@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// One row in the Source Control sidebar's file list: a kind badge letter, the
-/// file name, and either +N/-N line counts or (on hover) stage/unstage/discard
-/// buttons in their place.
 struct SourceControlRowView: View {
     let row: SourceControlStore.Row
     let palette: BSidePalette

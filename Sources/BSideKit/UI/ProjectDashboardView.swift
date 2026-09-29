@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// The main area's content when a project, but no task, is selected — a
-/// project is a container, never a terminal itself. Clicking a task row
-/// hands selection to `ProjectsStore.selectTask(_:project:)`, switching the main area to its terminal.
 struct ProjectDashboardView: View {
     var store: ProjectsStore
     var project: Project
@@ -38,7 +35,6 @@ struct ProjectDashboardView: View {
         .task(id: project.id) { gitInfo.refresh(project) }
     }
 
-    /// Same facts as the sidebar's project row, from the same cache — a second view onto that git state, not a second source of truth.
     private var header: some View {
         let info = gitInfo.info(forProject: project.id)
         return HStack(alignment: .firstTextBaseline) {
@@ -81,7 +77,6 @@ struct ProjectDashboardView: View {
         .tint(theme.palette.accent)
     }
 
-    /// Same signals and derivations the sidebar's task row uses, so the dashboard never disagrees about a task's state.
     private func taskCard(_ task: TaskRecord) -> some View {
         let summary = task.id.map(store.subagentFeed.summary(forTask:)) ?? TaskChildSummary(activeCount: 0, totalCount: 0, isBlocked: false)
         let isVanished = store.vanishedWorktreeTaskIds.contains(task.id ?? -1)
@@ -95,11 +90,7 @@ struct ProjectDashboardView: View {
             needsAttention: task.id.map(store.taskIDsNeedingAttention.contains) ?? false,
             busy: task.id.map(store.busyTaskIDs.contains) ?? false
         )
-        // Uses `isEffectivelyMerged` rather than `syncStatus.merged` directly
-        // so a branch that landed but has since gained uncommitted edits
-        // never reads as "merged" here either — with a trailing ● marker
-        // for those edits, kept text-only since this card has no room for
-        // the sidebar's styled pending pill.
+        // `isEffectivelyMerged`, so a landed branch with new uncommitted edits doesn't read "merged"; a trailing ● marks them.
         let syncText: String? = syncStatus.flatMap { sync -> String? in
             let effectivelyMerged = BranchSyncSummary.isEffectivelyMerged(sync)
             if effectivelyMerged && status == .inactive { return nil }

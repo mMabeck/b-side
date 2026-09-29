@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// Go-menu commands for jumping directly to an open task terminal
-/// (Cmd+1…9) or a sidebar project (Ctrl+1…9), per `NavigationShortcuts`.
-/// Mirrors `ProjectCommands`'s pattern of a `Commands` struct driving a
-/// per-window `ProjectsStore` rather than a static singleton, so these
-/// menu items and any keystroke that reaches them always act on the same
-/// store the sidebar and main area show.
 public struct NavigationCommands: Commands {
     private var store: ProjectsStore
     @ObservedObject private var focus = TaskWindowFocus.shared

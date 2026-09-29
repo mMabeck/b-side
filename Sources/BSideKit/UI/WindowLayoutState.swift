@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// Single source of truth for whether each of the three collapsible chrome
-/// regions is collapsed. Both toolbar buttons and View menu commands read
-/// and toggle through this shared object so they can never drift apart.
-/// The sidebars are window-wide; the terminal drawer is open per task or project.
 @MainActor
 public final class WindowLayoutState: ObservableObject {
     public static let shared = WindowLayoutState()
@@ -34,8 +30,7 @@ public final class WindowLayoutState: ObservableObject {
         openTerminalDrawers = Set(stored.compactMap(TerminalDrawerKey.init(rawValue:)))
     }
 
-    /// No `withAnimation` for either sidebar: `NavigationSplitView` and `.inspector`
-    /// animate themselves, and a SwiftUI animation on top desyncs them under rapid toggling.
+    /// No `withAnimation`: `NavigationSplitView` and `.inspector` animate themselves and a second animation desyncs them.
     public func toggleLeftSidebar() {
         leftSidebarCollapsed.toggle()
     }
@@ -55,8 +50,7 @@ public final class WindowLayoutState: ObservableObject {
         }
     }
 
-    /// Only keys seen and then removed: at launch projects load before their
-    /// tasks, so "not currently live" doesn't mean deleted.
+    /// At launch projects load before tasks, so "not live" doesn't mean deleted.
     func forgetTerminalDrawers(_ removed: Set<TerminalDrawerKey>) {
         guard !openTerminalDrawers.isDisjoint(with: removed) else { return }
         openTerminalDrawers.subtract(removed)

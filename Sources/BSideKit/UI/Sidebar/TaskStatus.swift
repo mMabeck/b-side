@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Same intent as `accessibilityReduceMotion`, but writable, since the
-/// system one is read-only.
 private struct StatusDotReduceMotionKey: EnvironmentKey {
     static let defaultValue: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 }
@@ -14,25 +12,14 @@ extension EnvironmentValues {
     }
 }
 
-/// The five states a task's sidebar dot can read as. Merge state is
-/// deliberately not an input — shown by the separate "Merged" pill instead,
-/// so a merged-but-still-open task can still read as unread, running, etc.
+/// Merge state is deliberately not an input; the separate "Merged" pill shows it.
 public enum TaskStatus: Hashable, Sendable {
-    /// A question alert, or a blocked/vanished worktree. The palette's most attention-grabbing colour.
     case question
-    /// A live subagent child or a busy parent Pi loop. Blinking amber (see `StatusDot`).
     case running
-    /// Open in a tab, with output since last viewed. Blue.
     case unread
-    /// Open in a tab, nothing new since last viewed. Green.
     case read
-    /// Not open in any tab. Grey.
     case inactive
 
-    /// `needsAttention`/`isBlocked`/`isVanished` outrank everything else.
-    /// `busy` folds the parent Pi loop's own busy/idle reports into the same
-    /// "running" tier as a live subagent child. A task not `isOpen` reads
-    /// `.inactive` regardless of anything else.
     public static func derive(
         isBlocked: Bool,
         isVanished: Bool,
@@ -58,7 +45,6 @@ public enum TaskStatus: Hashable, Sendable {
         }
     }
 
-    /// Read out ahead of the task's own name by VoiceOver.
     public var accessibilityLabel: String {
         switch self {
         case .question: "Needs attention"
@@ -70,7 +56,6 @@ public enum TaskStatus: Hashable, Sendable {
     }
 }
 
-/// The column width is reserved unconditionally so every task title starts at the same x.
 public enum TaskRowLayout {
     public static let statusDotColumnWidth: CGFloat = 14
     public static let statusDotDiameter: CGFloat = 8
@@ -80,8 +65,6 @@ public enum TaskRowLayout {
     }
 }
 
-/// Blinks once a second while `.running`, using local view state rather than
-/// a store-driven timer. Solid under Reduce Motion.
 public struct StatusDot: View {
     let status: TaskStatus
     let palette: BSidePalette
@@ -103,8 +86,7 @@ public struct StatusDot: View {
             .shadow(color: color.opacity(0.8), radius: 3)
             .shadow(color: color.opacity(0.5), radius: 5)
             .opacity(shouldBlink && isDimmed ? 0.3 : 1)
-            // Discrete steps, not an interpolated `repeatForever` pulse: that redraws
-            // the glass sidebar at display rate and outlives the running state.
+            // Discrete steps, not `repeatForever`: that redraws the glass sidebar at display rate and outlives the running state.
             .task(id: shouldBlink) {
                 isDimmed = false
                 while shouldBlink, !Task.isCancelled {

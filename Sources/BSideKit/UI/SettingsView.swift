@@ -1,8 +1,7 @@
 import GhosttyTheme
 import SwiftUI
 
-/// Settings scene content: a category sidebar, like System Settings. A tab
-/// bar overflows at this many panes, and its overflow menu items are disabled.
+/// A category sidebar rather than tabs: a tab bar's overflow menu items are disabled at this many panes.
 public struct SettingsView: View {
     @ObservedObject private var theme = GhosttyResolvedTheme.shared
     @State private var selection: SettingsPane? = .general
@@ -93,9 +92,6 @@ private struct AppearanceSettingsTab: View {
         ThemeOverrideMode(rawValue: modeRaw) ?? .useConfig
     }
 
-    /// The theme list's selection, routed to whichever stored name the
-    /// current mode uses. Picking a theme while following the Ghostty
-    /// config switches to a single-theme override.
     private var listSelection: Binding<String?> {
         Binding(
             get: {
@@ -149,7 +145,6 @@ private struct AppearanceSettingsTab: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// The theme the preview shows: whichever one the list is editing.
     private var previewedDefinition: GhosttyThemeDefinition? {
         switch mode {
         case .useConfig: theme.definition

@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// The commit message field and commit button, or (while a commit is
-/// running) a scrolling monospaced hook-output log and a Cancel button in
-/// their place. The log stays visible after a failed commit — it isn't
-/// cleared until the next commit attempt starts.
 struct CommitAreaView: View {
     @Binding var message: String
     let isCommitting: Bool
@@ -42,10 +38,7 @@ struct CommitAreaView: View {
             .disabled(!canCommit)
             .frame(maxWidth: .infinity, alignment: .trailing)
 
-        // ⌘↩ commits only while the message field itself has focus — a
-        // global shortcut here would fire from anywhere in the sidebar
-        // (or steal the key from Ghostty's own terminal panes), so it is
-        // deliberately not added to `GhosttyBridge.appOwnedKeybinds`.
+        // Cmd+Return only with the field focused: a global shortcut would fire anywhere in the sidebar or steal Ghostty's keys, so it's not in `appOwnedKeybinds`.
         if isFocused.wrappedValue {
             button.keyboardShortcut(.return, modifiers: .command)
         } else {

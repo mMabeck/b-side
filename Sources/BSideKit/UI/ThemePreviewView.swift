@@ -1,18 +1,11 @@
 import GhosttyTheme
 import SwiftUI
 
-/// A tiny, pure-SwiftUI mock of "Pi in B-Side" rendered in a given theme —
-/// no real terminal grid, just static text and shapes coloured from the
-/// theme's own palette. Used by the Appearance tab so picking a theme shows
-/// roughly what it will look like without committing to it first.
 public struct ThemePreviewView: View {
     static let baseSize = CGSize(width: 360, height: 200)
 
     let definition: GhosttyThemeDefinition
     let palette: BSidePalette
-    /// Shrinks the whole mock uniformly (e.g. for a side-by-side light/dark
-    /// pair) while keeping every internal layout proportion identical to the
-    /// full-size preview.
     var scale: CGFloat = 1
 
     public init(definition: GhosttyThemeDefinition, scale: CGFloat = 1) {
@@ -36,7 +29,6 @@ public struct ThemePreviewView: View {
         .frame(width: Self.baseSize.width * scale, height: Self.baseSize.height * scale)
     }
 
-    // MARK: - Sidebar
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -65,7 +57,6 @@ public struct ThemePreviewView: View {
         }
     }
 
-    // MARK: - Main area: mock Pi TUI
 
     private var mainArea: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -95,7 +86,6 @@ public struct ThemePreviewView: View {
         .overlay(RoundedRectangle(cornerRadius: 3).stroke(palette.separator, lineWidth: 1))
     }
 
-    // MARK: - Drawer: mock shell prompt
 
     private var drawer: some View {
         HStack(spacing: 5) {
@@ -111,7 +101,6 @@ public struct ThemePreviewView: View {
         .background(palette.surfaceBackground)
     }
 
-    // MARK: - Colour helpers
 
     private func monoLine(_ text: String, color: Color) -> some View {
         Text(text)
