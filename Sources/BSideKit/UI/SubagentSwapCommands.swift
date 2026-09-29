@@ -8,7 +8,7 @@ import SwiftUI
 /// Ghostty's default keybind table has no `ctrl+cmd+*` bindings to unbind.
 public struct SubagentSwapCommands: Commands {
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -54,7 +54,7 @@ public struct SubagentSwapCommands: Commands {
                     .keyboardShortcut(SubagentSwapShortcut.previousArrow)
                     .hidden()
             }
-            .disabled(!focus.isTaskWindowInFront)
+            .disabled(focusedStore == nil)
         }
     }
 
