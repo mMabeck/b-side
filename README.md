@@ -82,3 +82,19 @@ open "dist/B-Side.app"
 Run it from the app bundle rather than `swift run`: the SwiftUI `Settings` scene
 and user notifications need a real bundle identifier.
 
+## Release
+
+Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`: tests, bundle,
+launch smoke test, then a GitHub Release with a zipped `.app` and its SHA-256.
+Tags with a suffix (`v0.2.0-beta.1`) are marked pre-release.
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The app is ad-hoc signed and not notarized, so a downloaded copy is quarantined
+by Gatekeeper. Clear it after unzipping:
+
+```sh
+xattr -dr com.apple.quarantine B-Side.app
+```

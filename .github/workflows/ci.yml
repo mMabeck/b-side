@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths: &code-paths
+      - Sources/**
+      - Tests/**
+      - Package.swift
+      - Package.resolved
+      - scripts/**
+      - assets/**
+      - .github/workflows/**
+  pull_request:
+    paths: *code-paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-xcode26.6-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
+          restore-keys: spm-${{ runner.os }}-xcode26.6-${{ hashFiles('Package.resolved') }}-
+
+      - name: Build
+        run: swift build --build-tests
+
+      # Serial: parallel suites intermittently crash inside libghostty.
+      - name: Test
+        run: swift test --skip-build --no-parallel
+
+      - name: Bundle
+        run: ./scripts/bundle.sh
+
+      - name: Smoke test
+        run: ./scripts/smoke-test.sh dist/B-Side.app

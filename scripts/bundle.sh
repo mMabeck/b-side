@@ -18,6 +18,8 @@ cd "$(dirname "$0")/.."
 APP_NAME="${BSIDE_APP_NAME:-B-Side}"
 BUNDLE_ID="${BSIDE_BUNDLE_ID:-dev.mabeck.bside}"
 DIST_DIR="${BSIDE_DIST_DIR:-dist}"
+VERSION="${BSIDE_VERSION:-0.1.0}"
+BUILD_NUMBER="${BSIDE_BUILD_NUMBER:-1}"
 if [ "$INSTALL" = 1 ] && { [ "$APP_NAME" != "B-Side" ] || [ "$BUNDLE_ID" != "dev.mabeck.bside" ]; }; then
     echo "error: --install is only for the default app" >&2
     exit 2
@@ -71,9 +73,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>NSHighResolutionCapable</key>
