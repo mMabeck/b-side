@@ -80,9 +80,8 @@ public enum TaskRowLayout {
     }
 }
 
-/// Blinks while `.running`, using local view state rather than a
-/// store-driven timer, since only the dot's opacity changes each second.
-/// Solid under Reduce Motion.
+/// Blinks once a second while `.running`, using local view state rather than
+/// a store-driven timer. Solid under Reduce Motion.
 public struct StatusDot: View {
     let status: TaskStatus
     let palette: BSidePalette
@@ -104,17 +103,13 @@ public struct StatusDot: View {
             .shadow(color: color.opacity(0.8), radius: 3)
             .shadow(color: color.opacity(0.5), radius: 5)
             .opacity(shouldBlink && isDimmed ? 0.3 : 1)
-            .onChange(of: shouldBlink, initial: true) { _, isBlinking in
-                if isBlinking {
-                    withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
-                        isDimmed = true
-                    }
-                } else {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        isDimmed = false
-                    }
+            // Discrete steps, not an interpolated `repeatForever` pulse: that redraws
+            // the glass sidebar at display rate and outlives the running state.
+            .task(id: shouldBlink) {
+                isDimmed = false
+                while shouldBlink, !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    isDimmed.toggle()
                 }
             }
             .accessibilityLabel(status.accessibilityLabel)
