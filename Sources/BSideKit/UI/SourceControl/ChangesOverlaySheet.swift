@@ -405,30 +405,9 @@ struct ChangesOverlaySheet: View {
     }
 }
 
-/// Grants `.resizable`, which SwiftUI sheets don't get by default. Mirrors `ThemedWindowModifier`'s `WindowAccessor` pattern.
-private struct ResizableSheetWindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            view.window?.styleMask.insert(.resizable)
-        }
-        return view
-    }
-
-    // Mirrors `WindowAccessor` (`ThemedWindow.swift`): `makeNSView` can run
-    // before the view is attached to a window, so `view.window` is nil and
-    // the style mask never gets set. Retrying here on every body update
-    // catches the window once it exists; the insert is a no-op once already
-    // applied.
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            nsView.window?.styleMask.insert(.resizable)
-        }
-    }
-}
-
 extension View {
+    /// Grants `.resizable`, which SwiftUI sheets don't get by default.
     fileprivate func resizableSheetWindow() -> some View {
-        background(ResizableSheetWindowAccessor())
+        background(WindowAccessor { $0.styleMask.insert(.resizable) })
     }
 }

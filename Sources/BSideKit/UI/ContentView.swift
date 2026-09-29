@@ -111,7 +111,7 @@ public struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
-        .registersTaskWindow()
+        .focusedSceneValue(\.projectsStore, store)
         // The one place the task-creation sheet is presented; every trigger
         // just sets `store.pendingTaskCreationProject` so it's never shown twice.
         .sheet(item: pendingTaskCreationProjectBinding) { project in

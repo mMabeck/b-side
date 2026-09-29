@@ -8,7 +8,7 @@ import SwiftUI
 /// store the sidebar and main area show.
 public struct NavigationCommands: Commands {
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -38,7 +38,7 @@ public struct NavigationCommands: Commands {
                     .keyboardShortcut(NavigationShortcuts.projectShortcut(forIndex: index))
                 }
             }
-            .disabled(!focus.isTaskWindowInFront)
+            .disabled(focusedStore == nil)
         }
     }
 }
