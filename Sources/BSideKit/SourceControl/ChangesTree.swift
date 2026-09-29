@@ -78,6 +78,21 @@ public enum AnyChangesTreeNode<Leaf: ChangesTreeLeaf>: Sendable, Equatable, Iden
 }
 
 public typealias ChangesTreeNode = AnyChangesTreeNode<ChangesTreeFile>
+
+public struct ChangesTreeRow: Identifiable, Equatable, Sendable {
+    public let node: ChangesTreeNode
+    public let depth: Int
+
+    public var id: String { node.id }
+
+    static func visibleRows(_ nodes: [ChangesTreeNode], collapsed: Set<String>, depth: Int = 0) -> [ChangesTreeRow] {
+        nodes.flatMap { node -> [ChangesTreeRow] in
+            let row = ChangesTreeRow(node: node, depth: depth)
+            guard case .folder(let folder) = node, !collapsed.contains(folder.id) else { return [row] }
+            return [row] + visibleRows(folder.children, collapsed: collapsed, depth: depth + 1)
+        }
+    }
+}
 public typealias ChangesTreeRowNode = AnyChangesTreeNode<SourceControlStore.Row>
 
 public enum ChangesTreeBuilder {

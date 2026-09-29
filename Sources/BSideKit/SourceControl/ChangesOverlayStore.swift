@@ -39,6 +39,8 @@ public final class ChangesOverlayStore {
     /// The task's baseline for `.all`/`.committed`, `"HEAD"` for `.uncommitted`.
     public private(set) var baseRefLabel: String?
     public private(set) var showsFullFile = false
+    /// Tracks collapsed rather than expanded folders so new folders appear expanded.
+    public private(set) var collapsedFolderIDs: Set<String> = []
 
     public var totalAdded: Int { files.reduce(0) { $0 + ($1.linesAdded ?? 0) } }
     public var totalRemoved: Int { files.reduce(0) { $0 + ($1.linesRemoved ?? 0) } }
@@ -60,6 +62,7 @@ public final class ChangesOverlayStore {
         loadState = .idle
         files = []
         tree = []
+        collapsedFolderIDs = []
         branchName = nil
         baseRefLabel = nil
 
@@ -89,6 +92,29 @@ public final class ChangesOverlayStore {
         guard newValue != showsFullFile else { return }
         showsFullFile = newValue
         Task { await loadDiff() }
+    }
+
+    public var visibleRows: [ChangesTreeRow] {
+        ChangesTreeRow.visibleRows(tree, collapsed: collapsedFolderIDs)
+    }
+
+    public func toggleFolder(_ id: String) {
+        if collapsedFolderIDs.remove(id) == nil { collapsedFolderIDs.insert(id) }
+    }
+
+    public func expandAllFolders() {
+        collapsedFolderIDs = []
+    }
+
+    public func collapseAllFolders() {
+        collapsedFolderIDs = Set(Self.folderIDs(in: tree))
+    }
+
+    private static func folderIDs(in nodes: [ChangesTreeNode]) -> [String] {
+        nodes.flatMap { node -> [String] in
+            guard case .folder(let folder) = node else { return [] }
+            return [folder.id] + folderIDs(in: folder.children)
+        }
     }
 
     public func select(_ path: String?) {
