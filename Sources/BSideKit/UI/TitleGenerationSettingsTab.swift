@@ -7,7 +7,7 @@ struct TitleGenerationSettingsTab: View {
     @AppStorage(Keys.mode) private var modeRaw = TitleGenerationMode.localModel.rawValue
     @AppStorage(Keys.claudeModel) private var claudeModel = TitleGenerationSettings.defaultClaudeModel
     @AppStorage(Keys.codexModel) private var codexModel = ""
-    @AppStorage(Keys.modelSource) private var sourceRaw = TitleModelSource.file.rawValue
+    @AppStorage(Keys.modelSource) private var sourceRaw = TitleModelSource.huggingFace.rawValue
     @AppStorage(Keys.huggingFaceRepo) private var huggingFaceRepo = TitleGenerationSettings.defaultHuggingFaceRepo
     @AppStorage(Keys.huggingFaceQuant) private var huggingFaceQuant = TitleGenerationSettings.defaultHuggingFaceQuant
     @AppStorage(Keys.modelFilePath) private var modelFilePath = TitleGenerationSettings.defaultModelFilePath
@@ -18,7 +18,7 @@ struct TitleGenerationSettingsTab: View {
     @State private var isTesting = false
 
     private var mode: TitleGenerationMode { TitleGenerationMode(rawValue: modeRaw) ?? .localModel }
-    private var source: TitleModelSource { TitleModelSource(rawValue: sourceRaw) ?? .file }
+    private var source: TitleModelSource { TitleModelSource(rawValue: sourceRaw) ?? .huggingFace }
 
     var body: some View {
         Form {

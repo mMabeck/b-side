@@ -44,7 +44,7 @@ public struct TitleGenerationSettings: Equatable, Sendable {
     }
 
     public static let defaultClaudeModel = "haiku"
-    public static let defaultHuggingFaceRepo = "Mabeck/qwen3.5-0.8b-session-titles"
+    public static let defaultHuggingFaceRepo = "Mabeck/qwen3.5-0.8b-kth8-titles"
     public static let defaultHuggingFaceQuant = "Q8_0"
     public static let defaultModelFilePath = "~/Claude/title-gen/models/gguf/qwen3.5-0.8b-title-Q8_0.gguf"
 
@@ -52,7 +52,7 @@ public struct TitleGenerationSettings: Equatable, Sendable {
     public var claudeModel = defaultClaudeModel
     /// Empty means Codex's own configured default model.
     public var codexModel = ""
-    public var modelSource: TitleModelSource = .file
+    public var modelSource: TitleModelSource = .huggingFace
     public var huggingFaceRepo = defaultHuggingFaceRepo
     public var huggingFaceQuant = defaultHuggingFaceQuant
     public var modelFilePath = defaultModelFilePath

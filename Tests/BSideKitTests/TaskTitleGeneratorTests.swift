@@ -53,8 +53,13 @@ struct TaskTitleGeneratorCleanupTests {
 struct TaskTitleGeneratorRealModelTests {
     @Test("generates a short usable title from a real prompt")
     func generatesATitleFromARealPrompt() async throws {
-        let title = await TaskTitleGenerator.generate(fromPrompt: "the login page throws a 500 error, please fix it")
-        let unwrapped = try #require(title)
+        var settings = TitleGenerationSettings()
+        settings.modelSource = .file
+        let result = await TaskTitleGenerator.generateResult(
+            fromPrompt: "the login page throws a 500 error, please fix it",
+            settings: settings
+        )
+        let unwrapped = try result.get()
         #expect(!unwrapped.isEmpty)
         #expect(unwrapped.split(separator: " ").count <= 8)
     }
