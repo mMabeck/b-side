@@ -205,6 +205,7 @@ struct RightSidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .overlayScrollers()
     }
 
     private func sectionHeader(_ title: String, actionTitle: String, action: @escaping () -> Void) -> some View {

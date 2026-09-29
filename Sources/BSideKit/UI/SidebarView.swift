@@ -103,6 +103,7 @@ struct SidebarView: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .overlayScrollers()
                 .onAppear { syncSelectionFromStore() }
                 .onChange(of: selection) { _, newValue in
                     // The List clears selection to nil when clicking empty space or
