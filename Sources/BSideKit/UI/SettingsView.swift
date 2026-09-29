@@ -43,7 +43,8 @@ public struct SettingsView: View {
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case general, appearance, agent, titles, git, terminal, keybindings, notifications
 
-    var id: String { rawValue }
+    // List tags rows by `id`; it must be `Self` to match the selection binding.
+    var id: Self { self }
 
     var title: String {
         switch self {
