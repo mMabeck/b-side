@@ -12,7 +12,8 @@ import SwiftUI
 /// + `TerminalViewState`), never `TerminalSurfaceViewDelegate` — so this app
 /// never falsely claims to have handled an action (title, close, bell,
 /// desktop notification, ...) it hasn't; unhandled events fall back to
-/// Ghostty's own default behaviour.
+/// Ghostty's own default behaviour. The one exception is opening links: see
+/// ``TerminalLinkOpener``.
 public enum GhosttyBridge {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "terminal-theme")
 
@@ -606,5 +607,61 @@ public enum TerminalScrollRouter {
             view = current.superview
         }
         return nil
+    }
+}
+
+/// Ghostty's fallback opener refuses OSC 8 hyperlinks (`UnsafeOSC8Link`) and
+/// leaves them to the host, so without this Pi's links do nothing on click.
+extension TerminalViewState: @retroactive TerminalSurfaceOpenURLDelegate {
+    public func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
+        TerminalLinkOpener.open(url)
+    }
+}
+
+enum TerminalLinkOpener {
+    enum Action: Equatable {
+        case open(URL)
+        case reveal(URL)
+    }
+
+    /// An OSC 8 link's text needn't match its target, so a local file that
+    /// would run something is revealed in Finder rather than opened.
+    static func action(for link: String, fileManager: FileManager = .default) -> Action? {
+        let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let fileURL: URL
+        if let url = URL(string: text), let scheme = url.scheme, scheme.count > 1 {
+            guard scheme.lowercased() == "file" else { return .open(url) }
+            fileURL = url
+        } else if text.hasPrefix("/") || text.hasPrefix("~") {
+            fileURL = URL(fileURLWithPath: (text as NSString).expandingTildeInPath)
+        } else {
+            return nil
+        }
+        return launchesSomething(fileURL, fileManager: fileManager) ? .reveal(fileURL) : .open(fileURL)
+    }
+
+    private static let launchingExtensions: Set<String> = [
+        "app", "command", "tool", "terminal", "sh", "workflow", "pkg", "mpkg", "scpt", "applescript",
+    ]
+
+    private static func launchesSomething(_ url: URL, fileManager: FileManager) -> Bool {
+        if launchingExtensions.contains(url.pathExtension.lowercased()) { return true }
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return false }
+        if isDirectory.boolValue { return NSWorkspace.shared.isFilePackage(atPath: url.path) }
+        return fileManager.isExecutableFile(atPath: url.path)
+    }
+
+    @MainActor
+    static func open(_ link: String) {
+        switch action(for: link) {
+        case .open(let url):
+            NSWorkspace.shared.open(url)
+        case .reveal(let url):
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case nil:
+            GhosttyBridge.logger.info("ignored unopenable link \(link, privacy: .private)")
+        }
     }
 }
