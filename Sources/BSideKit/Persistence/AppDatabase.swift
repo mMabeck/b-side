@@ -17,8 +17,14 @@ public final class AppDatabase: Sendable {
         try migrator.migrate(dbQueue)
     }
 
+    public static let defaultAppSupportName = "B-Side"
+
+    /// Application Support folder for this bundle; side-by-side copies set `BSideAppSupportName` so they share no state.
+    public static let appSupportName: String =
+        Bundle.main.object(forInfoDictionaryKey: "BSideAppSupportName") as? String ?? defaultAppSupportName
+
     /// Opens (creating if needed) the database at the standard Application Support location.
-    public static func openStandard(appName: String = "B-Side") throws -> AppDatabase {
+    public static func openStandard(appName: String = appSupportName) throws -> AppDatabase {
         let fileManager = FileManager.default
         let appSupport = try fileManager.url(
             for: .applicationSupportDirectory,
@@ -26,7 +32,9 @@ public final class AppDatabase: Sendable {
             appropriateFor: nil,
             create: true
         )
-        return try open(appName: appName, legacyAppName: "DashNative", in: appSupport)
+        // Only the real app inherits DashNative data; a side-by-side copy must never move it.
+        let legacyAppName = appName == defaultAppSupportName ? "DashNative" : appName
+        return try open(appName: appName, legacyAppName: legacyAppName, in: appSupport)
     }
 
     /// Opens the database under `appName` inside `baseDirectory`, migrating data from

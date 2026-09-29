@@ -404,7 +404,11 @@ public final class SubagentStripHost: ObservableObject {
     public var onHostInput: ((Data) -> Void)?
 
     /// `nil` until the surface first attaches to a real view and reports a viewport.
-    @Published public private(set) var latestViewport: InMemoryTerminalViewport?
+    @Published public private(set) var latestViewport: InMemoryTerminalViewport? {
+        didSet { lastRenderedLines = nil }
+    }
+
+    private var lastRenderedLines: [String]?
 
     public init() {
         var capturedSession: InMemoryTerminalSession!
@@ -428,7 +432,10 @@ public final class SubagentStripHost: ObservableObject {
     }
 
     /// Full-repaint, not incremental — `SubagentStripRenderer` re-renders everything each tick.
+    /// Unchanged frames are skipped: every repaint wakes libghostty's display link.
     public func render(lines: [String]) {
+        guard lines != lastRenderedLines else { return }
+        lastRenderedLines = lines
         let body = (["\u{1B}[H\u{1B}[2J\u{1B}[?25l"] + lines).joined(separator: "\r\n")
         session.receive(body)
     }

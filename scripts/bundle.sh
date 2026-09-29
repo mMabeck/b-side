@@ -13,9 +13,19 @@ done
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="B-Side"
-BUNDLE_ID="dev.mabeck.bside"
-DIST_DIR="dist"
+# Overrides build a side-by-side copy (own defaults, data dir and endpoint file)
+# that can run next to the real app, e.g. for benchmarking.
+APP_NAME="${BSIDE_APP_NAME:-B-Side}"
+BUNDLE_ID="${BSIDE_BUNDLE_ID:-dev.mabeck.bside}"
+DIST_DIR="${BSIDE_DIST_DIR:-dist}"
+if [ "$INSTALL" = 1 ] && { [ "$APP_NAME" != "B-Side" ] || [ "$BUNDLE_ID" != "dev.mabeck.bside" ]; }; then
+    echo "error: --install is only for the default app" >&2
+    exit 2
+fi
+if [ "$APP_NAME" != "B-Side" ] && [ "$BUNDLE_ID" = "dev.mabeck.bside" ]; then
+    echo "error: a renamed copy needs its own BSIDE_BUNDLE_ID" >&2
+    exit 2
+fi
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 ICNS_PATH="assets/icon/AppIcon.icns"
 
@@ -52,6 +62,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
+    <key>BSideAppSupportName</key>
+    <string>$APP_NAME</string>
     <key>CFBundleExecutable</key>
     <string>BSide</string>
     <key>CFBundleIconFile</key>

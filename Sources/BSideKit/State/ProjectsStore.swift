@@ -422,8 +422,11 @@ public final class ProjectsStore {
             return (projects, tasksByProject)
         }
 
+        // `-BSideSelectTaskOnLaunch <id>` opens a task without UI input, for scripted measurement runs.
+        let launchArgument = UserDefaults.standard.integer(forKey: "BSideSelectTaskOnLaunch")
         observationTask = Task { [weak self, database] in
             guard let self else { return }
+            var launchTaskID: Int64? = launchArgument > 0 ? Int64(launchArgument) : nil
             do {
                 for try await (projects, tasksByProject) in observation.values(in: database.dbQueue) {
                     self.projects = projects
@@ -437,6 +440,10 @@ public final class ProjectsStore {
                     )
                     self.selectedProjectID = reconciled.selectedProjectID
                     self.selectedTaskID = reconciled.selectedTaskID
+                    if let id = launchTaskID, let pair = self.taskAndProject(forID: id) {
+                        launchTaskID = nil
+                        self.selectTask(pair.task, project: pair.project)
+                    }
                 }
             } catch {
                 Self.logger.error("Project observation failed: \(error, privacy: .public)")
@@ -554,7 +561,7 @@ public final class ProjectsStore {
             appropriateFor: nil,
             create: true
         ) else { return nil }
-        return appSupport.appendingPathComponent("B-Side", isDirectory: true)
+        return appSupport.appendingPathComponent(AppDatabase.appSupportName, isDirectory: true)
             .appendingPathComponent("subagent-endpoint", isDirectory: false)
     }
 
