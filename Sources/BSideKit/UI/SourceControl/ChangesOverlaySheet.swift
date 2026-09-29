@@ -398,25 +398,9 @@ struct ChangesOverlaySheet: View {
     }
 }
 
-private struct ResizableSheetWindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            view.window?.styleMask.insert(.resizable)
-        }
-        return view
-    }
-
-    // `makeNSView` can run before attach, so `view.window` is nil; retrying every body update catches the window (the insert is idempotent).
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            nsView.window?.styleMask.insert(.resizable)
-        }
-    }
-}
-
 extension View {
+    /// Grants `.resizable`, which SwiftUI sheets don't get by default.
     fileprivate func resizableSheetWindow() -> some View {
-        background(ResizableSheetWindowAccessor())
+        background(WindowAccessor { $0.styleMask.insert(.resizable) })
     }
 }

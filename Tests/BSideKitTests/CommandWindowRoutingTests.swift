@@ -3,13 +3,8 @@ import Testing
 @testable import BSideKit
 
 @MainActor
-@Suite("TaskWindowFocus")
-struct TaskWindowFocusTests {
-    private final class Flags {
-        var terminalClosed = false
-        var sheetDismissed = false
-    }
-
+@Suite("CommandWindowRouting")
+struct CommandWindowRoutingTests {
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 300, height: 200),
@@ -23,13 +18,12 @@ struct TaskWindowFocusTests {
 
     @Test("Cmd+W ends the terminal only in the task window, dismisses a sheet, and closes Settings")
     func closeRouting() {
-        let focus = TaskWindowFocus()
-        let flags = Flags()
+        var terminalClosed = false
+        var sheetDismissed = false
         let taskWindow = makeWindow()
         let settingsWindow = makeWindow()
         let sheet = makeWindow()
-        focus.register(taskWindow)
-        focus.setSheetCloseAction({ flags.sheetDismissed = true }, for: sheet)
+        CommandWindowRouting.setSheetCloseAction({ sheetDismissed = true }, for: sheet)
         taskWindow.setIsVisible(true)
         settingsWindow.setIsVisible(true)
         taskWindow.beginSheet(sheet, completionHandler: nil)
@@ -37,18 +31,17 @@ struct TaskWindowFocusTests {
             taskWindow.endSheet(sheet)
             taskWindow.orderOut(nil)
         }
-        #expect(focus.role(of: nil) == .other)
 
-        focus.close(sheet) { flags.terminalClosed = true }
-        #expect(flags.sheetDismissed)
-        #expect(!flags.terminalClosed)
+        CommandWindowRouting.close(sheet, isTaskWindow: true) { terminalClosed = true }
+        #expect(sheetDismissed)
+        #expect(!terminalClosed)
 
-        focus.close(settingsWindow) { flags.terminalClosed = true }
+        CommandWindowRouting.close(settingsWindow, isTaskWindow: false) { terminalClosed = true }
         #expect(!settingsWindow.isVisible)
-        #expect(!flags.terminalClosed)
+        #expect(!terminalClosed)
 
-        focus.close(taskWindow) { flags.terminalClosed = true }
-        #expect(flags.terminalClosed)
+        CommandWindowRouting.close(taskWindow, isTaskWindow: true) { terminalClosed = true }
+        #expect(terminalClosed)
         #expect(taskWindow.isVisible)
     }
 }

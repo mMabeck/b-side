@@ -2,7 +2,7 @@ import SwiftUI
 
 public struct ChangesCommands: Commands {
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -19,7 +19,7 @@ public struct ChangesCommands: Commands {
                 .keyboardShortcut(ChangesOverlayShortcut.showAllChanges)
                 .disabled(!isTaskSelected)
             }
-            .disabled(!focus.isTaskWindowInFront)
+            .disabled(focusedStore == nil)
         }
     }
 

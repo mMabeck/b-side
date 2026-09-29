@@ -23,25 +23,27 @@ extension View {
     }
 }
 
-/// SwiftUI has no direct window accessor; an invisible `NSView` reads `.window` once attached.
+/// SwiftUI has no direct window accessor; an invisible `NSView` configures its window once attached.
 struct WindowAccessor: NSViewRepresentable {
     let configure: (NSWindow) -> Void
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { [configure] in
-            if let window = view.window {
-                configure(window)
-            }
+    final class View: NSView {
+        var configure: (NSWindow) -> Void = { _ in }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { configure(window) }
         }
+    }
+
+    func makeNSView(context: Context) -> View {
+        let view = View(frame: .zero)
+        view.configure = configure
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { [configure] in
-            if let window = nsView.window {
-                configure(window)
-            }
-        }
+    func updateNSView(_ nsView: View, context: Context) {
+        nsView.configure = configure
+        if let window = nsView.window { configure(window) }
     }
 }

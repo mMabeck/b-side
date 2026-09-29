@@ -3,7 +3,7 @@ import SwiftUI
 /// Ctrl-Cmd keys reach here via `MainMenuKeyRouter` even with a terminal focused; Ghostty has no `ctrl+cmd+*` defaults to unbind.
 public struct SubagentSwapCommands: Commands {
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -47,7 +47,7 @@ public struct SubagentSwapCommands: Commands {
                     .keyboardShortcut(SubagentSwapShortcut.previousArrow)
                     .hidden()
             }
-            .disabled(!focus.isTaskWindowInFront)
+            .disabled(focusedStore == nil)
         }
     }
 

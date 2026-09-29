@@ -2,7 +2,7 @@ import SwiftUI
 
 public struct EditorCommands: Commands {
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
     private let launcher = EditorLauncher()
 
     public init(store: ProjectsStore) {
@@ -20,7 +20,7 @@ public struct EditorCommands: Commands {
                 .keyboardShortcut(EditorShortcut.openInEditor)
                 .disabled(Self.targetFolder(selection: store.mainSelection) == nil)
             }
-            .disabled(!focus.isTaskWindowInFront)
+            .disabled(focusedStore == nil)
         }
     }
 

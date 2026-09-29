@@ -103,7 +103,7 @@ public struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
-        .registersTaskWindow()
+        .focusedSceneValue(\.projectsStore, store)
         // The sole presentation site for the task-creation sheet; triggers only set `store.pendingTaskCreationProject`.
         .sheet(item: pendingTaskCreationProjectBinding) { project in
             // `project` can be stale if choices were persisted moments earlier; prefer the current store copy.

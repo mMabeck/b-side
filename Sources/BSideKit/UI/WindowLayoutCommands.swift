@@ -4,7 +4,7 @@ import SwiftUI
 public struct WindowLayoutCommands: Commands {
     @ObservedObject private var layout = WindowLayoutState.shared
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -30,7 +30,7 @@ public struct WindowLayoutCommands: Commands {
                 .disabled(store.mainSelection == .none)
                 .keyboardShortcut(WindowLayoutShortcut.terminalDrawer)
             }
-            .disabled(!focus.isTaskWindowInFront)
+            .disabled(focusedStore == nil)
         }
     }
 }
