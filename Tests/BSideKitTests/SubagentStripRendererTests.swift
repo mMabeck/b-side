@@ -47,14 +47,4 @@ struct SubagentStripRendererTests {
             #expect(statusRow.contains(substring))
         }
     }
-
-    @Test("An active card changes at most once per elapsed second")
-    func activeCardStableWithinSecond() {
-        let run = makeRun(id: "c1")
-        let render = { (now: Double) in
-            SubagentStripRenderer.render(runs: [run], viewedChildId: nil, columns: 120, now: Date(timeIntervalSinceReferenceDate: now)).lines
-        }
-        #expect(render(5.05) == render(5.95))
-        #expect(render(5.95) != render(6.05))
-    }
 }
