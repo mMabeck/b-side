@@ -1,34 +1,74 @@
 import GhosttyTheme
 import SwiftUI
 
-/// Standard macOS `Settings` scene content: General, Appearance, Agent, Titles, Git, Terminal, Notifications.
+/// Settings scene content: a category sidebar, like System Settings. A tab
+/// bar overflows at this many panes, and its overflow menu items are disabled.
 public struct SettingsView: View {
     @ObservedObject private var theme = GhosttyResolvedTheme.shared
+    @State private var selection: SettingsPane? = .general
 
     public init() {}
 
     public var body: some View {
-        TabView {
-            GeneralSettingsTab()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            AppearanceSettingsTab(theme: theme)
-                .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            AgentSettingsTab()
-                .tabItem { Label("Agent", systemImage: "cpu") }
-            TitleGenerationSettingsTab()
-                .tabItem { Label("Titles", systemImage: "character.cursor.ibeam") }
-            GitSettingsTab()
-                .tabItem { Label("Git", systemImage: "arrow.triangle.branch") }
-            TerminalSettingsTab()
-                .tabItem { Label("Terminal", systemImage: "terminal") }
-            KeybindingsSettingsTab(theme: theme)
-                .tabItem { Label("Keybindings", systemImage: "keyboard") }
-            NotificationsSettingsTab(theme: theme)
-                .tabItem { Label("Notifications", systemImage: "bell") }
+        NavigationSplitView {
+            List(SettingsPane.allCases, selection: $selection) { pane in
+                Label(pane.title, systemImage: pane.systemImage)
+            }
+            .navigationSplitViewColumnWidth(190)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            let pane = selection ?? .general
+            detail(for: pane)
+                .navigationTitle(pane.title)
         }
-        // No shared frame: each tab sets its own size, and the Settings
-        // window resizes per tab like standard macOS preference panes.
+        .frame(width: 920, height: 600)
         .themedWindow(theme.palette)
+    }
+
+    @ViewBuilder
+    private func detail(for pane: SettingsPane) -> some View {
+        switch pane {
+        case .general: GeneralSettingsTab()
+        case .appearance: AppearanceSettingsTab(theme: theme)
+        case .agent: AgentSettingsTab()
+        case .titles: TitleGenerationSettingsTab()
+        case .git: GitSettingsTab()
+        case .terminal: TerminalSettingsTab()
+        case .keybindings: KeybindingsSettingsTab(theme: theme)
+        case .notifications: NotificationsSettingsTab(theme: theme)
+        }
+    }
+}
+
+private enum SettingsPane: String, CaseIterable, Identifiable {
+    case general, appearance, agent, titles, git, terminal, keybindings, notifications
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .appearance: "Appearance"
+        case .agent: "Agent"
+        case .titles: "Titles"
+        case .git: "Git"
+        case .terminal: "Terminal"
+        case .keybindings: "Keybindings"
+        case .notifications: "Notifications"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: "gearshape"
+        case .appearance: "paintpalette"
+        case .agent: "cpu"
+        case .titles: "character.cursor.ibeam"
+        case .git: "arrow.triangle.branch"
+        case .terminal: "terminal"
+        case .keybindings: "keyboard"
+        case .notifications: "bell"
+        }
     }
 }
 
@@ -40,7 +80,7 @@ private struct GeneralSettingsTab: View {
             Toggle("Launch at Login", isOn: $launchAtLogin)
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 420, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -106,7 +146,7 @@ private struct AppearanceSettingsTab: View {
             }
         }
         .padding(20)
-        .frame(width: 720, height: 420, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     /// The theme the preview shows: whichever one the list is editing.
@@ -147,7 +187,7 @@ private struct AgentSettingsTab: View {
             TextField("Default Harness", text: $defaultHarness)
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 420, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -159,7 +199,7 @@ private struct GitSettingsTab: View {
             TextField("Default Base Ref", text: $defaultBaseRef)
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 420, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -171,7 +211,7 @@ private struct TerminalSettingsTab: View {
             Stepper("Font Size: \(Int(fontSize))", value: $fontSize, in: 9...24)
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 420, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -213,7 +253,7 @@ private struct KeybindingsSettingsTab: View {
                 .foregroundStyle(theme.palette.textSecondary)
                 .padding(12)
         }
-        .frame(width: 480, height: 420, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -274,6 +314,6 @@ private struct NotificationsSettingsTab: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 420, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
