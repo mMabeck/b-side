@@ -1,7 +1,6 @@
 import Foundation
 
 extension GitCLI {
-    /// One entry from `git worktree list --porcelain`.
     public struct Worktree: Sendable, Equatable {
         public let path: String
         public let headSHA: String?
@@ -49,8 +48,6 @@ extension GitCLI {
         return result
     }
 
-    /// Creates a new branch `newBranch` from `baseRef` and adds a worktree for it at
-    /// `worktreePath` in one step.
     public static func addWorktree(
         at worktreePath: URL,
         newBranch: String,
@@ -63,8 +60,6 @@ extension GitCLI {
         )
     }
 
-    /// Adds a worktree at `worktreePath` for an existing branch, without creating a
-    /// new one.
     public static func addWorktree(
         at worktreePath: URL,
         existingBranch: String,
@@ -82,8 +77,6 @@ extension GitCLI {
         _ = try? await run(["worktree", "repair"], in: repositoryPath)
     }
 
-    /// Removes the worktree at `worktreePath`. `force` allows removal despite
-    /// uncommitted changes.
     public static func removeWorktree(at worktreePath: URL, in repositoryPath: URL, force: Bool = false) async throws {
         var arguments = ["worktree", "remove"]
         if force { arguments.append("--force") }
@@ -91,15 +84,12 @@ extension GitCLI {
         _ = try await run(arguments, in: repositoryPath)
     }
 
-    /// Prunes stale worktree administrative files — entries whose directories have
-    /// vanished from disk.
     public static func pruneWorktrees(in repositoryPath: URL) async throws {
         _ = try await run(["worktree", "prune"], in: repositoryPath)
     }
 }
 
 extension String {
-    /// Returns `self` with `prefix` removed, or `nil` if `self` doesn't start with it.
     fileprivate func stripping(prefix: String) -> String? {
         guard hasPrefix(prefix) else { return nil }
         return String(dropFirst(prefix.count))

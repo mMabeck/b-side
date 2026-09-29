@@ -1,10 +1,7 @@
 import Foundation
 import GRDB
 
-/// A unit of work, owning a branch and (normally) a worktree.
-///
-/// Named `TaskRecord` rather than `Task` to avoid colliding with Swift's
-/// concurrency `Task` type.
+/// Named `TaskRecord` to avoid colliding with Swift's `Task`.
 public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     public var id: Int64?
     public var projectId: Int64
@@ -19,14 +16,10 @@ public struct TaskRecord: Identifiable, Equatable, Codable, Sendable {
     public var teardownCommand: String?
     public var archived: Bool
     public var sortPosition: Int
-    /// Set when the task's name was left blank at creation. Watched by
-    /// `TaskAutoRenameService`/`MainAreaView` for its first pi prompt,
-    /// cleared once applied or definitively skipped.
+    /// Set when the name was left blank; cleared once auto-rename is applied or skipped.
     public var awaitingAutoRename: Bool
-    /// The branch's tip commit at creation/attachment. `nil` for legacy rows;
-    /// `syncStatus` falls back to the reflog creation entry. Used so a branch with no commits of its own never reads as "merged".
+    /// `nil` for legacy rows; `syncStatus` falls back to the reflog. Keeps a branch with no commits of its own from reading as merged.
     public var baseCommit: String?
-    /// `nil` until the first qualifying activity (see `ProjectsStore.bumpTaskActivity`). Drives most-recent-first ordering.
     public var lastActivityAt: Date?
 
     public init(

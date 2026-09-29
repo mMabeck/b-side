@@ -2,9 +2,6 @@ import Foundation
 import GRDB
 import OSLog
 
-/// Owns the app's SQLite database: connection, migrations, and queries.
-///
-/// The database file lives under the app's Application Support directory.
 public final class AppDatabase: Sendable {
     public let dbQueue: DatabaseQueue
 
@@ -23,7 +20,6 @@ public final class AppDatabase: Sendable {
     public static let appSupportName: String =
         Bundle.main.object(forInfoDictionaryKey: "BSideAppSupportName") as? String ?? defaultAppSupportName
 
-    /// Opens (creating if needed) the database at the standard Application Support location.
     public static func openStandard(appName: String = appSupportName) throws -> AppDatabase {
         let fileManager = FileManager.default
         let appSupport = try fileManager.url(
@@ -43,7 +39,6 @@ public final class AppDatabase: Sendable {
         return try AppDatabase(dbQueue: dbQueue)
     }
 
-    /// Opens an in-memory database, for tests and previews.
     public static func openInMemory() throws -> AppDatabase {
         var config = Configuration()
         config.foreignKeysEnabled = true

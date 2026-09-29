@@ -1,17 +1,12 @@
 import Foundation
 
-/// Decides which of a task's children the strip currently shows: active/
-/// blocked always, plus a short linger past `endedAt` so a ✓/✗ is briefly
-/// readable, unless swapped into the main area (stays until swapped back).
-/// Pure function of the runs plus wall-clock time, so nothing needs to be
-/// remembered across calls (`nextBatch` is directly testable).
+/// Pure function of runs and wall-clock time, so `nextBatch` needs no remembered state.
 @MainActor
 public final class SubagentStripBatchTracker {
     public static let lingerInterval: TimeInterval = 3
 
     public init() {}
 
-    /// Runs to show for `taskId`'s strip right now, oldest first.
     public func visibleRuns(
         forTask taskId: Int64,
         allRuns: [ChildRun],
@@ -22,8 +17,6 @@ public final class SubagentStripBatchTracker {
         return allRuns.filter { ids.contains($0.id) }
     }
 
-    /// Retained for callers that used to reset per-task batch memory on
-    /// teardown; visibility no longer depends on tracked state.
     public func reset(taskId: Int64) {}
 
     public static func nextBatch(
@@ -44,7 +37,6 @@ public final class SubagentStripBatchTracker {
         })
     }
 
-    /// Ones whose card has aged out of `nextBatch`, so a finished child stops holding a pane slot.
     public static func agedOutPaneIDs(
         allRuns: [ChildRun],
         livePaneIDs: Set<String>,

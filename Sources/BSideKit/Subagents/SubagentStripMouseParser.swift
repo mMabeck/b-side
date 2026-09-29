@@ -1,10 +1,5 @@
 import Foundation
 
-/// Parses SGR mouse-report bytes and hit-tests them against a rendered
-/// `SubagentStripRenderer.Result`. Ghostty translates a click over the strip
-/// surface's `NSView` into an SGR report delivered via the in-memory
-/// session's `write` handler (see `GhosttyBridge.SubagentStripHost`); this
-/// type is pure so parsing/hit-testing are unit-testable without a live surface.
 public enum SubagentStripMouseParser {
     public struct MouseEvent: Equatable {
         public let button: Int
@@ -21,7 +16,6 @@ public enum SubagentStripMouseParser {
         }
     }
 
-    /// Only press events (`M`) matter to the strip; release (`m`) parses too, for callers filtering a real click vs. a drag.
     public static func parse(_ data: Data) -> [MouseEvent] {
         guard let text = String(data: data, encoding: .utf8) else { return [] }
         var events: [MouseEvent] = []
@@ -47,8 +41,6 @@ public enum SubagentStripMouseParser {
         case mainHint
     }
 
-    /// A card's child id within `cardRowCount` rows and a slot's column
-    /// range, `.mainHint` on the label row's hint, else `nil`.
     public static func hitTest(column: Int, row: Int, result: SubagentStripRenderer.Result) -> HitTestResult? {
         let zeroBasedColumn = column - 1
         let zeroBasedRow = row - 1

@@ -1,7 +1,6 @@
 import Foundation
 import GRDB
 
-/// Plain, versioned SQL migrations. No ORM ceremony.
 enum Migrations {
     static func register(in migrator: inout DatabaseMigrator) {
         migrator.registerMigration("v1_initial_schema") { db in

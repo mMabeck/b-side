@@ -1,13 +1,6 @@
 import Foundation
 
-/// Pure mapping from a strip hit-test result to the swap action it should
-/// trigger, given which child ids currently have a live pane. Split out of
-/// `TaskTerminalAreaView.handle` so the "was this child live at the moment
-/// of the click" decision is directly testable without a SwiftUI host —
-/// the caller is responsible for resolving `livePaneIDs` fresh from
-/// `SubagentPaneStore` at click time, not from a snapshot captured when the
-/// click handler was installed (Pi sends `begin` before `spawn`, so a
-/// snapshot taken too early sees no panes at all).
+/// `livePaneIDs` must be resolved at click time: Pi sends `begin` before `spawn`, so an earlier snapshot sees no panes.
 public enum SubagentStripClickAction: Equatable {
     case showMain
     case toggle(childId: String)

@@ -1,7 +1,6 @@
 import AppKit
 import AVFoundation
 
-/// Shared between `SettingsView` and alert-handling code outside SwiftUI.
 public enum TaskAlertSettingsKeys {
     public static let enabled = "settings.notifications.enabled"
     public static let soundsEnabled = "settings.notifications.playSounds"
@@ -10,7 +9,6 @@ public enum TaskAlertSettingsKeys {
     public static let volume = "settings.notifications.volume"
 }
 
-/// `rawValue` is both the persisted `@AppStorage` string and the name `NSSound(named:)` expects.
 public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
     case off = "None"
     case basso = "Basso"
@@ -32,7 +30,6 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
         NormalizedSoundPlayer.play(self, volume: Float(max(0, min(100, volume)) / 100))
     }
 
-    /// Same order `NSSound(named:)` searches: user's own, then machine-wide, then system.
     static func searchDirectories(fileManager: FileManager = .default) -> [URL] {
         [
             fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Sounds"),
@@ -43,7 +40,6 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
 
     static let soundExtensions = ["aiff", "aif", "wav", "caf", "m4a", "mp3"]
 
-    /// First existing `<name>.<ext>` walking `directories`, then `soundExtensions`, in order.
     static func locate(name: String, in directories: [URL], fileManager: FileManager = .default) -> URL? {
         for directory in directories {
             for ext in soundExtensions {
@@ -61,10 +57,7 @@ public enum TaskAlertSound: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// The system alert sounds peak 5–14 dB below full scale, so even at 100%
-/// `NSSound` played them quietly with no way to go louder (`.volume` tops
-/// out at 1.0). Scaling each sound's samples up to `targetPeak` once, at
-/// load, makes 100% as loud as possible without clipping and levels sounds against each other.
+/// System alert sounds peak 5–14 dB below full scale and `NSSound.volume` tops out at 1.0, so samples are scaled up to `targetPeak` at load.
 @MainActor
 enum NormalizedSoundPlayer {
     /// −1 dBFS: loud, with a little margin against inter-sample clipping.
@@ -109,7 +102,6 @@ enum NormalizedSoundPlayer {
         return data
     }
 
-    /// Silence is returned unchanged.
     nonisolated static func normalized(_ samples: [Float], targetPeak: Float) -> [Float] {
         let peak = samples.reduce(0) { max($0, abs($1)) }
         guard peak > 0 else { return samples }
@@ -143,9 +135,7 @@ enum NormalizedSoundPlayer {
     }
 }
 
-/// Reads settings directly from `UserDefaults`, since the alert-handling
-/// path runs outside SwiftUI and can't read `@AppStorage` bindings.
-/// Defaults mirror `SettingsView`'s, since an unwritten key reads back as absent, not its SwiftUI default.
+/// Reads `UserDefaults` directly (outside SwiftUI); defaults mirror `SettingsView`'s since an unwritten key reads back as absent.
 public enum TaskAlertSoundPlayer {
     public static let defaultVolume: Double = 70
 
