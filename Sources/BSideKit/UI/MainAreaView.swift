@@ -212,7 +212,6 @@ struct MainAreaView: View {
         }.value
     }
 
-    /// Off the main actor, like `locateTranscriptOffMain`.
     private static func firstUserPromptTextOffMain(url: URL) async -> String? {
         await Task.detached(priority: .utility) {
             guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
@@ -278,7 +277,6 @@ struct MainAreaView: View {
 
         guard let visibleID, !exitedTaskIDs.contains(visibleID) else { return }
 
-        // Focus must follow whichever surface is shown.
         let panes = store.subagentPanes.panes(forTask: visibleID)
         let shownChildID = store.subagentSwap.shownChildID(forTask: visibleID)
         switch MainAreaView.focusTarget(shownChildID: shownChildID, livePaneIDs: Set(panes.map(\.id))) {

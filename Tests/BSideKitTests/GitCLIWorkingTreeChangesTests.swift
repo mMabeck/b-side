@@ -26,8 +26,6 @@ import Testing
         #expect(changes.contains { $0.path == "second.txt" && $0.kind == .modified })
         #expect(changes.contains { $0.path == "untracked.txt" && $0.kind == .untracked })
 
-        // A modified tracked file reports both added and removed lines; an
-        // untracked file reports only added lines.
         let modified = try #require(changes.first { $0.path == "second.txt" })
         #expect(modified.linesAdded == 1)
         #expect(modified.linesRemoved == 1)

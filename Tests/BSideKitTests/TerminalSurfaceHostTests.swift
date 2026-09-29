@@ -83,7 +83,6 @@ struct TerminalSurfaceHostTests {
         try await Task.sleep(for: .milliseconds(500))
         #expect(window.firstResponder === hostA.state.attachedPlatformView)
 
-        // A re-render of the focused host must not steal focus (the old @FocusState bridge resigned it).
         hostA.objectWillChange.send()
         hostB.objectWillChange.send()
         try await Task.sleep(for: .milliseconds(500))

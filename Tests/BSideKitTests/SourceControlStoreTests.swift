@@ -127,7 +127,7 @@ struct SourceControlStoreTests {
         #expect(FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("orig.txt").path))
     }
 
-    // Regression: `D orig.txt` left staged after unstaging only the new path. The file missing on disk is expected; unstaging never touches the worktree.
+    // The file missing on disk is expected; unstaging never touches the worktree.
     @Test("Unstaging a rename unstages both the old and new path, leaving neither staged")
     func unstageRenameClearsBothPaths() async throws {
         let root = try TestRepo.makeTempDirectory()
