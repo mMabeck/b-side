@@ -1,9 +1,5 @@
 import Foundation
 
-/// Best-effort, non-blocking branch/dirty facts for the sidebar's project
-/// rows, styled after cmux's project list (name / branch / path). Fetched
-/// off the row's render path and cached; a missing value just means the row
-/// shows one less line, never a blocked UI.
 @MainActor
 @Observable
 public final class SidebarGitInfoCache {
@@ -21,9 +17,6 @@ public final class SidebarGitInfoCache {
         return infoByProject[projectID]
     }
 
-    /// Kicks off an async refresh for `project`; a no-op if one is already
-    /// cached from this launch, so scrolling the list doesn't refire git per
-    /// frame.
     public func refresh(_ project: Project) {
         guard let id = project.id, infoByProject[id] == nil else { return }
         let path = URL(fileURLWithPath: project.path)

@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// The Push button, or (while a push is running) a scrolling monospaced
-/// output log and a Cancel button in its place — mirrors `CommitAreaView`.
-/// Hidden entirely by the caller when the task's worktree has no `origin`.
 struct PushAreaView: View {
     let aheadCount: Int?
     let isPushing: Bool

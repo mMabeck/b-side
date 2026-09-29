@@ -2,17 +2,8 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// The main area: a task's terminal, a project's dashboard, or an empty
-/// state, chosen by `ProjectsStore.mainSelection`.
-///
-/// Task terminals are cached by task id in `hostsByTaskID` and never torn
-/// down on selection change, only hidden:
-/// destroying a `TerminalSurfaceHost` kills its pty. Hosts are only ever
-/// removed from the cache in `purgeHosts`, once their task is actually gone.
-///
-/// `token` rides along `selectedTaskID` in this key so a reselection of the
-/// already-selected task still reruns `.task(id:)` (and `syncFocus()`) —
-/// SwiftUI's `.task(id:)` only reruns when the id's value actually changes.
+/// Terminals stay cached by task id and are only hidden: destroying a `TerminalSurfaceHost` kills its pty.
+/// `token` in the `.task(id:)` key reruns it when the selected task is reselected.
 private struct FocusRequestKey: Equatable {
     let taskID: Int64?
     let token: Int
@@ -24,22 +15,14 @@ struct MainAreaView: View {
 
     @State private var hostsByTaskID: [Int64: TerminalSurfaceHost] = [:]
 
-    /// Terminal surfaces don't bridge through `@FocusState` (see `TerminalHostView`),
-    /// but an exited task's Resume button is a real SwiftUI control, driven by `syncFocus()`.
     @FocusState private var focusedTaskID: Int64?
 
-    /// Task ids whose parent host's Pi process exited on its own — distinct
-    /// from the terminal being closed/purged, which drops the id from
-    /// `hostsByTaskID` entirely. While present, that task's slot renders
-    /// `PiSessionEndedView` instead of `TerminalHostView`, even while hidden.
+    /// Pi exited on its own; the slot shows `PiSessionEndedView` instead of the terminal.
     @State private var exitedTaskIDs: Set<Int64> = []
 
-    /// Serializes `ensureHost` per task id so a rapid A -> B -> A selection
-    /// change can't have two calls both see "no host yet" and each start their own conversation.
+    /// Serializes `ensureHost` per task so a rapid A -> B -> A switch can't start two conversations.
     @State private var conversationGate = ConversationLaunchGate()
 
-    /// Retains each task's auto-rename poll loop so it can be cancelled once
-    /// purged — an unstructured `Task` nothing references can't be cancelled, only abandoned.
     @State private var autoRenameWatchers: [Int64: Task<Void, Never>] = [:]
 
     private var liveTaskIDs: Set<Int64> {
@@ -48,8 +31,6 @@ struct MainAreaView: View {
 
     var body: some View {
         ZStack {
-            // Every cached terminal stays mounted regardless of selection; only
-            // opacity/hit-testing tracks the active one. Sorted for deterministic iteration (dictionary order isn't).
             ForEach(hostsByTaskID.keys.sorted(), id: \.self) { taskID in
                 if let host = hostsByTaskID[taskID] {
                     let isVisible = taskID == MainAreaView.visibleTaskID(for: store.mainSelection)
@@ -74,7 +55,7 @@ struct MainAreaView: View {
             case .project(let project):
                 ProjectDashboardView(store: store, project: project)
             case .task:
-                EmptyView() // matching cached host above is already visible
+                EmptyView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -111,9 +92,7 @@ struct MainAreaView: View {
                 store.acknowledgeRestartRequested(requestedID)
             }
         }
-        // Switching away to another app/window and back leaves first responder
-        // wherever AppKit put it, not the visible task's terminal; refocus it,
-        // unless a terminal (e.g. the drawer's shell) already holds focus.
+        // Returning from another app leaves first responder elsewhere; refocus unless a terminal (e.g. the drawer's) holds it.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             if let window = note.object as? NSWindow, TerminalSurfaceHost.isTerminalView(window.firstResponder) {
                 return
@@ -122,7 +101,6 @@ struct MainAreaView: View {
         }
     }
 
-    /// With no projects at all, invites adding one instead of a prompt describing a choice the user can't make yet.
     @ViewBuilder
     private var emptyStateView: some View {
         if store.projects.isEmpty {
@@ -146,10 +124,6 @@ struct MainAreaView: View {
         }
     }
 
-    /// Reuses the task's active `Conversation` if one exists, else starts a
-    /// fresh pi session, so reopening the task resumes the same session.
-    /// Guarded twice against a concurrent call for the same task id:
-    /// `conversationGate` claims it up front, and `hostsByTaskID` is re-checked before assignment.
     @MainActor
     private func ensureHost(for task: TaskRecord, project: Project) async {
         guard let id = task.id, hostsByTaskID[id] == nil else { return }
@@ -158,9 +132,7 @@ struct MainAreaView: View {
         let locations = PiSessionService.Locations.standard()
         let workingDirectory = MainAreaView.resolvedDirectory(forTask: task, project: project)
 
-        // A stale transcript header `cwd`, or one `resolveTranscriptPath`'s poll
-        // hasn't caught up with yet, would otherwise make `pi` exit 1;
-        // `resolveTranscriptForResume` scans by session id and repairs the cwd first.
+        // A stale transcript `cwd` would make `pi` exit 1; `resolveTranscriptForResume` repairs it first.
         let resolved = await Self.resolveTranscriptForResumeOffMain(
             conversation: conversation,
             currentWorkingDirectory: workingDirectory.path,
@@ -182,8 +154,7 @@ struct MainAreaView: View {
             workingDirectory: workingDirectory,
             command: command,
             envVars: PiSessionService.launchEnvironment(taskId: id, subagentEndpoint: store.subagentServer?.address),
-            // Fires when the `pi` process exits on its own; an app-initiated
-            // teardown goes through `closeHost`/`relaunchHost` instead, which remove the id outright.
+            // Fires when `pi` exits on its own; app-initiated teardown removes the id outright.
             onExit: { [exitedBinding, store] _ in
                 exitedBinding.wrappedValue = MainAreaView.exitedTaskIDs(afterExit: id, current: exitedBinding.wrappedValue)
                 store.dropTaskBusy(id)
@@ -201,7 +172,6 @@ struct MainAreaView: View {
         }
     }
 
-    /// Bounded so a `pi` that never starts doesn't poll forever.
     @MainActor
     private static func resolveTranscriptPath(
         for conversation: Conversation,
@@ -217,7 +187,7 @@ struct MainAreaView: View {
         }
     }
 
-    /// Off the main actor: enumerates the whole sessions tree and reads every `.jsonl`, long enough on a ~230 MB tree to stall task switching.
+    /// Off the main actor: walks the whole sessions tree (~230 MB), long enough to stall task switching.
     private static func locateTranscriptOffMain(
         sessionID: String,
         locations: PiSessionService.Locations
@@ -227,7 +197,7 @@ struct MainAreaView: View {
         }.value
     }
 
-    /// Off the main actor: can rewrite the whole transcript file, which can grow to tens of megabytes.
+    /// Off the main actor: can rewrite a transcript of tens of MB.
     private static func resolveTranscriptForResumeOffMain(
         conversation: Conversation,
         currentWorkingDirectory: String,
@@ -242,7 +212,7 @@ struct MainAreaView: View {
         }.value
     }
 
-    /// Off the main actor, same reason as `locateTranscriptOffMain`; splitting and parsing happen in the detached work too.
+    /// Off the main actor, like `locateTranscriptOffMain`.
     private static func firstUserPromptTextOffMain(url: URL) async -> String? {
         await Task.detached(priority: .utility) {
             guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else {
@@ -253,8 +223,6 @@ struct MainAreaView: View {
         }.value
     }
 
-    /// Only started for a task with a blank name. Rechecks `task.awaitingAutoRename`
-    /// against fresh state each poll, and stops once the deadline passes, so an unprompted task doesn't poll forever.
     @MainActor
     private static func watchForAutoRename(
         taskId: Int64,
@@ -280,10 +248,6 @@ struct MainAreaView: View {
 
     private static let autoRenameWatchDuration: TimeInterval = 30 * 60
 
-    /// Marks the active task's shown host visible, every other cached host
-    /// not visible (per `TerminalSurfaceHost.isVisible`). Swapping only ever
-    /// shows one surface per task, so a pane that isn't the shown child
-    /// (or the parent, if a child is shown) stays not-visible even on the active task.
     private func syncVisibility() {
         let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         for (id, host) in hostsByTaskID {
@@ -298,9 +262,7 @@ struct MainAreaView: View {
         }
     }
 
-    /// `opacity`/`allowsHitTesting` hide a host and block clicks, but don't
-    /// resign first responder — without this, switching tasks would leave
-    /// keystrokes landing in the invisible one until clicked into.
+    /// Hiding doesn't resign first responder; without this keystrokes land in the invisible terminal.
     private func syncFocus() {
         let visibleID = MainAreaView.visibleTaskID(for: store.mainSelection)
         focusedTaskID = visibleID
@@ -314,10 +276,9 @@ struct MainAreaView: View {
             }
         }
 
-        // An exited task has no live surface; setting `focusedTaskID` above already suffices for its Resume button.
         guard let visibleID, !exitedTaskIDs.contains(visibleID) else { return }
 
-        // Focus must follow whichever surface (parent or swapped-in child) is actually shown.
+        // Focus must follow whichever surface is shown.
         let panes = store.subagentPanes.panes(forTask: visibleID)
         let shownChildID = store.subagentSwap.shownChildID(forTask: visibleID)
         switch MainAreaView.focusTarget(shownChildID: shownChildID, livePaneIDs: Set(panes.map(\.id))) {
@@ -333,7 +294,6 @@ struct MainAreaView: View {
         case child(String)
     }
 
-    /// The shown child if still live, else the parent.
     static func focusTarget(shownChildID: String?, livePaneIDs: Set<String>) -> FocusTarget {
         if let shownChildID, livePaneIDs.contains(shownChildID) {
             return .child(shownChildID)
@@ -341,9 +301,7 @@ struct MainAreaView: View {
         return .parent
     }
 
-    /// Kills the pty/Pi process but leaves the transcript on disk. Releases
-    /// the `conversationGate` claim explicitly, not via `release(exceptLiveTaskIDs:)`:
-    /// the task is still live, so without this a reopen would find the id still claimed.
+    /// Releases the `conversationGate` claim explicitly: the task is still live, so a reopen would find the id claimed.
     private func closeHost(taskID: Int64) {
         guard hostsByTaskID.removeValue(forKey: taskID) != nil else { return }
         autoRenameWatchers.removeValue(forKey: taskID)?.cancel()
@@ -371,14 +329,11 @@ struct MainAreaView: View {
         conversationGate.release(exceptLiveTaskIDs: liveTaskIDs)
     }
 
-    /// `taskID` may have been deleted/archived while its dead surface sat on screen.
     private func requestRelaunch(taskID: Int64) {
         guard let task = store.task(withId: taskID), let project = store.project(forTask: task) else { return }
         Task { await relaunchHost(for: task, project: project) }
     }
 
-    /// Relaunches via `ensureHost`'s normal path so the same pi session/transcript resumes.
-    /// Releases the `conversationGate` claim the same way `closeHost` does.
     @MainActor
     private func relaunchHost(for task: TaskRecord, project: Project) async {
         guard let id = task.id else { return }
@@ -402,8 +357,7 @@ struct MainAreaView: View {
         cachedIDs.subtracting(liveTaskIDs)
     }
 
-    /// A pane closing independently would otherwise leave `SubagentSwapStore`
-    /// pointing at a surface that no longer exists; reconciles back to "show the parent".
+    /// Without this a closed pane leaves `SubagentSwapStore` pointing at a dead surface.
     static func reconcileSwap(_ swap: SubagentSwapStore, panesByTask: [Int64: [SubagentPaneStore.ChildPane]]) {
         for (taskID, childID) in swap.shownChildIDByTask where !(panesByTask[taskID] ?? []).contains(where: { $0.id == childID }) {
             swap.handleClosed(childId: childID, taskId: taskID)
@@ -413,8 +367,6 @@ struct MainAreaView: View {
         }
     }
 
-    /// The single place `syncVisibility()`, `syncFocus()`, and `body`'s `ForEach`
-    /// all decide "is this the active task's host", so they can't disagree.
     static func visibleTaskID(for selection: MainSelection) -> Int64? {
         if case .task(let task, _) = selection {
             return task.id
@@ -422,9 +374,7 @@ struct MainAreaView: View {
         return nil
     }
 
-    /// Worktree, else the project path, else home — a terminal must never
-    /// fail to open over a vanished worktree, and this path is also written
-    /// into a repaired transcript header, where a nonexistent dir would make `pi --session` refuse to resume.
+    /// Falls back so a vanished worktree never blocks opening; a missing dir would also make `pi --session` refuse to resume.
     static func resolvedDirectory(forTask task: TaskRecord, project: Project) -> URL {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: task.worktreePath, isDirectory: &isDirectory)
@@ -436,11 +386,9 @@ struct MainAreaView: View {
         if projectExists && projectIsDirectory.boolValue {
             return URL(fileURLWithPath: project.path)
         }
-        // Both gone: home, rather than a nonexistent cwd making `pi --session` exit 1.
         return FileManager.default.homeDirectoryForCurrentUser
     }
 
-    /// Shared with `TerminalDrawerView` so it never disagrees with the main area about "where is this selection, on disk".
     static func resolvedDirectory(for store: ProjectsStore) -> URL {
         switch store.mainSelection {
         case .task(let task, let project):
@@ -453,20 +401,13 @@ struct MainAreaView: View {
     }
 }
 
-/// Ensures at most one caller resolves a `Conversation` for a given task id
-/// at a time. `ensureHost` awaits several times before a host exists to
-/// check against; without this, a rapid A -> B -> A switch could let both
-/// calls insert a row under a different pi session id and leak a pty.
-///
-/// A separate type (not inline `@State`) so the dedup is testable without a
-/// live AppKit/libghostty `TerminalSurfaceHost`.
+/// Without this a rapid A -> B -> A switch could insert two conversation rows and leak a pty.
 @MainActor
 final class ConversationLaunchGate {
     private var claimedTaskIDs: Set<Int64> = []
 
     init() {}
 
-    /// `nil` means the claim failed; the caller must do nothing further for this task right now, not treat it as an error.
     func ensureConversation(for task: TaskRecord, store: ProjectsStore) async -> Conversation? {
         guard let id = task.id, claim(id) else { return nil }
         var resolved = false
@@ -485,7 +426,6 @@ final class ConversationLaunchGate {
         return conversation
     }
 
-    /// Mirrors `MainAreaView.purgeHosts` so an id reappearing later (e.g. unarchived) isn't stuck claimed forever.
     func release(exceptLiveTaskIDs liveTaskIDs: Set<Int64>) {
         claimedTaskIDs.formIntersection(liveTaskIDs)
     }
@@ -500,7 +440,6 @@ final class ConversationLaunchGate {
         claimedTaskIDs.remove(id)
     }
 
-    /// Used when the terminal is closed explicitly rather than the task going away.
     func releaseClaim(for id: Int64) {
         claimedTaskIDs.remove(id)
     }

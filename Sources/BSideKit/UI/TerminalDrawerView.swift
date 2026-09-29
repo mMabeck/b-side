@@ -1,9 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Scratch shells for the user's own commands, one per task (or project), hidden
-/// rather than torn down on selection change or collapse so
-/// a running command survives; `ContentView` keeps this mounted at zero height.
+/// Hidden, not torn down, on selection change so running commands survive; `ContentView` keeps it mounted at zero height.
 struct TerminalDrawerView: View {
     typealias DrawerKey = TerminalDrawerKey
 
@@ -22,7 +20,6 @@ struct TerminalDrawerView: View {
         DrawerKey(store.mainSelection)
     }
 
-    /// Every key the current projects and tasks still back; `purgeHosts` drops the rest.
     private var liveKeys: Set<DrawerKey> {
         var keys = Set(store.tasksByProject.values.flatMap { $0.compactMap { $0.id.map(DrawerKey.task) } })
         keys.formUnion(store.projects.compactMap { $0.id.map(DrawerKey.project) })
@@ -45,8 +42,7 @@ struct TerminalDrawerView: View {
         .onChange(of: DrawerState(key: currentKey, isCollapsed: isCollapsed), initial: true) { old, new in
             if !new.isCollapsed { ensureHost(for: new.key) }
             syncVisibility()
-            // Focus moves only on a toggle; switching to a task whose drawer
-            // is open leaves focus with that task's main terminal.
+            // Focus moves only on a toggle; switching to a task with an open drawer leaves focus in its main terminal.
             guard old.key == new.key, old.isCollapsed != new.isCollapsed, let key = new.key else { return }
             if new.isCollapsed {
                 hostsByKey[key]?.resignFocus()
@@ -63,8 +59,6 @@ struct TerminalDrawerView: View {
 
     private func ensureHost(for key: DrawerKey?) {
         guard let key, hostsByKey[key] == nil, store.mainSelection != .none else { return }
-        // Reuses `MainAreaView`'s resolution so this drawer never disagrees
-        // with the main area about "where is this selection, on disk".
         hostsByKey[key] = TerminalSurfaceHost(workingDirectory: MainAreaView.resolvedDirectory(for: store))
     }
 

@@ -1,10 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Applies a ``BSidePalette`` to the hosting `NSWindow`: real `NSAppearance`
-/// (so system-drawn chrome, including Liquid Glass, matches), and a
-/// transparent title bar. Traffic lights and standard window behaviour are
-/// untouched.
 struct ThemedWindowModifier: ViewModifier {
     let palette: BSidePalette
 
@@ -13,8 +9,7 @@ struct ThemedWindowModifier: ViewModifier {
     }
 
     private func apply(_ window: NSWindow) {
-        // At the `NSApp` level too: menus/popovers/sheets from any window
-        // resolve their own appearance from `NSApp.effectiveAppearance` when they have none of their own.
+        // `NSApp` too: menus, popovers and sheets without their own appearance resolve from `NSApp.effectiveAppearance`.
         NSApplication.shared.appearance = palette.preferredAppearance
         window.appearance = palette.preferredAppearance
         window.titlebarAppearsTransparent = true
@@ -23,13 +18,12 @@ struct ThemedWindowModifier: ViewModifier {
 }
 
 extension View {
-    /// Re-applies on every body update, so a theme change takes effect without restarting the app.
     func themedWindow(_ palette: BSidePalette) -> some View {
         modifier(ThemedWindowModifier(palette: palette))
     }
 }
 
-/// SwiftUI has no direct window accessor; places an invisible `NSView` and reads `.window` once attached.
+/// SwiftUI has no direct window accessor; an invisible `NSView` reads `.window` once attached.
 struct WindowAccessor: NSViewRepresentable {
     let configure: (NSWindow) -> Void
 

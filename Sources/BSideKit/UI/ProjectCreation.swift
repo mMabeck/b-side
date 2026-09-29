@@ -1,15 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Adding a project needs an `NSOpenPanel` folder picker and, when the chosen
-/// directory isn't a git repo yet, a confirmation alert offering to `git
-/// init` it. Several entry points now trigger this flow (the sidebar's
-/// toolbar button, its pinned footer row, the empty-projects invite, Cmd+Shift+N,
-/// and the File menu), so the panel/alert logic lives here once instead of
-/// being copied into each call site. Both `NSOpenPanel.runModal()` and
-/// `NSAlert.runModal()` are synchronous and app-modal, so there's no risk of
-/// two entry points opening the panel at once the way there is for the task
-/// creation sheet (see `ProjectsStore.pendingTaskCreationProject`).
 @MainActor
 public enum ProjectCreation {
     public static func addProject(store: ProjectsStore) {
@@ -27,8 +18,6 @@ public enum ProjectCreation {
         }
     }
 
-    /// Shows a confirmation alert asking whether to `git init` a non-repo directory.
-    /// Returns whether the user agreed.
     private static func offerToInitRepository(at url: URL) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Not a Git Repository"

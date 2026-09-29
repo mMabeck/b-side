@@ -1,13 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Which kind of window is key, so app-wide menu commands that act on the
-/// task window stand down while another window (Settings) is in front.
 @MainActor
 public final class TaskWindowFocus: ObservableObject {
     public enum Role: Equatable {
         case task
-        /// A sheet presented on a task window, e.g. the Changes overlay.
         case taskSheet
         case other
     }
@@ -54,9 +51,7 @@ public final class TaskWindowFocus: ObservableObject {
         sheetCloseActions.setObject(CloseAction(action), forKey: window)
     }
 
-    /// Cmd+W: ends the task terminal in a task window, runs a sheet's own
-    /// dismiss (sheets have no close button, so `performClose` would only
-    /// beep), and closes any other window normally.
+    /// Cmd+W: sheets have no close button, so `performClose` would only beep; they run their own dismiss.
     func close(_ window: NSWindow?, closeTaskTerminal: () -> Void) {
         guard let window else { return }
         switch role(of: window) {
@@ -80,7 +75,6 @@ extension View {
         background(WindowAccessor { TaskWindowFocus.shared.register($0) })
     }
 
-    /// For a sheet on the task window: what Cmd+W does while it is key.
     func closesSheetOnCommandW(_ action: @escaping () -> Void) -> some View {
         background(WindowAccessor { TaskWindowFocus.shared.setSheetCloseAction(action, for: $0) })
     }

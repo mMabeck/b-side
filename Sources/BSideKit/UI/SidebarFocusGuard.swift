@@ -1,17 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Hands keyboard focus back to the visible task's terminal after any click
-/// inside the sidebar. SwiftUI's `List` is backed by an `NSTableView`, which
-/// makes itself first responder on mouse-down for its own row
-/// tracking/selection before any `Button` action runs, with no public way
-/// to opt out (`.focusable(false)` only affects SwiftUI's focus ring). This
-/// lets the click land wherever AppKit wants, then reasserts terminal focus
-/// one runloop hop later, the same imperative approach `MainAreaView.syncFocus()` uses.
-///
-/// Scoped to a marker `NSView` covering the sidebar's own bounds and that
-/// view's own window, so clicks in other windows are never affected. Only
-/// refocuses when `store.mainSelection` is actually a task.
+/// NSTableView takes first responder on mouse-down with no way to opt out; refocus the terminal one runloop hop later.
 struct SidebarFocusGuard: NSViewRepresentable {
     var store: ProjectsStore
 
@@ -59,14 +49,11 @@ struct SidebarFocusGuard: NSViewRepresentable {
             }
         }
 
-        /// Never swallows the event — returned unmodified by the caller.
-        // Not `private` so `SidebarFocusGuardTests` can drive it with a programmatic `NSEvent`.
         func handleMouseDown(_ event: NSEvent, in window: NSWindow) {
             guard event.window === window, let markerView, markerView.window === window else { return }
             let locationInMarker = markerView.convert(event.locationInWindow, from: nil)
             guard markerView.bounds.contains(locationInMarker) else { return }
-            // Deferred so this runs after AppKit's own mouse-down handling (row
-            // selection, first responder, the row's action), or reasserting focus first would just be undone by it.
+            // Deferred until after AppKit's mouse-down handling, or refocusing would be undone.
             DispatchQueue.main.async { [weak self] in
                 guard let self, case .task = self.store.mainSelection else { return }
                 self.store.requestTerminalFocus()

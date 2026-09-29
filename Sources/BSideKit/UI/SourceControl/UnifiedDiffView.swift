@@ -2,21 +2,14 @@ import AppKit
 import HighlightSwift
 import SwiftUI
 
-/// Pure, side-effect-free parsing and rendering of a unified diff `String`
-/// into an `NSAttributedString`, coloured from a ``BSidePalette``. No git
-/// types, no view lifecycle — safe to call off the main thread and to unit
-/// test directly.
 enum UnifiedDiffRenderer {
     enum RowKind: Equatable {
         case context
         case added
         case removed
-        /// Replaces a `@@` hunk header in the rendered output.
         case separator
     }
 
-    /// One parsed diff line. `text` never carries the leading `+`/`-`/space
-    /// marker or any git metadata — those are either dropped or drawn in the gutter.
     struct Row {
         let kind: RowKind
         let oldLineNumber: Int?
@@ -24,10 +17,7 @@ enum UnifiedDiffRenderer {
         let text: String
     }
 
-    /// Gutter data attached to each rendered context/added/removed line via
-    /// ``NSAttributedString/Key/diffLineInfo``, read back by
-    /// `DiffGutterView` at draw time. Kept out of the visible text so
-    /// copying a selection never includes line numbers or markers.
+    /// Kept out of the visible text so copying never includes line numbers or markers.
     struct DiffLineGutterInfo: Hashable {
         enum Kind: Hashable { case context, added, removed }
         let kind: Kind
@@ -35,11 +25,6 @@ enum UnifiedDiffRenderer {
         let newLineNumber: Int?
     }
 
-    /// Splits a unified diff into rows, dropping git metadata lines (`diff
-    /// --git`, `index`, `---`/`+++`, mode/similarity/rename lines) and
-    /// `\ No newline at end of file` markers, and replacing each `@@` hunk
-    /// header with a `.separator` row. No separator precedes a first hunk
-    /// that starts at the beginning of the file.
     static func parse(_ diff: String) -> [Row] {
         var rows: [Row] = []
         var oldLine = 0
@@ -53,8 +38,7 @@ enum UnifiedDiffRenderer {
             if line.hasPrefix("\\ No newline") { return }
             let inHunk = oldRemaining > 0 || newRemaining > 0
 
-            // Metadata and hunk headers only mean what they look like between hunks;
-            // a removed/added line's content can itself start with "--- "/"+++ ".
+            // Metadata and hunk headers only apply between hunks; a removed/added line can itself start with "--- "/"+++ ".
             if !inHunk {
                 if isMetadataLine(line) { return }
 
@@ -77,7 +61,6 @@ enum UnifiedDiffRenderer {
                     return
                 }
 
-                // Outside any recognised hunk and not metadata/a header: nothing to render.
                 return
             }
 
@@ -97,7 +80,6 @@ enum UnifiedDiffRenderer {
                 oldRemaining = max(0, oldRemaining - 1)
                 newRemaining = max(0, newRemaining - 1)
             default:
-                // A stray line inside a hunk with no marker: show it verbatim as context.
                 rows.append(Row(kind: .context, oldLineNumber: oldLine, newLineNumber: newLine, text: line))
                 oldLine += 1
                 newLine += 1
@@ -109,18 +91,13 @@ enum UnifiedDiffRenderer {
         return rows
     }
 
-    /// One `append` per row rather than per-character lookups, so a 10k+ line diff renders in well under a second.
     static func render(_ diff: String, palette: BSidePalette) -> NSAttributedString {
         renderRows(parse(diff), palette: palette).attributed
     }
 
-    /// Font used for diff body text; shared with the syntax highlighter so highlighted
-    /// runs are measured against the same metrics the base render used.
+    /// Shared with the highlighter so runs are measured against the same metrics.
     static var bodyFont: NSFont { NSFont.monospacedSystemFont(ofSize: 13, weight: .regular) }
 
-    /// Same as ``render(_:palette:)`` but also returns each row's character range in
-    /// the result, so callers (the syntax highlighter) can overlay colours onto exactly
-    /// the right span without re-deriving row boundaries.
     static func renderRows(_ rows: [Row], palette: BSidePalette) -> (attributed: NSMutableAttributedString, rowRanges: [NSRange]) {
         let result = NSMutableAttributedString()
         var rowRanges: [NSRange] = []
@@ -156,8 +133,7 @@ enum UnifiedDiffRenderer {
                 case .removed: attributes[.diffRowBackground] = removedBackground
                 case .context, .separator: break
                 }
-                // A truly empty line needs one character to carry the gutter/background
-                // attributes; a space renders indistinguishably from blank.
+                // A truly empty line needs one character to carry the gutter/background attributes; a space renders as blank.
                 let text = row.text.isEmpty ? " " : row.text
                 result.append(NSAttributedString(string: text, attributes: attributes))
             }
@@ -168,8 +144,6 @@ enum UnifiedDiffRenderer {
         return (result, rowRanges)
     }
 
-    /// Counts additions/deletions by scanning the rendered attributed string, so
-    /// `DiffTextView` can build a VoiceOver-reachable summary without re-parsing the diff.
     static func changeCounts(in attributed: NSAttributedString) -> (added: Int, removed: Int) {
         var added = 0
         var removed = 0
@@ -184,8 +158,6 @@ enum UnifiedDiffRenderer {
         return (added, removed)
     }
 
-    /// Digit-width of the largest old/new line number, `0` when a side never appears
-    /// (an added or deleted file), so the gutter can collapse that column entirely.
     struct GutterMetrics: Equatable {
         let oldDigitCount: Int
         let newDigitCount: Int
@@ -204,8 +176,6 @@ enum UnifiedDiffRenderer {
         )
     }
 
-    /// Same as ``gutterMetrics(for:)`` but reads back from a rendered attributed
-    /// string, for callers (the gutter view) that only see the final text.
     static func gutterMetrics(in attributed: NSAttributedString) -> GutterMetrics {
         var maxOld = 0
         var maxNew = 0
@@ -268,21 +238,14 @@ enum UnifiedDiffRenderer {
 }
 
 extension NSAttributedString.Key {
-    /// Carries ``UnifiedDiffRenderer/DiffLineGutterInfo`` for a rendered line; read by `DiffGutterView`.
     static let diffLineInfo = NSAttributedString.Key("BSideDiffLineInfo")
-    /// A full-row tint colour for added/removed lines; read by `DiffRowBackgroundLayoutManager`.
     static let diffRowBackground = NSAttributedString.Key("BSideDiffRowBackground")
 }
 
-/// Fills full-width row backgrounds for added/removed lines, sized to the
-/// text view's own width so the tint reaches the visible edge even for short
-/// lines and while scrolled horizontally. Forces TextKit 1 (built directly
-/// from `NSLayoutManager`/`NSTextContainer` rather than `NSTextView(usingTextLayoutManager:)`)
-/// since TextKit 2 doesn't expose per-line background drawing this way.
+/// Forces TextKit 1 (`NSLayoutManager`/`NSTextContainer` built directly): TextKit 2 doesn't expose per-line background drawing.
 private final class DiffRowBackgroundLayoutManager: NSLayoutManager {
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
-        // Drawing always happens on the main thread; NSLayoutManager's own
-        // override point isn't main-actor-isolated, so this bridges to read `textView.bounds`.
+        // Drawing is always on the main thread, but NSLayoutManager's override point isn't main-actor-isolated; this bridges to read `textView.bounds`.
         if let textContainer = textContainers.first,
            let textView = textContainer.textView,
            let textStorage {
@@ -307,9 +270,7 @@ private final class DiffRowBackgroundLayoutManager: NSLayoutManager {
     }
 }
 
-/// Line-number gutter drawn outside the text storage so copies exclude numbers
-/// and markers. Pinned to the scroll view, not the clip view, so it never
-/// scrolls horizontally; repaints on the clip view's bounds changes.
+/// Drawn outside the text storage so copies exclude numbers; pinned to the scroll view so it never scrolls horizontally.
 private final class DiffGutterView: NSView {
     weak var diffTextView: NSTextView?
     private weak var scrollView: DiffScrollView?
@@ -317,8 +278,6 @@ private final class DiffGutterView: NSView {
         didSet { needsDisplay = true }
     }
 
-    /// Set whenever the diff text changes; a collapsed (all-zero) side omits that
-    /// column entirely instead of reserving empty space for it.
     var metrics: UnifiedDiffRenderer.GutterMetrics = UnifiedDiffRenderer.GutterMetrics(oldDigitCount: 0, newDigitCount: 0) {
         didSet {
             guard metrics != oldValue else { return }
@@ -340,8 +299,6 @@ private final class DiffGutterView: NSView {
         return (String(repeating: "0", count: digitCount) as NSString).size(withAttributes: [.font: Self.font]).width
     }
 
-    /// Layout in drawing order: left padding, old column (if any), gap, new column
-    /// (if any), gap, marker column, right padding into the code.
     private var columnMaxXs: (old: CGFloat?, new: CGFloat?, marker: CGFloat) {
         var x = Self.horizontalPadding
         var oldMaxX: CGFloat?
@@ -445,9 +402,7 @@ private final class DiffGutterView: NSView {
     }
 }
 
-/// Reserves `gutterLeftInset` of its own width for `DiffGutterView`, shrinking the
-/// clip view accordingly. `NSScrollView.contentInsets` looked like the built-in way
-/// to do this, but didn't move the clip view's frame in practice here, so `tile()` does it by hand.
+/// `NSScrollView.contentInsets` didn't move the clip view's frame here, so `tile()` reserves `gutterLeftInset` by hand.
 final class DiffScrollView: NSScrollView {
     var gutterLeftInset: CGFloat = 0
     weak var gutterView: NSView?
@@ -466,9 +421,7 @@ final class DiffScrollView: NSScrollView {
     }
 }
 
-/// Backs a VoiceOver rotor ("Added lines"/"Removed lines") by walking `.diffLineInfo`
-/// runs in the text storage on demand — the +/- markers only live in the gutter, which
-/// is itself hidden from accessibility, so this is how VoiceOver tells the kinds apart.
+/// The +/- markers only live in the hidden gutter, so this rotor is how VoiceOver tells added and removed lines apart.
 @MainActor
 private final class DiffLineKindRotorDelegate: NSObject, @MainActor NSAccessibilityCustomRotorItemSearchDelegate {
     private weak var textView: NSTextView?
@@ -510,7 +463,6 @@ private final class DiffLineKindRotorDelegate: NSObject, @MainActor NSAccessibil
     }
 }
 
-/// Read-only, selectable text view; wraps a plain `NSTextView`, not a rich editor, since the diff is display-only.
 struct DiffTextView: NSViewRepresentable {
     let attributedText: NSAttributedString
     let palette: BSidePalette
@@ -519,7 +471,6 @@ struct DiffTextView: NSViewRepresentable {
         let textStorage = NSTextStorage()
         let layoutManager = DiffRowBackgroundLayoutManager()
         textStorage.addLayoutManager(layoutManager)
-        // A diff needs horizontal scrolling for long lines instead of wrapping.
         let textContainer = NSTextContainer(size: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
         textContainer.widthTracksTextView = false
         layoutManager.addTextContainer(textContainer)
@@ -584,9 +535,7 @@ struct DiffTextView: NSViewRepresentable {
         }
     }
 
-    /// NSTextView's frame can grow wider than the clip view once layout runs for a horizontally
-    /// scrollable document, which otherwise leaves the initial scroll position mid-document instead
-    /// of at the start; deferred a runloop turn so it applies after that layout pass.
+    /// The frame can grow wider than the clip view after layout, leaving the scroll mid-document; deferred a runloop turn to apply after that pass.
     private func scrollToStart(_ scrollView: DiffScrollView) {
         DispatchQueue.main.async {
             scrollView.contentView.scroll(to: .zero)
@@ -619,13 +568,6 @@ struct DiffTextView: NSViewRepresentable {
     }
 }
 
-/// Renders a unified diff, showing the plain (uncoloured) result immediately and
-/// layering in `HighlightSwift` token colours once ready. Reconstructs the old and
-/// new side of the diff from the parsed rows and highlights each independently so
-/// multi-line constructs (docstrings, block comments) colour correctly even where a
-/// hunk boundary would otherwise cut them off. Highlighting runs off the main thread
-/// via `Task`; SwiftUI's `.task(id:)` cancels a stale pass when the selected file
-/// (or diff text, or the palette's light/dark theme) changes.
 struct DiffPaneView: View {
     let diffText: String
     let filePath: String
@@ -658,17 +600,13 @@ struct DiffPaneView: View {
         let newRowIndices = rows.indices.filter { rows[$0].newLineNumber != nil }
         guard !oldRowIndices.isEmpty || !newRowIndices.isEmpty else { return }
 
-        // Strip stray `\r` (git preserves it as line content for CRLF-sourced
-        // files) so it never inflates the leading-whitespace run `leadingTrim`
-        // measures below.
+        // Strip stray `\r` (CRLF sources) so it doesn't inflate the leading-whitespace run `leadingTrim` measures.
         let oldText = oldRowIndices.map { rows[$0].text.replacingOccurrences(of: "\r", with: "") }.joined(separator: "\n")
         let newText = newRowIndices.map { rows[$0].text.replacingOccurrences(of: "\r", with: "") }.joined(separator: "\n")
         let mode: HighlightMode = DiffLanguageDetector.language(forPath: filePath).map { .languageIgnoreIllegal($0) } ?? .automatic
         let colors = DiffSyntaxHighlighter.colors(isDark: palette.isDark)
 
-        // Sequential, not `async let`: both calls funnel through the same `HLJS`
-        // actor anyway, and returning `NSAttributedString` (non-Sendable) across a
-        // concurrent child task's boundary isn't allowed under strict concurrency.
+        // Sequential, not `async let`: `NSAttributedString` isn't Sendable across a child task boundary under strict concurrency.
         let old = await Self.highlight(oldText, mode: mode, colors: colors)
         guard !Task.isCancelled else { return }
         let new = await Self.highlight(newText, mode: mode, colors: colors)

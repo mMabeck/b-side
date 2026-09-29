@@ -1,18 +1,12 @@
 import SwiftUI
 
-/// Which branch a new task's worktree attaches to: a fresh branch cut from a
-/// base ref, or an existing local branch.
 public enum TaskCreationMode: String, CaseIterable, Identifiable, Sendable {
     case newBranch = "New Branch"
     case existingBranch = "Existing Branch"
     public var id: String { rawValue }
 }
 
-/// Pure validation and formatting rules for ``TaskCreationView``, kept free
-/// of SwiftUI so they're directly unit-testable.
 enum TaskCreationValidation {
-    /// A blank task name falls back to a placeholder. With `useWorktree` off
-    /// the task runs in place, so no base ref/branch is required either.
     static func canCreate(
         name: String,
         mode: TaskCreationMode,
@@ -29,14 +23,12 @@ enum TaskCreationValidation {
         }
     }
 
-    /// Shown but disabled if already checked out elsewhere, since a worktree can't reuse a live branch.
     static func displayName(for branch: TaskWorktreeService.BranchOption) -> String {
         guard let checkedOutAt = branch.checkedOutAt else { return branch.name }
         return "\(branch.name) (checked out at \(checkedOutAt))"
     }
 }
 
-/// Sheet for creating a task: name, base ref/branch, then a log panel of setup command output.
 struct TaskCreationView: View {
     var store: ProjectsStore
     var onFinished: () -> Void
@@ -45,7 +37,6 @@ struct TaskCreationView: View {
 
     @ObservedObject private var theme: GhosttyResolvedTheme = .shared
 
-    /// Changeable via `projectField`; dependent fields are re-seeded in `applyProjectDefaults(_:)`.
     @State private var selectedProject: Project
 
     @State private var name = ""
@@ -111,9 +102,9 @@ struct TaskCreationView: View {
         }
         .frame(width: 480)
         .closesSheetOnCommandW { if !isCreating { dismiss() } }
-        // The sheet gets its own `NSWindow`, so system-drawn text needs the palette applied to it directly too.
+        // The sheet has its own `NSWindow`, so system-drawn text needs the palette applied directly.
         .themedWindow(theme.palette)
-        // The `guard` after both awaits drops a stale load if the project changed again before it finished.
+        // The `guard` after both awaits drops a stale load if the project changed meanwhile.
         .task(id: selectedProject.id) {
             let project = selectedProject
             let loadedBranches = (try? await TaskWorktreeService.availableBranches(for: project)) ?? []
@@ -185,7 +176,7 @@ struct TaskCreationView: View {
         }
     }
 
-    /// Branches/base refs are reloaded by `body`'s `.task(id:)`, not here; clearing them just avoids showing stale options while that reload is in flight.
+    /// Clearing only avoids stale options while `.task(id:)` reloads them.
     private func applyProjectDefaults(_ project: Project) {
         baseRef = project.baseRef
         useWorktree = project.lastUseWorktree
@@ -198,9 +189,6 @@ struct TaskCreationView: View {
 
     // MARK: - Branch / base ref
 
-    /// A free-text field rather than a closed picker, so typing a name that
-    /// isn't in `baseRefOptions` (yet, or ever) still works; the suggestions
-    /// popover offers fuzzy-ranked existing refs without constraining input.
     private var baseRefField: some View {
         TextField("Base Ref", text: $baseRef, prompt: Text("main"))
             .textInputSuggestions {
