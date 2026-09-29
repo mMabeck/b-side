@@ -1,9 +1,6 @@
 import Foundation
 import OSLog
 
-/// Typed async interface over the `git` CLI, shelling out rather than
-/// linking libgit2. Every subcommand with a porcelain or `-z`-delimited
-/// format uses it instead of parsing human-readable output.
 public enum GitCLI {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "git")
 
@@ -17,19 +14,14 @@ public enum GitCLI {
         }
     }
 
-    // MARK: - Repository basics
-
-    /// Whether `path` is inside a git working tree.
     public static func isGitRepository(at path: URL) async -> Bool {
         (try? await run(["rev-parse", "--is-inside-work-tree"], in: path)) != nil
     }
 
-    /// Runs `git init` in `path`.
     public static func initRepository(at path: URL) async throws {
         _ = try await run(["init"], in: path)
     }
 
-    /// The current branch name, or `nil` if detached or unavailable.
     public static func currentBranch(at path: URL) async -> String? {
         guard let output = try? await runText(["branch", "--show-current"], in: path) else {
             return nil
@@ -38,7 +30,6 @@ public enum GitCLI {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// The URL of the `origin` remote, if any.
     public static func originRemote(at path: URL) async -> String? {
         guard let output = try? await runText(["remote", "get-url", "origin"], in: path) else {
             return nil
@@ -46,8 +37,6 @@ public enum GitCLI {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
-
-    // MARK: - Process execution
 
     /// Never blocks the calling actor: read via readability handlers on a background queue.
     @discardableResult
@@ -59,9 +48,7 @@ public enum GitCLI {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            // `--no-optional-locks` keeps read-only commands (status, diff, ...) from
-            // taking git's optional index lock, which otherwise rewrites `index` on
-            // every refresh and retriggers `WorktreeWatcher` in a loop.
+            // `--no-optional-locks`: git's optional index lock rewrites `index` on every refresh, retriggering `WorktreeWatcher` in a loop.
             process.arguments = ["git", "--no-optional-locks"] + arguments
             process.currentDirectoryURL = directory
 
@@ -73,10 +60,7 @@ public enum GitCLI {
             let stdoutAccumulator = DataAccumulator()
             let stderrAccumulator = DataAccumulator()
 
-            // Termination can fire before a pipe's final readability callback has
-            // delivered its last chunk, which would otherwise race a read against
-            // process exit and truncate output. Only resume once the process has
-            // terminated *and* both pipes have reached EOF.
+            // Termination can fire before a pipe's last readability callback; resume only after exit *and* EOF on both pipes, or output truncates.
             let group = DispatchGroup()
             group.enter()  // stdout EOF
             group.enter()  // stderr EOF
@@ -129,22 +113,19 @@ public enum GitCLI {
         }
     }
 
-    /// Runs a git subcommand and decodes stdout as UTF-8 text.
     @discardableResult
     static func runText(_ arguments: [String], in directory: URL) async throws -> String {
         let data = try await run(arguments, in: directory)
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    /// Splits a NUL-delimited (`-z`) git output into non-empty components.
     static func splitNulDelimited(_ data: Data) -> [String] {
         data.split(separator: 0)
             .compactMap { String(data: Data($0), encoding: .utf8) }
     }
 }
 
-/// Thread-safe byte buffer for accumulating pipe reads from a `readabilityHandler`,
-/// which fires on an arbitrary background queue.
+/// Filled from a `readabilityHandler`, which fires on an arbitrary background queue.
 final class DataAccumulator: @unchecked Sendable {
     private let lock = NSLock()
     private var storage = Data()

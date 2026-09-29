@@ -1,20 +1,11 @@
 import Foundation
 
-/// Incrementally splits appended bytes into complete `\n`-terminated JSON
-/// lines, decoding each into a `SubagentEvent`. Shared by the file-tailing
-/// transport (jsonl on disk) and the HTTP transport, since both deliver the
-/// same line-oriented event stream, possibly split across multiple chunks.
-///
-/// A partial trailing line (no `\n` yet) is held back until the rest
-/// arrives. A malformed line is skipped without blocking lines after it.
+/// Shared by the file-tailing and HTTP transports. Holds back a partial trailing line; skips malformed ones.
 public struct SubagentEventLineParser: Sendable {
     private var buffer = Data()
 
     public init() {}
 
-    /// Feeds newly received bytes and returns the events decoded from any
-    /// complete lines now available. Incomplete trailing bytes are retained
-    /// for the next call.
     public mutating func consume(_ data: Data) -> [SubagentEvent] {
         buffer.append(data)
 

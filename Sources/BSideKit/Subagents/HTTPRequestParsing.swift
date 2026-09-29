@@ -1,20 +1,13 @@
 import Foundation
 
-/// A minimal HTTP/1.1 request, parsed from raw bytes. Only what the local
-/// subagent-event endpoint needs: method, path, and body.
 public struct ParsedHTTPRequest: Sendable, Equatable {
     public var method: String
     public var path: String
     public var body: Data
 }
 
-/// Hand-rolled HTTP/1.1 request parsing, kept pure and separate from the
-/// socket so it can be unit tested without a live connection.
 public enum HTTPRequestParser {
-    /// Parses one request from the front of `data`. Returns `nil` if the
-    /// headers (or, once known, the body per `Content-Length`) are not yet
-    /// fully buffered — the caller should wait for more bytes and retry.
-    /// On success, also returns how many bytes of `data` the request consumed.
+    /// Returns `nil` until the headers and `Content-Length` body are fully buffered.
     public static func parse(_ data: Data) -> (request: ParsedHTTPRequest, consumed: Int)? {
         let headerTerminator: [UInt8] = [0x0D, 0x0A, 0x0D, 0x0A]
         guard let headerEnd = range(of: headerTerminator, in: data) else { return nil }

@@ -1,10 +1,6 @@
 import Foundation
 
-/// Formats one tool call into the single clipped row Pi's own subagent cards
-/// use, mirroring `tool-line.ts::formatToolCall`. Pure text only — the card
-/// view applies colour by prefix, not this formatter.
 public enum ToolCallLineFormatter {
-    /// Formats `toolName`/`args` into the row body, without the leading `→ `.
     public static func format(toolName: String, args: [String: JSONValue]) -> String {
         switch toolName {
         case "bash":
@@ -78,7 +74,6 @@ public enum ToolCallLineFormatter {
         }
     }
 
-    /// Shortens an argument preview to `max` characters, marking what was cut.
     static func clip(_ text: String, _ max: Int) -> String {
         text.count > max ? "\(text.prefix(max))..." : text
     }

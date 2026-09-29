@@ -4,16 +4,11 @@ import GRDB
 import OSLog
 import SwiftUI
 
-/// What the main area shows, derived from `ProjectsStore`'s selection state.
-/// A project alone is never a terminal — only a task is — so this collapses
-/// the two separately-nilable IDs into one thing to switch on.
 public enum MainSelection: Equatable {
     case none
     case project(Project)
     case task(TaskRecord, Project)
 
-    /// The project a bare "new task" action targets: the selected task's own
-    /// project if a task is selected, else the selected project, else `nil`.
     public var taskCreationTarget: Project? {
         switch self {
         case .none: return nil
@@ -23,14 +18,11 @@ public enum MainSelection: Equatable {
     }
 }
 
-/// Which neighbour `ProjectsStore.moveProject(_:direction:)` swaps towards.
 public enum ProjectMoveDirection {
     case up
     case down
 }
 
-/// Drives the sidebar's project (and nested task) list live from the database,
-/// using GRDB's `ValueObservation`.
 @MainActor
 @Observable
 public final class ProjectsStore {
@@ -39,20 +31,13 @@ public final class ProjectsStore {
     public private(set) var syncStatusByTask: [Int64: TaskWorktreeService.BranchSyncStatus] = [:]
     public private(set) var vanishedWorktreeTaskIds: Set<Int64> = []
 
-    /// Task ids whose sidebar row reads "needs attention" from a question alert — cleared when the task is next selected.
     public private(set) var taskIDsNeedingAttention: Set<Int64> = []
 
-    /// Task ids reported busy via `POST /agent/{taskId}/busy` and not yet idle. In-memory only, so a relaunch starts empty.
     public private(set) var busyTaskIDs: Set<Int64> = []
 
-    /// Task ids with a live terminal that have output since last viewed — the sidebar's blue "unread" dot. In-memory only.
     public private(set) var unreadTaskIDs: Set<Int64> = []
 
-    /// Idempotent since `/agent/{taskId}/busy` may repeat: only a genuine
-    /// not-busy -> busy transition bumps ordering, or a burst of repeated
-    /// busy pings mid-task would reorder the Active section several times a
-    /// second. Clears a question's red state too: Pi reporting busy means it
-    /// resumed, so the question was answered.
+    /// Only a genuine not-busy -> busy transition bumps ordering, so repeated pings don't reorder the Active section. Also clears a question's red state: busy means it was answered.
     public func setTaskBusy(_ taskId: Int64) {
         let wasAlreadyBusy = busyTaskIDs.contains(taskId)
         busyTaskIDs.insert(taskId)
@@ -61,15 +46,13 @@ public final class ProjectsStore {
         bumpTaskActivity(taskId)
     }
 
-    /// For a genuine `POST .../idle` report. Idempotent.
     public func clearTaskBusy(_ taskId: Int64) {
         if markIdle(taskId) {
             bumpTaskActivity(taskId)
         }
     }
 
-    /// For teardown (process/PTY exit, terminal closed, host purged): unlike
-    /// `clearTaskBusy`, never bumps recency, since that isn't a user activity signal.
+    /// Never bumps recency, unlike `clearTaskBusy`: teardown isn't a user activity signal.
     public func dropTaskBusy(_ taskId: Int64) {
         markIdle(taskId)
     }
@@ -86,35 +69,25 @@ public final class ProjectsStore {
         return true
     }
 
-    /// Feeds `TaskAlertDebouncer.isDebounced`.
     private var lastTerminalAlertAt: [Int64: Date] = [:]
 
-    /// Swappable so tests don't play real system sounds.
     @ObservationIgnored
     public var playAlertSound: @MainActor (TaskAlertKind) -> Void = { TaskAlertSoundPlayer.play(kind: $0) }
 
-    /// In-memory only. Kept in sync with `selectedTaskID` by `selectProject(_:)`/`selectTask(_:project:)` so the two never disagree.
     public var selectedProjectID: Int64?
 
     public var selectedProject: Project? {
         projects.first { $0.id == selectedProjectID }
     }
 
-    /// In-memory only. `nil` means the main area shows the project's dashboard (or an empty state) rather than a task terminal.
     public var selectedTaskID: Int64?
 
-    /// Bumped by every `selectTask(_:project:)`/`selectProject(_:)`, including
-    /// a reselection of what's already selected, so `MainAreaView`'s
-    /// `syncFocus()` reruns even when `selectedTaskID` itself doesn't change
-    /// (e.g. clicking an already-selected row while focus sits elsewhere).
+    /// Bumped on every selection, even of the current one, so `MainAreaView.syncFocus()` reruns.
     public private(set) var focusRequestToken: Int = 0
 
-    /// The project a task-creation sheet targets, or `nil`. Every trigger sets
-    /// this instead of its own `@State` flag, so the sheet (presented once in
-    /// `ContentView`) can't be shown twice or left pointed at a stale project.
+    /// Single source for the task-creation sheet so it can't be shown twice or point at a stale project.
     public var pendingTaskCreationProject: Project?
 
-    /// The task the Changes overlay targets, or `nil` — same rationale as `pendingTaskCreationProject`.
     public var pendingChangesOverlayTask: TaskRecord?
 
     public var selectedTask: TaskRecord? {
@@ -122,24 +95,17 @@ public final class ProjectsStore {
         return tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == selectedTaskID }
     }
 
-    /// Live terminals in `MainAreaView`, ordered by recent activity:
-    /// `bumpTaskActivity` moves an already-open task to the front on a real
-    /// agent event, so "Cmd+1" tracks the most-recently-active task, not a
-    /// fixed "opened first" slot. `MainAreaView` is the only writer of
-    /// open/close, mirroring its own `hostsByTaskID` one-for-one.
+    /// Ordered by recent activity so Cmd+1 tracks the most recently active task; `MainAreaView` is the only writer of open/close.
     public private(set) var openTerminalTaskIDs: [Int64] = []
 
-    /// No-op if `taskID` is already tracked, since `ensureHost` creates a host once per task and re-selection must not reorder it.
     public func noteTerminalOpened(taskID: Int64) {
         openTerminalTaskIDs = Self.addingOpenTerminal(taskID, to: openTerminalTaskIDs)
     }
 
-    /// Called with the same ids `MainAreaView.purgeHosts` evicts from `hostsByTaskID`, so the two stay in sync.
     public func pruneOpenTerminals(removing removed: Set<Int64>) {
         openTerminalTaskIDs = Self.removingOpenTerminals(removed, from: openTerminalTaskIDs)
     }
 
-    /// The entry that takes `taskID`'s place once removed, or the new last entry if it was last. Pure for direct testability.
     static func nextActiveTaskID(afterClosing taskID: Int64, in openTaskIDs: [Int64]) -> Int64? {
         guard let index = openTaskIDs.firstIndex(of: taskID) else { return nil }
         let remaining = removingOpenTerminals([taskID], from: openTaskIDs)
@@ -147,12 +113,9 @@ public final class ProjectsStore {
         return remaining[min(index, remaining.count - 1)]
     }
 
-    /// A one-shot request (not a queue — only one Cmd+W happens at a time),
-    /// set by `closeTerminal(for:project:)` and cleared by `MainAreaView` via `acknowledgeTerminalClosed` once purged.
+    /// One-shot request set by `closeTerminal` and cleared by `MainAreaView` once purged.
     public private(set) var closedTerminalTaskID: Int64?
 
-    /// Drops `task` from `openTerminalTaskIDs` and requests teardown via
-    /// `closedTerminalTaskID`; the task itself (worktree, transcript) is untouched.
     public func closeTerminal(for task: TaskRecord, project: Project) {
         guard let id = task.id else { return }
         let nextID = Self.nextActiveTaskID(afterClosing: id, in: openTerminalTaskIDs)
@@ -172,11 +135,9 @@ public final class ProjectsStore {
         closedTerminalTaskID = nil
     }
 
-    /// A one-shot request mirroring `closedTerminalTaskID`.
     public private(set) var restartRequestedTaskID: Int64?
 
-    /// Relaunches along the same `PiSessionService.launchCommand` path `ensureHost`
-    /// uses, so the same pi session/transcript resumes instead of starting fresh.
+    /// Relaunches via `PiSessionService.launchCommand` so the same pi session resumes.
     public func requestRestartTerminal(for task: TaskRecord) {
         guard let id = task.id else { return }
         restartRequestedTaskID = id
@@ -199,7 +160,6 @@ public final class ProjectsStore {
         ids.filter { !removed.contains($0) }
     }
 
-    /// No-op if `id` isn't present, so bumping a task with no open terminal never adds it.
     static func movingToFront(_ id: Int64, in ids: [Int64]) -> [Int64] {
         guard let index = ids.firstIndex(of: id) else { return ids }
         var result = ids
@@ -208,10 +168,6 @@ public final class ProjectsStore {
         return result
     }
 
-    /// Persists `lastActivityAt` asynchronously and moves `id` to the front
-    /// of `openTerminalTaskIDs` if open. Called only for real agent events
-    /// (never mere selection) and only on a genuine state transition by every
-    /// caller, so it can't fire faster than those transitions occur.
     public func bumpTaskActivity(_ id: Int64) {
         openTerminalTaskIDs = Self.movingToFront(id, in: openTerminalTaskIDs)
         Task { [database] in
@@ -222,7 +178,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// Unlike `selectedTask`, not tied to the current selection.
     public func taskAndProject(forID id: Int64) -> (task: TaskRecord, project: Project)? {
         for (projectID, tasks) in tasksByProject {
             guard let task = tasks.first(where: { $0.id == id }) else { continue }
@@ -232,19 +187,16 @@ public final class ProjectsStore {
         return nil
     }
 
-    /// Clears any task selection: a project alone is never a terminal.
     public func selectProject(_ project: Project) {
         selectedProjectID = project.id
         selectedTaskID = nil
         focusRequestToken += 1
     }
 
-    /// Hands keyboard focus back to the selected task's terminal without changing selection.
     public func requestTerminalFocus() {
         focusRequestToken += 1
     }
 
-    /// Sets both selections together so they can never disagree.
     public func selectTask(_ task: TaskRecord, project: Project) {
         selectedProjectID = project.id
         selectedTaskID = task.id
@@ -257,8 +209,6 @@ public final class ProjectsStore {
 
     // MARK: - Terminal alerts
 
-    /// Plays the configured sound, marks the sidebar row for a question, and
-    /// posts a native notification unless B-Side is frontmost and showing this task.
     public func handleTerminalDesktopNotification(taskID: Int64, title: String, body: String) {
         handleTerminalAlert(
             taskID: taskID,
@@ -293,11 +243,7 @@ public final class ProjectsStore {
         TaskAlertNotificationCenter.shared.notify(taskID: taskID, taskName: taskName, title: title, body: body)
     }
 
-    /// Reconciles selection against a fresh `projects`/`tasksByProject`
-    /// snapshot so a task/project removed underneath the database never
-    /// leaves the selection pointing at nothing. Falls back to the vanished
-    /// task's parent project if it still exists, else no selection. Pure and
-    /// static so it's directly testable without a database; called from `start()`'s `ValueObservation`.
+    /// Falls back to the vanished task's parent project if it still exists, else no selection.
     static func reconcileSelection(
         selectedProjectID: Int64?,
         selectedTaskID: Int64?,
@@ -319,8 +265,7 @@ public final class ProjectsStore {
         return (nil, nil)
     }
 
-    /// Derived rather than tracked separately, so there is exactly one place
-    /// deciding dashboard vs. terminal vs. empty state. A task selection wins if both are somehow set.
+    /// A task selection wins if both are somehow set.
     public var mainSelection: MainSelection {
         if let task = selectedTask, let project = projects.first(where: { $0.id == task.projectId }) {
             return .task(task, project)
@@ -331,19 +276,14 @@ public final class ProjectsStore {
         return .none
     }
 
-    /// Feed of child agent runs, keyed by task; one store so the Subagents tab and sidebar indicators read the same data.
     public let subagentFeed = SubagentFeedStore()
 
-    /// Live child surfaces, keyed by task — the live-surface counterpart to `subagentFeed`. `TaskTerminalAreaView` swaps these in.
     public let subagentPanes = SubagentPaneStore()
 
-    /// Which surface (parent or one child) each task's main area shows — see `SubagentSwapStore`.
     public let subagentSwap = SubagentSwapStore()
 
-    /// Each task's current "batch" of runs for the subagent strip — see `SubagentStripBatchTracker`.
     public let subagentStripBatches = SubagentStripBatchTracker()
 
-    /// The local HTTP endpoint agent processes report to. `nil` until `start()` binds it.
     public private(set) var subagentServer: SubagentEventServer?
 
     /// What `SubagentSwapNavigation` steps through. A headless card-only child never appears: there is nothing to swap to.
@@ -355,13 +295,9 @@ public final class ProjectsStore {
         return visible.map(\.id).filter { liveIDs.contains($0) }
     }
 
-    /// Bumped once per strip-prune tick so views can subscribe their body to
-    /// the passage of time without polling — a card leaving after its linger
-    /// is otherwise triggered by no event.
+    /// Bumped per strip-prune tick: a card leaving after its linger is otherwise triggered by no event.
     public private(set) var stripTickToken = 0
 
-    /// Tears down any live pane whose card has aged out of the strip, so a
-    /// finished child stops holding a `SubagentPaneStore.maxPanesPerTask` slot.
     private func pruneAgedOutStripPanes() {
         let now = Date()
         var changed = false
@@ -393,7 +329,6 @@ public final class ProjectsStore {
     private var observationTask: Task<Void, Never>?
     private var stripPruneTask: Task<Void, Never>?
     private var appActivationObserver: NSObjectProtocol?
-    /// One watcher per project, kept in sync with `projects` by `syncRefsWatchers()`; detects branch commits live so `syncStatusByTask` doesn't go stale.
     private var refsWatchers: [Int64: ProjectRefsWatcher] = [:]
     /// Guards against a ref change piling up a second concurrent git call for the same task.
     private var syncRefreshInFlight: Set<Int64> = []
@@ -410,9 +345,7 @@ public final class ProjectsStore {
             var tasksByProject: [Int64: [TaskRecord]] = [:]
             for project in projects {
                 guard let projectId = project.id else { continue }
-                // Most recently active first (`lastActivityAt`); SQLite sorts NULL
-                // last in DESC, so pre-migration rows fall to the bottom, with
-                // `id.desc` as tiebreaker. `sortPosition` is unused today, so dropped.
+                // SQLite sorts NULL last in DESC, so pre-migration rows fall to the bottom; `id.desc` is the tiebreaker.
                 tasksByProject[projectId] = try TaskRecord
                     .filter(TaskRecord.Columns.projectId == projectId)
                     .filter(TaskRecord.Columns.archived == false)
@@ -482,14 +415,12 @@ public final class ProjectsStore {
                 if let id = self.selectedTaskID {
                     self.unreadTaskIDs.remove(id)
                 }
-                // Backstop for FSEvents-based `refsWatchers`: covers a commit/merge
-                // made while suspended that coalescing may have missed.
+                // Backstop for FSEvents coalescing that may miss a commit/merge made while suspended.
                 await self.refreshAllSyncStatuses()
             }
         }
     }
 
-    /// Keeps `refsWatchers` matching `projects` one-to-one.
     private func syncRefsWatchers() {
         let currentIDs = Set(projects.compactMap(\.id))
         for id in refsWatchers.keys where !currentIDs.contains(id) {
@@ -520,7 +451,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// The app-activation backstop: refreshes every known project's tasks.
     private func refreshAllSyncStatuses() async {
         for project in projects {
             guard let id = project.id else { continue }
@@ -552,8 +482,7 @@ public final class ProjectsStore {
         }
     }
 
-    /// The bound port changes every launch; the Pi-side spawner reads this
-    /// file (after checking `BSIDE_SUBAGENT_ENDPOINT`) to find it.
+    /// The port changes every launch; the Pi-side spawner reads this file to find it.
     static func subagentEndpointFileURL() -> URL? {
         guard let appSupport = try? FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -596,7 +525,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// Adds `path` as a project. If it is not already a git repository, `git init`s it.
     public func addProject(at path: URL) async throws {
         if await !GitCLI.isGitRepository(at: path) {
             try await GitCLI.initRepository(at: path)
@@ -617,8 +545,7 @@ public final class ProjectsStore {
         }
     }
 
-    /// Mirrors `List.onMove` semantics. Updates `projects` in place first
-    /// (optimistic) so the drag doesn't snap back while the write is in flight.
+    /// Updates `projects` optimistically so the drag doesn't snap back while the write is in flight.
     public func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int) async throws {
         var reordered = projects
         reordered.move(fromOffsets: source, toOffset: destination)
@@ -633,7 +560,7 @@ public final class ProjectsStore {
         }
     }
 
-    /// VoiceOver's "Move Up"/"Move Down" action, since drag reordering has no VoiceOver equivalent. No-op at the list's end.
+    /// VoiceOver alternative to drag reordering.
     public func moveProject(_ project: Project, direction: ProjectMoveDirection) async throws {
         guard let index = projects.firstIndex(where: { $0.id == project.id }) else { return }
         let destination = direction == .up ? index - 1 : index + 2
@@ -649,7 +576,6 @@ public final class ProjectsStore {
     }
 
     /// Base ref is persisted only when a non-blank new-branch base was used.
-    /// Updates `projects` in place too, so a sheet opened right after preselects the new defaults.
     public func rememberTaskCreationChoices(
         project: Project,
         baseRef: String?,
@@ -678,7 +604,6 @@ public final class ProjectsStore {
 
     // MARK: - Tasks and worktrees
 
-    /// A blank `name` falls back to "New Task". `useWorktree` defaults to the project's `ProjectConfig` setting.
     @discardableResult
     public func createTask(
         project: Project,
@@ -720,10 +645,7 @@ public final class ProjectsStore {
             try task.insert(db)
             return task
         }
-        // Folded into `tasksByProject` ahead of the `ValueObservation` refresh so
-        // `selectTask` below resolves to `.task` immediately, not a stale
-        // `.project`/`.none`. The observation may win the race and insert first, so
-        // only insert here if absent, or the task would show twice until the next refresh.
+        // Inserted ahead of the observation refresh so `selectTask` resolves to `.task` immediately; only if absent, since the observation may win the race.
         tasksByProject[inserted.projectId] = Self.insertingIfAbsent(
             inserted,
             into: tasksByProject[inserted.projectId] ?? []
@@ -732,14 +654,11 @@ public final class ProjectsStore {
         return inserted
     }
 
-    /// `tasks` with `task` prepended, unless a row with its id is already
-    /// present (see `createTask`'s optimistic insert).
     static func insertingIfAbsent(_ task: TaskRecord, into tasks: [TaskRecord]) -> [TaskRecord] {
         guard !tasks.contains(where: { $0.id == task.id }) else { return tasks }
         return [task] + tasks
     }
 
-    /// If requested, removes the worktree while keeping the branch.
     public func archiveTask(_ task: TaskRecord, project: Project, removeWorktree: Bool) async throws {
         if removeWorktree {
             try await TaskWorktreeService.archiveWorktree(
@@ -759,7 +678,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// `deleteLocalBranch` should only be offered when the app created it.
     public func deleteTask(
         _ task: TaskRecord,
         project: Project,
@@ -781,7 +699,6 @@ public final class ProjectsStore {
         discardBusyAndUnread(id)
     }
 
-    /// Unlike `clearTaskBusy`, no "mark unread" side effect — there's no sidebar row left once archived/deleted.
     private func discardBusyAndUnread(_ taskId: Int64) {
         busyTaskIDs.remove(taskId)
         unreadTaskIDs.remove(taskId)
@@ -789,7 +706,6 @@ public final class ProjectsStore {
 
     // MARK: - Pi conversations
 
-    /// `nil` if the agent terminal has never launched. Reused by `MainAreaView` so reopening a task resumes the same pi session.
     public func activeConversation(forTaskId taskId: Int64) async -> Conversation? {
         try? await database.dbQueue.read { db in
             try Conversation
@@ -800,7 +716,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// No transcript path yet; `recordTranscriptPath` fills it in once pi creates the file on disk.
     @discardableResult
     public func startConversation(for task: TaskRecord, sessionID: String) async throws -> Conversation {
         let conversation = Conversation(taskId: task.id ?? 0, sessionId: sessionID, transcriptPath: "")
@@ -811,7 +726,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// No-op if the conversation was deleted while resolution was in flight.
     public func recordTranscriptPath(_ path: String, for conversation: Conversation) async throws {
         guard let id = conversation.id else { return }
         try await database.dbQueue.write { db in
@@ -821,16 +735,12 @@ public final class ProjectsStore {
         }
     }
 
-    /// From the in-memory snapshot, not the database — avoids a round trip for callers needing the freshest known state.
     public func task(withId id: Int64) -> TaskRecord? {
         tasksByProject.values.lazy.flatMap { $0 }.first { $0.id == id }
     }
 
-    /// Injectable so tests can stub the local title model.
     public var titleGenerator: (String) async -> String? = TaskTitleGenerator.generate
 
-    /// Tries the local title model, then the heuristic. Clears `awaitingAutoRename`
-    /// even when neither yields a title, so this never re-fires for the same task.
     public func applyAutoRename(task: TaskRecord, project: Project, prompt: String) async {
         guard task.awaitingAutoRename else { return }
 
@@ -892,8 +802,6 @@ public final class ProjectsStore {
         }
     }
 
-    /// Prunes worktree metadata and detects worktrees whose directories vanished
-    /// out from under the app. Called on launch.
     public func pruneAndDetectVanishedWorktrees() async {
         var vanished: Set<Int64> = []
         for project in await currentProjects() {

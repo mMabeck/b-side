@@ -1,15 +1,12 @@
 import Foundation
 
-/// One event from a child's `events.jsonl`, decoded per Pi's `getDisplayItems`.
-/// Tool names/arguments live only on `message_end`; `tool_execution_update`/
-/// `tool_execution_end` carry a `toolCallId` but no arguments.
+/// Tool names/arguments live only on `message_end`; `tool_execution_*` events carry just a `toolCallId`.
 public enum SubagentEvent: Sendable, Equatable {
     case messageEnd(role: String?, stopReason: String?, errorMessage: String?, toolCalls: [SubagentToolCall], text: String?, usage: MessageUsage? = nil)
     case toolResult(toolCallId: String?, isError: Bool)
     case toolExecutionUpdate(toolCallId: String?, toolName: String?)
     case toolExecutionEnd(toolCallId: String?, toolName: String?)
 
-    /// `nil` for malformed lines or unrecognised types, skipped rather than blocking the rest of the stream.
     public static func decode(from line: Data) -> SubagentEvent? {
         guard let value = try? JSONDecoder().decode(JSONValue.self, from: line),
               let object = value.objectValue,
@@ -77,8 +74,6 @@ public struct SubagentToolCall: Sendable, Equatable {
     public var arguments: [String: JSONValue]
 }
 
-/// Token usage of one assistant message, as Pi reports it on `message.usage`
-/// (`cost` is `usage.cost.total`), plus the message's `model`.
 public struct MessageUsage: Sendable, Equatable {
     public var input = 0
     public var output = 0
@@ -112,13 +107,11 @@ public struct MessageUsage: Sendable, Equatable {
     }
 }
 
-/// The `done.json` payload written when a child finishes.
 public struct SubagentDonePayload: Sendable, Equatable {
     public var exitCode: Int?
     public var stopReason: String?
     public var errorMessage: String?
-    /// Cumulative totals for the run, when the sender tracks them; unlike a
-    /// per-message tally, includes anything sent before the card opened.
+    /// Includes anything sent before the card opened, unlike a per-message tally.
     public var statistics: RunStatistics?
 
     public init(exitCode: Int? = nil, stopReason: String? = nil, errorMessage: String? = nil, statistics: RunStatistics? = nil) {

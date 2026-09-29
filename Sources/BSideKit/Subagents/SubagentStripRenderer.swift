@@ -1,21 +1,14 @@
 import Foundation
 
-/// Pure terminal-native rendering of a task's subagent cards, drawn as text
-/// (box-drawing + SGR colour codes), not SwiftUI, so the strip reads like
-/// the terminal it lives above. Plain ANSI text a `SubagentStripHost` writes
-/// into an in-memory Ghostty surface. The viewed card draws with a
-/// double-line border instead of a single line, so which surface is live is legible from the strip alone.
 public enum SubagentStripRenderer {
-    /// 3 tool-call lines plus a status row, framed top/bottom — 6 rows per card, plus the label row below.
     public static let cardBodyRowCount = 4
-    public static let cardRowCount = cardBodyRowCount + 2 // + top/bottom border
+    public static let cardRowCount = cardBodyRowCount + 2
     public static let labelRowCount = 1
     public static let totalRowCount = cardRowCount + labelRowCount
 
     public static let minCardWidth = 30
     private static let columnGap = 1
 
-    /// Shared by rendering and `SubagentStripMouseParser.hitTest` so a click always resolves against the layout drawn.
     public struct CardSlot: Equatable {
         public let childId: String
         public let columnRange: Range<Int>
@@ -26,10 +19,8 @@ public enum SubagentStripRenderer {
     }
 
     public struct Result: Equatable {
-        /// Exactly `totalRowCount` lines, each `columns` wide (ANSI aside), or empty if `runs` is empty.
         public let lines: [String]
         public let slots: [CardSlot]
-        /// The "main" hint's column range in the label row, hit-testable like a card.
         public let mainHintRange: Range<Int>?
 
         public init(lines: [String], slots: [CardSlot], mainHintRange: Range<Int>?) {
@@ -40,11 +31,10 @@ public enum SubagentStripRenderer {
     }
 
     private static let spinnerFrames: [Character] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    /// Pi's own spinner rate, so the strip moves in step with the terminal below it.
+    /// Pi's own spinner rate.
     public static let spinnerFrameInterval: TimeInterval = 0.08
 
-    // ANSI SGR codes (terminal palette, not RGB — matches the surrounding
-    // Ghostty theme instead of a hardcoded colour).
+    // Terminal palette codes, not RGB, so colours follow the Ghostty theme.
     private enum SGR {
         static let reset = "\u{1B}[0m"
         static let dim = "\u{1B}[2m"
@@ -60,7 +50,6 @@ public enum SubagentStripRenderer {
             return Result(lines: [], slots: [], mainHintRange: nil)
         }
 
-        // Too narrow for even one card: clamp to just the label row, which fits `columns` exactly via `fit()`.
         guard columns >= minCardWidth else {
             let (labelLine, mainHintRange) = renderLabelRow(runs: runs, columns: columns, hiddenCount: 0)
             let blankRow = String(repeating: " ", count: columns)
@@ -75,7 +64,6 @@ public enum SubagentStripRenderer {
         let shown = Array(runs.prefix(maxCards))
         let hiddenCount = runs.count - shown.count
 
-        // Equal width: split the available columns evenly, minimum enforced.
         let totalGaps = columnGap * (shown.count - 1)
         let cardWidth = max(minCardWidth, (columns - totalGaps) / max(shown.count, 1))
 
@@ -184,8 +172,7 @@ public enum SubagentStripRenderer {
         let label = " " + parts.joined(separator: " · ") + " "
 
         let hint = "click a card to view · ⌃⌘0 main"
-        // Clamped: with several states in play the label alone can exceed a
-        // narrow strip, so `hintStart` must never land past the line's end.
+        // Clamped: a long label can exceed a narrow strip, so `hintStart` must not land past the line's end.
         let hintStart = min(max(label.count, columns - hint.count - 1), columns)
         let ruleWidth = max(0, hintStart - label.count)
         let plain = label + String(repeating: "─", count: ruleWidth) + " " + hint
@@ -207,7 +194,6 @@ public enum SubagentStripRenderer {
         return "\(minutes)m \(String(format: "%02d", seconds))s"
     }
 
-    /// Pads or clips to exactly `width`; callers only pass plain text, colour is layered around it afterwards.
     static func fit(_ text: String, width: Int) -> String {
         guard width > 0 else { return "" }
         if text.count > width {

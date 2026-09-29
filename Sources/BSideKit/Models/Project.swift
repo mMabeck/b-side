@@ -1,24 +1,15 @@
 import Foundation
 import GRDB
 
-/// A local git repository the user has added. Tasks branch from and are compared
-/// against `baseRef` (usually `main`).
 public struct Project: Identifiable, Equatable, Codable, Sendable {
     public var id: Int64?
     public var path: String
     public var displayName: String
     public var remote: String?
     public var baseRef: String
-    /// Last `useWorktree` choice made in the New Task sheet for this
-    /// project. `nil` until a task has been created, falling back to the
-    /// project's `ProjectConfig` default.
     public var lastUseWorktree: Bool?
-    /// Last `TaskCreationMode` raw value chosen in the New Task sheet.
     public var lastTaskCreationMode: String?
-    /// The project's position in the sidebar's drag-reordered list, lowest
-    /// first. `ProjectsStore.moveProjects` is the only writer after initial
-    /// insert; `addProject` gives a new project one past the current max so
-    /// it lands at the end.
+    /// Lowest first; `addProject` gives a new project one past the current max.
     public var sortOrder: Int
 
     public init(

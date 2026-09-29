@@ -1,14 +1,7 @@
 import Foundation
 
 extension GitCLI {
-    /// Git-ignored paths that are *not* swept into a wholly-ignored directory.
-    ///
-    /// `git status --porcelain=v2 --ignored=matching` collapses a directory that is
-    /// entirely ignored (e.g. `node_modules/`) into a single entry ending in `/`,
-    /// rather than listing every file beneath it. Filtering those out leaves loose
-    /// ignored files sitting next to tracked ones — `.env`, `.npmrc`, local config
-    /// overrides — without walking into dependency or build trees. That is the rule
-    /// this app uses for which ignored files a fresh worktree needs copied in.
+    /// Ignored paths outside wholly-ignored directories: porcelain v2 collapses e.g. `node_modules/` into one `/` entry, so filtering those leaves loose files like `.env`.
     public static func looseIgnoredFiles(at path: URL) async throws -> [String] {
         let data = try await run(
             ["status", "--porcelain=v2", "-z", "--ignored=matching"],
@@ -25,9 +18,6 @@ extension GitCLI {
         return paths
     }
 
-    /// Whether `path`'s working tree has any uncommitted changes (staged,
-    /// unstaged, or untracked). Cheap: a single porcelain status call, no
-    /// diff computation.
     public static func isWorkingTreeDirty(at path: URL) async throws -> Bool {
         let data = try await run(["status", "--porcelain", "-z"], in: path)
         return !data.isEmpty
