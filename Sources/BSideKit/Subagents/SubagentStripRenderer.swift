@@ -40,6 +40,8 @@ public enum SubagentStripRenderer {
     }
 
     private static let spinnerFrames: [Character] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    /// Pi's own spinner rate, so the strip moves in step with the terminal below it.
+    public static let spinnerFrameInterval: TimeInterval = 0.08
 
     // ANSI SGR codes (terminal palette, not RGB — matches the surrounding
     // Ghostty theme instead of a hardcoded colour).
@@ -150,9 +152,7 @@ public enum SubagentStripRenderer {
         let statusColor: String
         switch run.state {
         case .active:
-            // Stepped with the elapsed seconds so the card changes at most once a second;
-            // each change costs a terminal redraw, so a faster spinner keeps the GPU awake.
-            let frame = spinnerFrames[max(0, Int(elapsed)) % spinnerFrames.count]
+            let frame = spinnerFrames[max(0, Int(elapsed / spinnerFrameInterval)) % spinnerFrames.count]
             statusText = "\(frame) working  \(formatElapsed(elapsed))"
             statusColor = color
         case .blocked:
