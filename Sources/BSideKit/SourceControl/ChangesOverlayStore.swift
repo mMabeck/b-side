@@ -42,6 +42,11 @@ public final class ChangesOverlayStore {
     /// Tracks collapsed rather than expanded folders so new folders appear expanded.
     public private(set) var collapsedFolderIDs: Set<String> = []
 
+    private(set) var changeBlocks: [DiffChangeBlock] = []
+    public private(set) var currentChangeIndex: Int?
+    public var changeCount: Int { changeBlocks.count }
+    var currentChangeBlock: DiffChangeBlock? { currentChangeIndex.map { changeBlocks[$0] } }
+
     public var totalAdded: Int { files.reduce(0) { $0 + ($1.linesAdded ?? 0) } }
     public var totalRemoved: Int { files.reduce(0) { $0 + ($1.linesRemoved ?? 0) } }
 
@@ -50,6 +55,7 @@ public final class ChangesOverlayStore {
     private var watcher: WorktreeWatcher?
     private var refreshGeneration = 0
     private var diffLoadGeneration = 0
+    private var pendingLanding: ChangeNavigation.Direction?
 
     public init() {}
 
@@ -59,6 +65,7 @@ public final class ChangesOverlayStore {
         selectedPath = nil
         diffText = nil
         diffErrorMessage = nil
+        resetChangeNavigation()
         loadState = .idle
         files = []
         tree = []
@@ -121,7 +128,60 @@ public final class ChangesOverlayStore {
         guard path != selectedPath else { return }
         if let path, !files.contains(where: { $0.path == path }) { return }
         selectedPath = path
+        resetChangeNavigation()
         Task { await loadDiff() }
+    }
+
+    public func goToNextChange() { stepChange(.forward) }
+    public func goToPreviousChange() { stepChange(.backward) }
+    public func selectNextFile() { selectAdjacentFile(.forward) }
+    public func selectPreviousFile() { selectAdjacentFile(.backward) }
+
+    private func stepChange(_ direction: ChangeNavigation.Direction) {
+        switch ChangeNavigation.step(from: currentChangeIndex, count: changeBlocks.count, direction: direction) {
+        case .block(let index): currentChangeIndex = index
+        case .adjacentFile: selectAdjacentFile(direction, landingOnChange: true)
+        }
+    }
+
+    private func selectAdjacentFile(_ direction: ChangeNavigation.Direction, landingOnChange: Bool = false) {
+        let paths = visibleRows.compactMap { row -> String? in
+            if case .file(let file) = row.node { return file.path }
+            return nil
+        }
+        let target: String?
+        if let selectedPath, let index = paths.firstIndex(of: selectedPath) {
+            let neighbour = direction == .forward ? index + 1 : index - 1
+            target = paths.indices.contains(neighbour) ? paths[neighbour] : nil
+        } else {
+            target = direction == .forward ? paths.first : paths.last
+        }
+        guard let target else {
+            pendingLanding = nil
+            return
+        }
+        select(target)
+        if landingOnChange { pendingLanding = direction }
+    }
+
+    private func resetChangeNavigation() {
+        changeBlocks = []
+        currentChangeIndex = nil
+        pendingLanding = nil
+    }
+
+    private func updateChangeBlocks(for diff: GitCLI.DiffText) {
+        changeBlocks = diff.isBinary ? [] : DiffChangeBlock.blocks(in: UnifiedDiffRenderer.parse(diff.text))
+        if let landing = pendingLanding {
+            if changeBlocks.isEmpty {
+                selectAdjacentFile(landing, landingOnChange: true)
+            } else {
+                pendingLanding = nil
+                currentChangeIndex = landing == .forward ? 0 : changeBlocks.count - 1
+            }
+        } else if let index = currentChangeIndex, index >= changeBlocks.count {
+            currentChangeIndex = changeBlocks.isEmpty ? nil : changeBlocks.count - 1
+        }
     }
 
     public func refresh() async {
@@ -201,6 +261,7 @@ public final class ChangesOverlayStore {
         guard let worktreeURL, let selectedPath, let file = files.first(where: { $0.path == selectedPath }) else {
             diffText = nil
             diffErrorMessage = nil
+            resetChangeNavigation()
             return
         }
         let requestedMode = mode
@@ -227,10 +288,12 @@ public final class ChangesOverlayStore {
             guard generation == diffLoadGeneration else { return }
             diffText = diff
             diffErrorMessage = nil
+            updateChangeBlocks(for: diff)
         } catch {
             guard generation == diffLoadGeneration else { return }
             diffText = nil
             diffErrorMessage = Self.describe(error)
+            resetChangeNavigation()
         }
     }
 

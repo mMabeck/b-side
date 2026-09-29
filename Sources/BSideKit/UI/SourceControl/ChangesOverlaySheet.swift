@@ -54,6 +54,30 @@ struct ChangesOverlaySheet: View {
             vsCodePath = vsCodeDiffLauncher.resolveCodePath()
         }
         .onDisappear { store.dismiss() }
+        .background(navigationShortcuts)
+    }
+
+    // Hidden buttons keep the shortcuts live whether focus is in the tree or the diff text view.
+    private var navigationShortcuts: some View {
+        let f7 = KeyEquivalent(Character(UnicodeScalar(NSF7FunctionKey)!))
+        return Group {
+            Button("Next Change") { store.goToNextChange() }
+                .keyboardShortcut(f7, modifiers: [])
+            Button("Previous Change") { store.goToPreviousChange() }
+                .keyboardShortcut(f7, modifiers: .shift)
+            Button("Next Change") { store.goToNextChange() }
+                .keyboardShortcut(.downArrow, modifiers: .option)
+            Button("Previous Change") { store.goToPreviousChange() }
+                .keyboardShortcut(.upArrow, modifiers: .option)
+            Button("Next File") { store.selectNextFile() }
+                .keyboardShortcut(.downArrow, modifiers: [.option, .command])
+            Button("Previous File") { store.selectPreviousFile() }
+                .keyboardShortcut(.upArrow, modifiers: [.option, .command])
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .frame(width: 0, height: 0)
     }
 
     private static let minSize = CGSize(width: 1000, height: 600)
@@ -159,16 +183,21 @@ struct ChangesOverlaySheet: View {
     private var treeList: some View {
         VStack(spacing: 0) {
             treeHeader
-            List(selection: selectionBinding) {
-                ForEach(store.visibleRows) { row in
-                    treeRow(row)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 8 + CGFloat(row.depth) * 12, bottom: 0, trailing: 10))
-                        .listRowSeparator(.hidden)
+            ScrollViewReader { proxy in
+                List(selection: selectionBinding) {
+                    ForEach(store.visibleRows) { row in
+                        treeRow(row)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 8 + CGFloat(row.depth) * 12, bottom: 0, trailing: 10))
+                            .listRowSeparator(.hidden)
+                    }
+                }
+                .listStyle(.plain)
+                .environment(\.defaultMinListRowHeight, ChangesRowStyle.rowHeight)
+                .scrollContentBackground(.hidden)
+                .onChange(of: store.selectedPath) { _, path in
+                    if let path { proxy.scrollTo(path) }
                 }
             }
-            .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, ChangesRowStyle.rowHeight)
-            .scrollContentBackground(.hidden)
         }
         .background(theme.palette.surfaceBackground)
     }
@@ -210,7 +239,9 @@ struct ChangesOverlaySheet: View {
         .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.separator).frame(height: 1) }
     }
 
-    private func iconButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(
+        _ title: String, systemImage: String, accessibilityLabel: String? = nil, action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 11))
@@ -220,7 +251,7 @@ struct ChangesOverlaySheet: View {
         .buttonStyle(.borderless)
         .foregroundStyle(theme.palette.textSecondary)
         .help(title)
-        .accessibilityLabel(title)
+        .accessibilityLabel(accessibilityLabel ?? title)
     }
 
     /// Plain `Divider()` with a drag gesture, not `HSplitView` (`updateConstraints` crash); global coordinates keep the drag in sync.
@@ -294,6 +325,7 @@ struct ChangesOverlaySheet: View {
                 .foregroundStyle(theme.palette.textDisabled)
                 .layoutPriority(1)
             Spacer(minLength: 8)
+            changeNavigationControls
             Toggle(isOn: Binding(get: { store.showsFullFile }, set: { store.setShowsFullFile($0) })) {
                 Label("Full File", systemImage: "doc.plaintext")
                     .labelStyle(.iconOnly)
@@ -318,6 +350,28 @@ struct ChangesOverlaySheet: View {
     }
 
     @ViewBuilder
+    private var changeNavigationControls: some View {
+        if store.changeCount > 0 {
+            Text(changeCounterText)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(theme.palette.textSecondary)
+                .accessibilityLabel(changeCounterText)
+            iconButton("Previous Change (\u{21E7}F7, \u{2325}\u{2191})", systemImage: "chevron.up", accessibilityLabel: "Previous Change") {
+                store.goToPreviousChange()
+            }
+            iconButton("Next Change (F7, \u{2325}\u{2193})", systemImage: "chevron.down", accessibilityLabel: "Next Change") {
+                store.goToNextChange()
+            }
+        }
+    }
+
+    private var changeCounterText: String {
+        let count = store.changeCount
+        guard let index = store.currentChangeIndex else { return "\(count) change\(count == 1 ? "" : "s")" }
+        return "\(index + 1) of \(count)"
+    }
+
+    @ViewBuilder
     private var diffContent: some View {
         if let diffErrorMessage = store.diffErrorMessage {
             SheetCenteredMessage(message: "Couldn't load diff: \(diffErrorMessage)", palette: theme.palette)
@@ -331,7 +385,10 @@ struct ChangesOverlaySheet: View {
                     if diffText.isTruncated {
                         SheetTruncationBanner(palette: theme.palette)
                     }
-                    DiffPaneView(diffText: diffText.text, filePath: selectedPath, palette: theme.palette)
+                    DiffPaneView(
+                        diffText: diffText.text, filePath: selectedPath, palette: theme.palette,
+                        focusedBlock: store.currentChangeBlock
+                    )
                 }
             }
         } else {
