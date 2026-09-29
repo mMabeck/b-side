@@ -3,9 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `ProjectsStore`'s project reordering against a real in-memory
-/// database, mirroring `ProjectsStoreSelectionTests`'s pattern: `start()`
-/// and wait for `ValueObservation` before asserting.
 @MainActor
 @Suite("ProjectsStore project ordering")
 struct ProjectsStoreOrderingTests {

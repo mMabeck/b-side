@@ -3,29 +3,21 @@ import Testing
 
 @testable import BSideKit
 
-/// Covers `GitCLI.workingTreeChanges`/`workingTreeDiff`, the Changes
-/// overlay's `.all` and `.uncommitted` modes (`branchChanges`/`branchDiff`,
-/// the `.committed` mode, already have coverage in `GitCLIChangesTests`).
 @Suite struct GitCLIWorkingTreeChangesTests {
     @Test func uncommittedCombinesStagedAndUnstagedAgainstHead() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
         let repoURL = try await TestRepo.makeRepo(in: root)
 
-        // A second tracked file, committed clean so it can be modified
-        // without touching README.md's own history.
         try "second\n".write(to: repoURL.appendingPathComponent("second.txt"), atomically: true, encoding: .utf8)
         try await GitCLI.run(["add", "second.txt"], in: repoURL)
         try await GitCLI.run(["commit", "-m", "add second"], in: repoURL)
 
-        // Staged: a modified tracked file.
         try "staged change\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
         try await GitCLI.stage(["README.md"], at: repoURL)
 
-        // Unstaged: the other tracked file, modified but not staged.
         try "unstaged change\n".write(to: repoURL.appendingPathComponent("second.txt"), atomically: true, encoding: .utf8)
 
-        // Untracked file.
         try "brand new\n".write(to: repoURL.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
 
         let changes = try await GitCLI.workingTreeChanges(against: "HEAD", at: repoURL)
@@ -50,11 +42,9 @@ import Testing
         let repoURL = try await TestRepo.makeRepo(in: root)
         let baseline = try await GitCLI.revParse("HEAD", at: repoURL)
 
-        // Committed since baseline.
         try "committed change\n".write(to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
         try await GitCLI.run(["commit", "-am", "committed change"], in: repoURL)
 
-        // Uncommitted on top of that.
         try "dirty worktree edit\n".write(to: repoURL.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
 
         let changes = try await GitCLI.workingTreeChanges(against: baseline, at: repoURL)
@@ -85,7 +75,6 @@ import Testing
             }
         )
 
-        // A rename reports zero added/removed lines when unmodified.
         let renamed = try #require(changes.first { $0.path == "new-name.txt" })
         #expect(renamed.linesAdded == 0)
         #expect(renamed.linesRemoved == 0)

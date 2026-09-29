@@ -3,12 +3,9 @@ import Testing
 
 @testable import BSideKit
 
-/// Pure logic behind the sidebar's "Active" section and its Cmd+1…9/Ctrl+1…9
-/// shortcuts: no live window, no rendered menu, no terminal.
 @MainActor
 @Suite("Navigation shortcuts and open-terminal ordering")
 struct NavigationShortcutsTests {
-    // MARK: - ProjectsStore.openTerminalTaskIDs ordering
 
     @Test("Opening a terminal appends its task id in order opened")
     func addingOpenTerminalAppendsInOrder() {
@@ -33,7 +30,6 @@ struct NavigationShortcutsTests {
         #expect(ProjectsStore.removingOpenTerminals(remove, from: from) == expected)
     }
 
-    // MARK: - NavigationShortcuts index mapping
 
     @Test("Active task id at index maps to the Nth-opened terminal")
     func activeTaskIDMapsByPosition() {
@@ -67,7 +63,6 @@ struct NavigationShortcutsTests {
         #expect(NavigationShortcuts.project(atIndex: 2, in: projects) == nil)
     }
 
-    // MARK: - Shortcut definitions
 
     @Test("Active task and project shortcuts never collide")
     func shortcutFamiliesAreDisjoint() {
@@ -78,7 +73,6 @@ struct NavigationShortcutsTests {
         }
     }
 
-    // MARK: - Ghostty unbinds
 
     @Test("The generated Ghostty config unbinds Cmd+1…9 and Ctrl+1…9")
     func ghosttyConfigUnbindsDigitShortcuts() {

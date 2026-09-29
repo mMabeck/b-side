@@ -21,7 +21,6 @@ struct SubagentSwapStoreTests {
         #expect(swap.shownChildID(forTask: 1) == expectedShown)
     }
 
-    // MARK: - MainAreaView.reconcileSwap (pane-close auto-return)
 
     @Test("reconcileSwap returns to the parent once the shown child's pane is gone")
     func reconcileSwapReturnsToParentAfterPaneCloses() {

@@ -5,8 +5,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Pure palette-derivation tests: no window, no terminal surface, no
-/// libghostty runtime.
 @MainActor
 struct BSidePaletteTests {
     @Test("A known dark theme resolves as dark and forces darkAqua; a known light theme resolves as light and forces aqua", arguments: [
@@ -22,12 +20,7 @@ struct BSidePaletteTests {
 
     @Test("Secondary and disabled text meet a readable contrast floor against the background, even for a hostile theme")
     func hostileThemeStillProducesReadableSecondaryAndDisabledText() throws {
-        // A deliberately hostile theme: foreground and background contrast
-        // normally (like any usable terminal theme), but every ANSI slot,
-        // including index 8, sits right next to the background — exactly the
-        // shape of theme that broke chrome text before this fix, so any
-        // derivation that still trusted the palette instead of deriving from
-        // foreground (backed by the contrast guarantee) would fail here.
+        // Hostile theme: every ANSI slot, including index 8, sits next to the background; chrome text must derive from foreground.
         let hostile = GhosttyThemeDefinition(
             name: "Hostile",
             background: "1a1a1a",
@@ -43,7 +36,6 @@ struct BSidePaletteTests {
         #expect(disabled.contrastRatio(with: background) >= 3.0 - 0.01)
     }
 
-    // MARK: - Contrast-guarantee helper
 
     @Test("ensuringContrast pulls a too-close colour toward the foreground until it clears the minimum ratio")
     func ensuringContrastPullsTowardForegroundUntilReadable() {
@@ -58,9 +50,6 @@ struct BSidePaletteTests {
     }
 }
 
-/// Recovers an `RGBColor` (this module's internal blend/contrast type) from a
-/// resolved `Color`, for asserting on palette output without exposing test
-/// plumbing in the palette's own API.
 private func rgbColor(from color: Color) -> BSideKit.RGBColor {
     let ns = NSColor(color).usingColorSpace(.deviceRGB) ?? NSColor(color)
     return BSideKit.RGBColor(r: Double(ns.redComponent), g: Double(ns.greenComponent), b: Double(ns.blueComponent))

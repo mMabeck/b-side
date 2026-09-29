@@ -2,8 +2,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Which project a bare "New Task"/Cmd+N opens the sheet for when nothing
-/// selection-specific resolves a target — pure, no store or database needed.
 @Suite("ProjectCommands default task-creation project")
 struct ProjectCommandsDefaultTargetTests {
     private static let projectA = Project(id: 1, path: "/tmp/a", displayName: "a")

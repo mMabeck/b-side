@@ -4,8 +4,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Pure parser/renderer tests: no window, no view hierarchy, no palette resolution
-/// from a live Ghostty theme.
 struct UnifiedDiffRendererTests {
     private let palette = BSidePalette.fallback
 
@@ -34,8 +32,7 @@ struct UnifiedDiffRendererTests {
         (rowIndex: 3, kind: UnifiedDiffRenderer.RowKind.separator, old: nil, new: nil, text: "⋯ func bar() {"),
         (rowIndex: 4, kind: UnifiedDiffRenderer.RowKind.context, old: 10, new: 10, text: "let tail = 1"),
         (rowIndex: 5, kind: UnifiedDiffRenderer.RowKind.added, old: nil, new: 11, text: "let inserted = 2"),
-        // A removed/added line whose content itself looks like a "---"/"+++" metadata
-        // header must still be parsed as diff content, not dropped or misnumbered.
+        // Content that looks like a "---"/"+++" header must still parse as diff content.
         (rowIndex: 6, kind: UnifiedDiffRenderer.RowKind.removed, old: 11, new: nil, text: "-- old comment"),
         (rowIndex: 7, kind: UnifiedDiffRenderer.RowKind.added, old: nil, new: 12, text: "++ new thing"),
         (rowIndex: 8, kind: UnifiedDiffRenderer.RowKind.context, old: 12, new: 13, text: "let last = 3"),

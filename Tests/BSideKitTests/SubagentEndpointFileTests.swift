@@ -3,10 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `ProjectsStore`'s address hand-off file for the Pi-side
-/// spawner: `startSubagentServer()` writes it once the server is listening,
-/// `stop()` removes it. Isolated to a temp directory rather than the real
-/// `~/Library/Application Support/B-Side`.
 @MainActor
 @Suite("Subagent endpoint file")
 struct SubagentEndpointFileTests {

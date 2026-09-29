@@ -3,8 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `ProjectsStore.createTask`'s base-ref persistence and
-/// `useWorktree` override against a real git repo and in-memory database.
 @MainActor
 @Suite("ProjectsStore task creation")
 struct ProjectsStoreTaskCreationTests {

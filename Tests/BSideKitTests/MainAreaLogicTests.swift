@@ -3,11 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Pure logic behind the main area's task-terminal handling: which directory
-/// a task's terminal resolves to, and which cached hosts get evicted once
-/// their tasks are no longer live. View bodies themselves aren't exercised
-/// here — see `SidebarSnapshotTests`/`ContentViewThemeSnapshotTests` for the
-/// rendering side of the app.
 @MainActor
 @Suite("MainAreaView pure logic")
 struct MainAreaLogicTests {
@@ -41,7 +36,6 @@ struct MainAreaLogicTests {
         #expect(resolved.path == (expectsLiveWorktree ? worktree.path : projectDir.path))
     }
 
-    // MARK: - Focus target
 
     @Test("focusTarget is the parent with no or stale shown child, and the child when it has a live pane", arguments: [
         (shownChildID: nil, livePaneIDs: Set(["c1"]), expected: MainAreaView.FocusTarget.parent),
