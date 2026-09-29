@@ -1,10 +1,6 @@
 import Foundation
 
-/// Resolves the `code` CLI and opens a two-file diff (`code --diff base current`)
-/// for the Changes overlay's "Open Diff in VS Code" button. Content, not a patch:
-/// `code --diff` compares two real files, so each side is written to a temp file
-/// at its own revision (see `currentSideSource` for which revision the current
-/// side reads from).
+/// Opens `code --diff` on two temp files, since it compares real files, not patches.
 public struct VSCodeDiffLauncher {
     public typealias EnvironmentProvider = () -> [String: String]
     public typealias FileExistsCheck = (String) -> Bool
@@ -19,10 +15,7 @@ public struct VSCodeDiffLauncher {
         ]
     }
 
-    /// Where to read the "current" (right-hand) side of the diff from. Committed
-    /// mode compares the base against HEAD, not the worktree, so its current side
-    /// must come from HEAD too — otherwise uncommitted edits leak in, or a file
-    /// deleted only on disk (but still in HEAD) shows up empty.
+    /// Committed mode's current side must come from HEAD, or uncommitted edits leak in and HEAD-only files show empty.
     public enum CurrentSideSource: Equatable, Sendable {
         case none
         case worktreeFile
@@ -50,7 +43,6 @@ public struct VSCodeDiffLauncher {
         self.fileExists = fileExists
     }
 
-    /// Searches `PATH` directories in order, then the known fallback install locations.
     public func resolveCodePath() -> String? {
         let pathVariable = environment()["PATH"] ?? ""
         for directory in pathVariable.split(separator: ":") {
@@ -60,9 +52,7 @@ public struct VSCodeDiffLauncher {
         return Self.fallbackPaths.first(where: fileExists)
     }
 
-    /// Writes `baseContent`/`currentContent` (`nil` for an added/deleted side) to
-    /// sibling temp directories under the same `fileName`, so both sides keep the
-    /// original extension for VS Code's own language detection, then runs `code --diff`.
+    /// Both sides share `fileName` in sibling temp dirs so VS Code detects the language.
     public func openDiff(fileName: String, baseContent: Data?, currentContent: Data?, codePath: String) throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("bside-vscode-diff-\(UUID().uuidString)", isDirectory: true)

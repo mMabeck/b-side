@@ -6,18 +6,11 @@ import GhosttyTheme
 import OSLog
 import SwiftUI
 
-/// The single seam between BSideKit and libghostty: no other file may import
-/// `GhosttyKit`/`GhosttyTerminal`, since the embedding
-/// API is unstable upstream. Uses the SwiftUI surface (`TerminalSurfaceView`
-/// + `TerminalViewState`), never `TerminalSurfaceViewDelegate` — so this app
-/// never falsely claims to have handled an action (title, close, bell,
-/// desktop notification, ...) it hasn't; unhandled events fall back to
-/// Ghostty's own default behaviour. The one exception is opening links: see
-/// ``TerminalLinkOpener``.
+/// The only file that may import libghostty: its embedding API is unstable upstream.
+/// Uses the SwiftUI surface, never `TerminalSurfaceViewDelegate`, so unhandled actions fall back to Ghostty's defaults (links: ``TerminalLinkOpener``).
 public enum GhosttyBridge {
     static let logger = Logger(subsystem: "dev.mabeck.bside", category: "terminal-theme")
 
-    /// Respects `XDG_CONFIG_HOME`, falling back to `~/.config/ghostty/config`.
     public static var userConfigFilePath: String? {
         let configHome: URL
         if let xdgConfigHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"],
@@ -32,18 +25,14 @@ public enum GhosttyBridge {
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
-    /// One `theme = ...` directive: a fixed name, or `light:X,dark:Y`. B-Side
-    /// never derives appearance from macOS, so adaptive always resolves to
-    /// `dark` — see ``resolveThemeDefinition(_:)``.
+    /// Adaptive `light:X,dark:Y` always resolves to `dark`: appearance is never derived from macOS.
     enum ThemeDirective: Equatable {
         case fixed(String)
         case adaptive(light: String, dark: String)
     }
 
-    /// `libghostty-spm` rejects the *entire* config if `theme = <name>` fails
-    /// to resolve, even against this package's own catalog. This pulls the `theme` line out before libghostty sees it and
-    /// reapplies it as individual colour directives once resolved; everything
-    /// else in the file passes through untouched.
+    /// libghostty-spm rejects the whole config if `theme = <name>` fails to resolve, so the theme line is pulled out
+    /// and reapplied as colour directives.
     static func extractThemeDirective(from contents: String) -> (sanitized: String, directive: ThemeDirective?) {
         var directive: ThemeDirective?
         var sanitizedLines: [String] = []
@@ -87,15 +76,11 @@ public enum GhosttyBridge {
             }
         }
 
-        // Malformed (missing one side) falls through as a literal name so the
-        // fallback logging below can still name the actual bad value.
+        // Malformed (missing a side) falls through as a literal name so fallback logging names the bad value.
         guard let light, let dark else { return .fixed(value) }
         return .adaptive(light: light, dark: dark)
     }
 
-    /// Never throws: an unresolvable name is logged and `nil` returned so the
-    /// caller falls back to the default theme. Adaptive directives always
-    /// resolve to `dark`.
     static func resolveThemeDefinition(_ directive: ThemeDirective?) -> GhosttyThemeDefinition? {
         guard let directive else { return nil }
 
@@ -114,26 +99,16 @@ public enum GhosttyBridge {
         return definition
     }
 
-    /// The user's config, fully resolved for ``GhosttyResolvedTheme`` to publish.
-    /// Colours travel through `theme:`, not `terminalConfiguration:` —
-    /// `TerminalController` always renders the theme layer last, so colours
-    /// placed in `terminalConfiguration` get silently overwritten.
+    /// Colours travel through `theme:`, not `terminalConfiguration:`: `TerminalController` renders the theme layer last and overwrites them.
     struct ResolvedUserConfig {
         let configSource: TerminalController.ConfigSource
         let theme: TerminalTheme
         let themeDefinition: GhosttyThemeDefinition?
     }
 
-    /// Key equivalents this app owns, unbound here so the terminal surface
-    /// doesn't swallow them before AppKit's menu ever sees the key
-    /// (`performKeyEquivalent` runs before the main menu). Each entry mirrors
-    /// an app shortcut colliding with a Ghostty default: `cmd+,`→open_config,
-    /// `cmd+1…9`/`ctrl+1…9`→goto_tab, `cmd+q`→quit, `cmd+w`→close_surface,
-    /// `cmd+n`→new_window, `cmd+shift+r`(near `cmd+r`→reload_config), and
-    /// `cmd+shift+d`→new_split:down (would otherwise swallow "Show All
-    /// Changes"). A new colliding app shortcut must be added here too — an
-    /// unbind alone under Pi's kitty keyboard mode isn't enough. Copy/paste/
-    /// select-all/find stay bound to the terminal deliberately.
+    /// Unbound so the terminal surface doesn't swallow app shortcuts before AppKit's menu (`performKeyEquivalent` runs first).
+    /// Add any new app shortcut colliding with a Ghostty default here; an unbind alone fails under Pi's kitty keyboard mode.
+    /// Copy/paste/select-all/find stay bound to the terminal deliberately.
     static let appOwnedKeybinds = """
 
     # Appended by B-Side: see GhosttyBridge.appOwnedKeybinds.
@@ -152,21 +127,16 @@ public enum GhosttyBridge {
 
     """
 
-    /// One `keybind = …=unbind` per digit 1–9, for `cmd+` and `ctrl+`.
     private static let digitUnbinds: String = (1...9)
         .flatMap { digit in ["keybind = cmd+\(digit)=unbind", "keybind = ctrl+\(digit)=unbind"] }
         .joined(separator: "\n")
 
-    /// `override` (defaulting to the live Appearance-tab preference) replaces
-    /// whatever `theme = ...` directive the config has, if any; tests can
-    /// pass an explicit value to keep resolution pure.
     @MainActor
     static func resolveUserConfig(
         override: ThemeDirective? = ThemeOverride.currentDirective()
     ) -> ResolvedUserConfig {
         guard let path = userConfigFilePath else {
-            // Generated rather than `.none`: the app's own key equivalents
-            // must be released from Ghostty's defaults regardless.
+            // Generated, not `.none`: app key equivalents must be unbound regardless.
             let definition = resolveThemeDefinition(override)
             return ResolvedUserConfig(
                 configSource: .generated(appOwnedKeybinds),
@@ -190,10 +160,8 @@ public enum GhosttyBridge {
         }
 
         let (sanitized, configDirective) = extractThemeDirective(from: raw)
-        // Override replaces the config file's own directive outright.
         let directive = override ?? configDirective
-        // Generated text rather than `.file(path)`, even with no theme
-        // directive, since the unbinds must be appended either way.
+        // Generated, not `.file(path)`: the unbinds must be appended either way.
         let definition = resolveThemeDefinition(directive)
         let theme = definition?.toTerminalTheme() ?? .default
         return ResolvedUserConfig(
@@ -204,9 +172,7 @@ public enum GhosttyBridge {
     }
 }
 
-/// Publishes the Ghostty theme resolved from `~/.config/ghostty/config` so
-/// SwiftUI views outside the terminal grid can mirror it. `definition` is
-/// `nil` until resolved; treat `nil` as "no opinion, use system colours."
+/// `definition` is `nil` until resolved: no opinion, use system colours.
 @MainActor
 public final class GhosttyResolvedTheme: ObservableObject {
     public static let shared = GhosttyResolvedTheme()
@@ -221,23 +187,16 @@ public final class GhosttyResolvedTheme: ObservableObject {
         self.definition = definition
     }
 
-    /// Resolves from disk and publishes to `target` (``shared`` by default),
-    /// independent of any terminal surface. Called at app launch so windows
-    /// with no terminal (Settings, New Task) see the real theme on first
-    /// frame. `target` is overridable so tests avoid the shared singleton.
+    /// Called at launch so windows with no terminal (Settings, New Task) see the real theme on first frame.
     public static func resolveEagerly(into target: GhosttyResolvedTheme = shared) {
         target.update(GhosttyBridge.resolveUserConfig().themeDefinition)
     }
 
-    /// The app-wide semantic palette, derived from the resolved theme or
-    /// ``BSidePalette/fallback`` otherwise.
     public var palette: BSidePalette {
         definition.map(BSidePalette.themed(from:)) ?? .fallback
     }
 }
 
-/// One libghostty surface: a real pty running a login shell, owned by the
-/// `.exec` backend.
 @MainActor
 public final class TerminalSurfaceHost: ObservableObject {
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "terminal")
@@ -252,9 +211,7 @@ public final class TerminalSurfaceHost: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
 
-    /// `command`, when given, replaces the default `shell -l`. `onExit` fires
-    /// only when the surface's own process exits on its own, not on an
-    /// explicit teardown the caller already knows about.
+    /// `onExit` fires only when the process exits on its own, not on explicit teardown.
     public init(
         workingDirectory: URL,
         shell: String? = nil,
@@ -291,11 +248,7 @@ public final class TerminalSurfaceHost: ObservableObject {
             .sink { [weak self] count in self?.bellCount = count }
             .store(in: &cancellables)
 
-        // `.at` publishes last, after `title`/`body` have already been
-        // assigned (see `TerminalViewState+Delegate.swift`), so reading
-        // `state`'s own properties here — not the publisher's payload — is
-        // always the fully-updated triple, not a stale title paired with a
-        // fresh timestamp.
+        // `.at` publishes last, so reading `state` here yields the fully updated triple, not a stale title with a fresh timestamp.
         state.$lastDesktopNotificationAt
             .compactMap { $0 }
             .sink { [weak self] at in
@@ -306,19 +259,16 @@ public final class TerminalSurfaceHost: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Registered so a later theme change (``GhosttyThemeController/reapply()``) can re-theme this surface.
         TerminalSurfaceHostRegistry.shared.register(self)
     }
 
     deinit {
-        // `deinit` on a `@MainActor` class runs nonisolated; safe here since
-        // the registry's dictionary is only ever touched from the main actor.
+        // `deinit` runs nonisolated; safe because the registry is only touched from the main actor.
         MainActor.assumeIsolated {
             TerminalSurfaceHostRegistry.shared.unregister(self)
         }
     }
 
-    /// Backs a surface with an `InMemoryTerminalSession` instead of a real pty — used only by `SubagentStripHost`.
     fileprivate init(inMemorySession: InMemoryTerminalSession) {
         let resolvedConfig = GhosttyBridge.resolveUserConfig()
         state = TerminalViewState(
@@ -336,12 +286,11 @@ public final class TerminalSurfaceHost: ObservableObject {
 
     public var title: String { state.title }
 
-    /// Replays once the view is attached if it isn't yet. See ``TerminalHostView`` for why focus is driven imperatively.
+    /// Replays once attached; see ``TerminalHostView`` for why focus is driven imperatively.
     public func focus() {
         state.requestFocus()
     }
 
-    /// Lets callers outside this file ask "is a terminal taking keystrokes?" without importing `GhosttyTerminal`.
     public static func isTerminalView(_ responder: NSResponder?) -> Bool {
         responder is TerminalView
     }
@@ -359,26 +308,19 @@ public final class TerminalSurfaceHost: ObservableObject {
         }
     }
 
-    /// Framed as a bracketed paste, so embedded newlines land in the edit line instead of running anything. Distinct from ``sendReturn()``.
+    /// Bracketed paste, so embedded newlines land in the edit line instead of running.
     @discardableResult
     public func paste(_ text: String) -> Bool {
         state.paste(text: text)
     }
 
-    /// The key path, never paste-framed, unlike ``paste(_:)``.
     @discardableResult
     public func sendReturn() -> Bool {
         state.sendKey(.enter)
     }
 }
 
-/// SwiftUI view hosting one `TerminalSurfaceHost`; the only type outside this
-/// file that needs a terminal on screen.
-///
-/// Deliberately not bound to `@FocusState`: SwiftUI resets an unanchored
-/// `@FocusState` to nil on its own, so any re-render (title change, bell,
-/// ...) could silently steal keyboard focus from the terminal being typed
-/// in. Callers move focus with ``TerminalSurfaceHost/focus()``/``resignFocus()`` instead.
+/// Deliberately not bound to `@FocusState`: SwiftUI resets an unanchored one to nil on re-render, stealing focus from the terminal.
 public struct TerminalHostView: View {
     @ObservedObject var host: TerminalSurfaceHost
 
@@ -391,20 +333,15 @@ public struct TerminalHostView: View {
     }
 }
 
-/// One in-memory Ghostty surface rendering the subagent card strip: no pty,
-/// no child process. `render(lines:)` writes ANSI bytes directly into the
-/// grid; mouse clicks come back through `onHostInput` as raw SGR report
-/// bytes (`InMemoryTerminalSession.write` fires wherever Ghostty would
-/// otherwise write to a real pty's stdin), which `SubagentStripMouseParser` turns into clicks.
+/// In-memory surface (no pty) for the subagent strip: clicks arrive via `onHostInput` as raw SGR reports, since
+/// `InMemoryTerminalSession.write` fires wherever Ghostty would write to a pty's stdin.
 @MainActor
 public final class SubagentStripHost: ObservableObject {
     public let hostView: TerminalSurfaceHost
     private let session: InMemoryTerminalSession
 
-    /// SGR mouse reports once ``enableMouseReporting()`` has run. Set by the caller (`SubagentStripView`).
     public var onHostInput: ((Data) -> Void)?
 
-    /// `nil` until the surface first attaches to a real view and reports a viewport.
     @Published public private(set) var latestViewport: InMemoryTerminalViewport? {
         didSet { lastRenderedLines = nil }
     }
@@ -432,8 +369,7 @@ public final class SubagentStripHost: ObservableObject {
         session.receive("\u{1B}[?1000h\u{1B}[?1006h")
     }
 
-    /// Full-repaint, not incremental — `SubagentStripRenderer` re-renders everything each tick.
-    /// Unchanged frames are skipped: every repaint wakes libghostty's display link.
+    /// Skips unchanged frames: every repaint wakes libghostty's display link.
     public func render(lines: [String]) {
         guard lines != lastRenderedLines else { return }
         lastRenderedLines = lines
@@ -441,7 +377,6 @@ public final class SubagentStripHost: ObservableObject {
         session.receive(body)
     }
 
-    /// Falls back to an estimate before the surface has reported its first viewport.
     public func pointHeight(forRows rows: Int) -> CGFloat {
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         guard let viewport = latestViewport, viewport.cellHeightPixels > 0 else {
@@ -461,15 +396,12 @@ public final class SubagentStripHost: ObservableObject {
 }
 
 extension TerminalSurfaceHost {
-    /// For tests that create several panes at once: spawning many real exec surfaces back-to-back crashes libghostty under `swift test`.
+    /// Spawning many real exec surfaces back-to-back crashes libghostty under `swift test`.
     static func makeInMemoryForTesting() -> TerminalSurfaceHost {
         TerminalSurfaceHost(inMemorySession: InMemoryTerminalSession(write: { _ in }, resize: { _ in }))
     }
 }
 
-/// Tracks every live ``TerminalSurfaceHost`` so a theme change can reach it
-/// without restarting the app. Entries are weak; a closed host stops
-/// receiving updates once ``TerminalSurfaceHost/deinit`` unregisters it.
 @MainActor
 final class TerminalSurfaceHostRegistry {
     static let shared = TerminalSurfaceHostRegistry()
@@ -490,7 +422,6 @@ final class TerminalSurfaceHostRegistry {
         hosts.removeValue(forKey: ObjectIdentifier(host))
     }
 
-    /// `setTheme(_:)` reconfigures the running surface without touching its pty or session.
     func applyThemeToAllHosts(_ theme: TerminalTheme) {
         for box in hosts.values {
             box.host?.state.setTheme(theme)
@@ -498,9 +429,6 @@ final class TerminalSurfaceHostRegistry {
     }
 }
 
-/// Re-resolves the user's config with the Appearance tab's override,
-/// republishes it, updates `NSApp`'s appearance immediately, and re-themes
-/// every live terminal.
 @MainActor
 public enum GhosttyThemeController {
     static func reapply() {
@@ -511,10 +439,7 @@ public enum GhosttyThemeController {
     }
 }
 
-/// Invisible per-task bridge from `TerminalSurfaceHost`'s republished bell/
-/// desktop-notification signals to `ProjectsStore.handleTerminalBell`/
-/// `handleTerminalDesktopNotification`, mounted alongside `TerminalHostView`
-/// for every cached host — live or hidden — so a background task's alert still fires.
+/// Mounted for every cached host, live or hidden, so a background task's alert still fires.
 public struct TerminalAlertBridge: View {
     @ObservedObject var host: TerminalSurfaceHost
     var store: ProjectsStore
@@ -542,16 +467,12 @@ public struct TerminalAlertBridge: View {
     }
 }
 
-/// Makes trackpad scrolling feel like Ghostty.app: `libghostty-spm`'s
-/// `AppTerminalView` forwards raw precise-scroll deltas, while Ghostty.app
-/// doubles them, so the same config scrolls at half speed here. The view
-/// can't be subclassed, so a local monitor intercepts the event and
-/// resends the doubled delta through `sendMouseScroll`. Wheel-mouse events pass through untouched.
+/// libghostty-spm forwards raw precise-scroll deltas while Ghostty.app doubles them; the view can't be subclassed,
+/// so a local monitor resends doubled deltas.
 @MainActor
 public enum TerminalScrollRouter {
     static let preciseMultiplier: Double = 2
 
-    /// Call once, from `BSideApp.init()`.
     public static func install() {
         NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             route(event) ? nil : event
@@ -572,9 +493,7 @@ public enum TerminalScrollRouter {
         return true
     }
 
-    /// Mirrors Ghostty.app's `Ghostty.Input.Momentum`; the package's own
-    /// `TerminalScrollModifiers.Momentum` stops at `.changed`, so the full
-    /// set (Ghostty's `input.mouse.Momentum`, `enum(u3)`) is built here instead.
+    /// The package's `TerminalScrollModifiers.Momentum` stops at `.changed`; this mirrors Ghostty's full `input.mouse.Momentum`.
     static func momentum(for phase: NSEvent.Phase) -> Int32 {
         switch phase {
         case .began: 1
@@ -610,8 +529,7 @@ public enum TerminalScrollRouter {
     }
 }
 
-/// Ghostty's fallback opener refuses OSC 8 hyperlinks (`UnsafeOSC8Link`) and
-/// leaves them to the host, so without this Pi's links do nothing on click.
+/// Ghostty's fallback opener refuses OSC 8 hyperlinks (`UnsafeOSC8Link`), so without this Pi's links do nothing.
 extension TerminalViewState: @retroactive TerminalSurfaceOpenURLDelegate {
     public func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
         TerminalLinkOpener.open(url)
@@ -624,8 +542,7 @@ enum TerminalLinkOpener {
         case reveal(URL)
     }
 
-    /// An OSC 8 link's text needn't match its target, so a local file that
-    /// would run something is revealed in Finder rather than opened.
+    /// An OSC 8 link's text needn't match its target, so a local file that would run something is revealed in Finder.
     static func action(for link: String, fileManager: FileManager = .default) -> Action? {
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }

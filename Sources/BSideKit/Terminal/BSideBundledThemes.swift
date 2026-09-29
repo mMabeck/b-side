@@ -1,9 +1,6 @@
 import GhosttyTheme
 
-/// The brand themes (`docs/brand.md`), also shipped as installable configs at
-/// `assets/theme/*.conf`. `GhosttyThemeCatalog` only knows themes baked into
-/// `libghostty-spm`, so these are mirrored here by hand so the Appearance tab
-/// can offer them regardless of what's installed on disk.
+/// Mirrors `assets/theme/*.conf` by hand: `GhosttyThemeCatalog` only knows themes baked into `libghostty-spm`.
 enum BSideBundledThemes {
     static let bSide = GhosttyThemeDefinition(
         name: "B-Side",
@@ -40,12 +37,9 @@ enum BSideBundledThemes {
     static let all: [GhosttyThemeDefinition] = [bSide, bSidePaper]
 }
 
-/// Theme lookup across both sources: brand themes first, then
-/// `GhosttyThemeCatalog`. Lists the corpus via `.allThemes`, never `search("")`,
-/// since Foundation's `contains("")` is false.
+/// Lists via `.allThemes`, never `search("")`: Foundation's `contains("")` is false.
 enum ThemeCatalogSource {
-    /// Pinned above the alphabetical catalog, which otherwise opens on
-    /// obscure names and buries these among ~480 entries. `ThemeOverrideTests` guards against upstream renames.
+    /// Pinned above the alphabetical catalog, which otherwise buries these among ~480 entries.
     static let featuredNames: [String] = [
         "Catppuccin Mocha", "Catppuccin Latte",
         "TokyoNight", "TokyoNight Day",
@@ -71,7 +65,6 @@ enum ThemeCatalogSource {
         BSideBundledThemes.all + featuredNames.compactMap(GhosttyThemeCatalog.theme(named:))
     }
 
-    /// Excludes ``featuredThemes()`` so each name appears once in the picker.
     static func otherThemes() -> [GhosttyThemeDefinition] {
         let featured = Set(featuredNames)
         return GhosttyThemeCatalog.allThemes.filter { !featured.contains($0.name) }
@@ -81,19 +74,17 @@ enum ThemeCatalogSource {
         BSideBundledThemes.all + GhosttyThemeCatalog.allThemes
     }
 
-    /// Same background-luminance test ``BSidePalette/themed(from:)`` uses.
     static func isDark(_ definition: GhosttyThemeDefinition) -> Bool {
         RGBColor(hex: definition.background).relativeLuminance < 0.5
     }
 
-    /// One titled group of the theme list.
     struct Group: Identifiable {
         let title: String
         let themes: [GhosttyThemeDefinition]
         var id: String { title }
     }
 
-    /// Computed once — classifying ~490 themes is not free and the catalog never changes at runtime.
+    // Classifying ~490 themes isn't free and the catalog never changes at runtime.
     static let groups: [Group] = {
         let featured = featuredThemes()
         let other = otherThemes()
