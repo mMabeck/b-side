@@ -4,8 +4,8 @@ import SwiftUI
 /// Takes over the File menu's standard Close (Cmd+W) slot instead of adding
 /// a competing item, since Cmd+W closing the whole window would be
 /// destructive: every task's terminal stays mounted for the app's lifetime,
-/// so "close" in the task window means "end this one task's terminal". Any
-/// other key window (Settings) gets the standard close, which this slot owns.
+/// so "close" in the task window means "end this one task's terminal". Sheets
+/// and other windows (Settings) get closed instead; see `TaskWindowFocus.close`.
 public struct TerminalCommands: Commands {
     private var store: ProjectsStore
     @ObservedObject private var focus = TaskWindowFocus.shared
@@ -18,13 +18,10 @@ public struct TerminalCommands: Commands {
         CommandGroup(replacing: .saveItem) {
             Button(focus.keyWindowRole == .task ? "Close Task Terminal" : "Close") {
                 // Re-read at click time: a sheet or Settings may have become key since the menu was built.
-                let keyWindow = NSApplication.shared.keyWindow
-                guard focus.role(of: keyWindow) == .task else {
-                    keyWindow?.performClose(nil)
-                    return
-                }
-                if case .task(let task, let project) = store.mainSelection {
-                    store.closeTerminal(for: task, project: project)
+                focus.close(NSApplication.shared.keyWindow) {
+                    if case .task(let task, let project) = store.mainSelection {
+                        store.closeTerminal(for: task, project: project)
+                    }
                 }
             }
             .keyboardShortcut(TerminalCloseShortcut.closeTask)

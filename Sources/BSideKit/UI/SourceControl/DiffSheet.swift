@@ -48,6 +48,7 @@ struct DiffSheet: View {
         // Its own `NSWindow` needs the palette applied directly, or system-drawn text renders in light `aqua`.
         .themedWindow(theme.palette)
         .onExitCommand { dismiss() }
+        .closesSheetOnCommandW { dismiss() }
     }
 
     /// Not cached across body re-evaluations, since ``UnifiedDiffRenderer`` stays fast even at 10k+ lines.

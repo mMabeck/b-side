@@ -51,6 +51,7 @@ struct ChangesOverlaySheet: View {
         .themedWindow(theme.palette)
         .resizableSheetWindow()
         .onExitCommand { dismiss() }
+        .closesSheetOnCommandW { dismiss() }
         .onAppear {
             store.present(task: task)
             vsCodePath = vsCodeDiffLauncher.resolveCodePath()

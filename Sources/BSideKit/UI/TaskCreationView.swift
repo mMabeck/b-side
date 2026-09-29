@@ -110,6 +110,7 @@ struct TaskCreationView: View {
             }
         }
         .frame(width: 480)
+        .closesSheetOnCommandW { if !isCreating { dismiss() } }
         // The sheet gets its own `NSWindow`, so system-drawn text needs the palette applied to it directly too.
         .themedWindow(theme.palette)
         // The `guard` after both awaits drops a stale load if the project changed again before it finished.
