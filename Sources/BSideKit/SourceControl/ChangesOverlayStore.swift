@@ -33,7 +33,10 @@ public final class ChangesOverlayStore {
     public private(set) var files: [ChangesTreeFile] = []
     public private(set) var tree: [ChangesTreeNode] = []
     public private(set) var selectedPath: String?
+    /// The highlighted tree row: a file (always equal to `selectedPath`) or a folder, whose selection leaves the last file's diff in place.
+    public private(set) var focusedRowID: String?
     public private(set) var diffText: GitCLI.DiffText?
+    private(set) var diffRows: [UnifiedDiffRenderer.Row] = []
     public private(set) var diffErrorMessage: String?
     public private(set) var branchName: String?
     /// The task's baseline for `.all`/`.committed`, `"HEAD"` for `.uncommitted`.
@@ -63,6 +66,7 @@ public final class ChangesOverlayStore {
         self.task = task
         mode = .all
         selectedPath = nil
+        focusedRowID = nil
         diffText = nil
         diffErrorMessage = nil
         resetChangeNavigation()
@@ -92,12 +96,14 @@ public final class ChangesOverlayStore {
     public func setMode(_ newMode: Mode) {
         guard newMode != mode else { return }
         mode = newMode
+        resetChangeNavigation()
         Task { await refresh() }
     }
 
     public func setShowsFullFile(_ newValue: Bool) {
         guard newValue != showsFullFile else { return }
         showsFullFile = newValue
+        resetChangeNavigation()
         Task { await loadDiff() }
     }
 
@@ -107,6 +113,52 @@ public final class ChangesOverlayStore {
 
     public func toggleFolder(_ id: String) {
         if collapsedFolderIDs.remove(id) == nil { collapsedFolderIDs.insert(id) }
+    }
+
+    public func focusRow(_ id: String?) {
+        guard let id else { return }
+        focusedRowID = id
+        if files.contains(where: { $0.path == id }) { select(id) }
+    }
+
+    public func toggleFocusedFolder() {
+        if let folder = focusedFolder { toggleFolder(folder.id) }
+    }
+
+    /// Collapses an expanded folder; otherwise moves focus to the parent folder.
+    public func collapseFocusedOrMoveToParent() {
+        guard let focusedRowID, let ancestors = Self.ancestors(of: focusedRowID, in: tree) else { return }
+        if let folder = focusedFolder, !collapsedFolderIDs.contains(folder.id) {
+            collapsedFolderIDs.insert(folder.id)
+        } else if let parent = ancestors.last {
+            self.focusedRowID = parent.id
+        }
+    }
+
+    /// Expands a collapsed folder; on an expanded one moves focus to its first child.
+    public func expandFocusedOrMoveToFirstChild() {
+        guard let folder = focusedFolder else { return }
+        if collapsedFolderIDs.contains(folder.id) {
+            collapsedFolderIDs.remove(folder.id)
+        } else if let first = folder.children.first {
+            focusRow(first.id)
+        }
+    }
+
+    private var focusedFolder: ChangesTreeNode.Folder? {
+        guard let focusedRowID, let ancestors = Self.ancestors(of: focusedRowID, in: tree) else { return nil }
+        for node in (ancestors.last?.children ?? tree) where node.id == focusedRowID {
+            if case .folder(let folder) = node { return folder }
+        }
+        return nil
+    }
+
+    private static func ancestors(of id: String, in nodes: [ChangesTreeNode]) -> [ChangesTreeNode.Folder]? {
+        for node in nodes {
+            if node.id == id { return [] }
+            if case .folder(let folder) = node, let inner = ancestors(of: id, in: folder.children) { return [folder] + inner }
+        }
+        return nil
     }
 
     public func expandAllFolders() {
@@ -128,6 +180,7 @@ public final class ChangesOverlayStore {
         guard path != selectedPath else { return }
         if let path, !files.contains(where: { $0.path == path }) { return }
         selectedPath = path
+        focusedRowID = path
         resetChangeNavigation()
         Task { await loadDiff() }
     }
@@ -145,10 +198,7 @@ public final class ChangesOverlayStore {
     }
 
     private func selectAdjacentFile(_ direction: ChangeNavigation.Direction, landingOnChange: Bool = false) {
-        let paths = visibleRows.compactMap { row -> String? in
-            if case .file(let file) = row.node { return file.path }
-            return nil
-        }
+        let paths = tree.flatMap(\.leaves).map(\.path)
         let target: String?
         if let selectedPath, let index = paths.firstIndex(of: selectedPath) {
             let neighbour = direction == .forward ? index + 1 : index - 1
@@ -160,7 +210,8 @@ public final class ChangesOverlayStore {
             pendingLanding = nil
             return
         }
-        select(target)
+        for folder in Self.ancestors(of: target, in: tree) ?? [] { collapsedFolderIDs.remove(folder.id) }
+        focusRow(target)
         if landingOnChange { pendingLanding = direction }
     }
 
@@ -170,8 +221,8 @@ public final class ChangesOverlayStore {
         pendingLanding = nil
     }
 
-    private func updateChangeBlocks(for diff: GitCLI.DiffText) {
-        changeBlocks = diff.isBinary ? [] : DiffChangeBlock.blocks(in: UnifiedDiffRenderer.parse(diff.text))
+    private func updateChangeBlocks() {
+        changeBlocks = DiffChangeBlock.blocks(in: diffRows)
         if let landing = pendingLanding {
             if changeBlocks.isEmpty {
                 selectAdjacentFile(landing, landingOnChange: true)
@@ -237,8 +288,13 @@ public final class ChangesOverlayStore {
         loadState = .loaded
 
         // Keep the selection if still present, else the first file; reload the diff either way since content may have changed.
-        if selectedPath == nil || !files.contains(where: { $0.path == selectedPath }) {
-            selectedPath = files.first?.path
+        let selectionChanged = selectedPath == nil || !files.contains(where: { $0.path == selectedPath })
+        if selectionChanged {
+            selectedPath = tree.flatMap(\.leaves).first?.path
+            resetChangeNavigation()
+        }
+        if selectionChanged || focusedRowID.map({ Self.ancestors(of: $0, in: tree) == nil }) ?? true {
+            focusedRowID = selectedPath
         }
         await loadDiff()
     }
@@ -260,6 +316,7 @@ public final class ChangesOverlayStore {
 
         guard let worktreeURL, let selectedPath, let file = files.first(where: { $0.path == selectedPath }) else {
             diffText = nil
+            diffRows = []
             diffErrorMessage = nil
             resetChangeNavigation()
             return
@@ -287,11 +344,13 @@ public final class ChangesOverlayStore {
             // A newer `loadDiff()` may have finished meanwhile; the generation counter catches even a reselection of the same path.
             guard generation == diffLoadGeneration else { return }
             diffText = diff
+            diffRows = diff.isBinary ? [] : UnifiedDiffRenderer.parse(diff.text)
             diffErrorMessage = nil
-            updateChangeBlocks(for: diff)
+            updateChangeBlocks()
         } catch {
             guard generation == diffLoadGeneration else { return }
             diffText = nil
+            diffRows = []
             diffErrorMessage = Self.describe(error)
             resetChangeNavigation()
         }

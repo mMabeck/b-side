@@ -33,5 +33,15 @@ import Testing
 
         store.expandAllFolders()
         #expect(store.collapsedFolderIDs.isEmpty)
+
+        store.collapseAllFolders()
+        #expect(store.selectedPath == "src/ui/a.swift")
+        store.selectNextFile()
+        #expect(store.selectedPath == "src/b.swift")
+        #expect(store.focusedRowID == "src/b.swift")
+        #expect(store.collapsedFolderIDs == ["src/ui"])
+        store.selectPreviousFile()
+        #expect(store.selectedPath == "src/ui/a.swift")
+        #expect(store.collapsedFolderIDs.isEmpty)
     }
 }

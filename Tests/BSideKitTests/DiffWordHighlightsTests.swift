@@ -11,7 +11,8 @@ import Testing
         ("alpha beta gamma", "one two three four", nil, nil),
     ] as [(String, String, [String]?, [String]?)])
     func highlightsChangedTokens(old: String, new: String, removed: [String]?, added: [String]?) throws {
-        let result = DiffWordHighlights.highlights(old: old, new: new)
+        var budget = DiffWordHighlights.comparisonBudget
+        let result = DiffWordHighlights.highlights(old: old, new: new, budget: &budget)
         guard let removed, let added else {
             #expect(result == nil)
             return
