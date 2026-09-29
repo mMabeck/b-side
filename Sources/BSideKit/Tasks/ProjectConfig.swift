@@ -38,9 +38,8 @@ public struct ProjectConfig: Codable, Equatable, Sendable {
     }
 
     /// Loads `.bside/config.json` from the project, falling back to defaults if the
-    /// file is missing or malformed. Migrates a legacy `.dash/` directory in place first.
+    /// file is missing or malformed.
     public static func load(forProjectAt projectPath: URL) -> ProjectConfig {
-        migrateLegacyConfigDirectoryIfNeeded(forProjectAt: projectPath)
         let url = configFileURL(forProjectAt: projectPath)
         guard let data = try? Data(contentsOf: url) else {
             return ProjectConfig()
@@ -50,23 +49,6 @@ public struct ProjectConfig: Codable, Equatable, Sendable {
         } catch {
             logger.error("Failed to parse \(url.path, privacy: .public): \(error, privacy: .public)")
             return ProjectConfig()
-        }
-    }
-
-    /// One-time move of a legacy `.dash/` directory into `.bside/`. No-ops if `.bside/`
-    /// already exists or `.dash/` doesn't; failures are logged, not thrown, so a
-    /// migration hiccup never crashes the app or loses the old config.
-    static func migrateLegacyConfigDirectoryIfNeeded(forProjectAt projectPath: URL) {
-        let fileManager = FileManager.default
-        let newDir = projectPath.appendingPathComponent(".bside", isDirectory: true)
-        let oldDir = projectPath.appendingPathComponent(".dash", isDirectory: true)
-        guard !fileManager.fileExists(atPath: newDir.path) else { return }
-        guard fileManager.fileExists(atPath: oldDir.path) else { return }
-        do {
-            try fileManager.moveItem(at: oldDir, to: newDir)
-            logger.info("Migrated project config directory from \(oldDir.path, privacy: .public) to \(newDir.path, privacy: .public)")
-        } catch {
-            logger.error("Failed to migrate project config directory from \(oldDir.path, privacy: .public): \(error, privacy: .public)")
         }
     }
 }

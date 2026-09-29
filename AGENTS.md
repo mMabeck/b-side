@@ -119,10 +119,6 @@ swift test --filter GitCLITests
 - **`GitCLI` must wait for EOF on both pipes and process exit**, or output
   truncates. Persist DB fields after each successful git step so partial
   failures don't desync state.
-- **Legacy migration** (`DashNative` → `B-Side` app-support dir, `.dash/` →
-  `.bside/` in project trees): on failure keep reading the legacy location;
-  never create an empty destination that suppresses retries. Don't use real
-  legacy projects as test fixtures — loading them migrates them.
 - **Auto-rename changes a task's title and app-created branch, not its
   worktree directory** (`<adjective>-<noun>-<4 hex>` stays, e.g. `quiet-otter-3f9a`).
 - **`bundle.sh` must ad-hoc sign the assembled `.app`.** With only the

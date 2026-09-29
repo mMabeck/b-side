@@ -62,15 +62,3 @@ open "dist/B-Side.app"
 Run it from the app bundle rather than `swift run`: the SwiftUI `Settings` scene
 and user notifications need a real bundle identifier.
 
-## Upgrading from Dash Native
-
-The app renamed itself, and so did the two places it keeps state. Both migrate
-themselves once, on first use, by moving the old directory into place:
-
-- `~/Library/Application Support/DashNative` → `.../B-Side`
-- a project's `.dash/` → `.bside/`
-
-The second happens inside your repository's working tree, so the first time
-B-Side opens a project you already used with Dash Native, expect `.dash/` →
-`.bside/` to show up in `git status`. If a move fails, the app keeps reading the
-old location and retries next launch rather than starting empty.
