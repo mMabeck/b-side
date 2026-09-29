@@ -103,8 +103,10 @@ enum UnifiedDiffRenderer {
         var rowRanges: [NSRange] = []
         let font = bodyFont
         let separatorFont = NSFont.systemFont(ofSize: 12, weight: .regular)
-        let addedBackground = NSColor(palette.statusSuccess).withAlphaComponent(0.14)
-        let removedBackground = NSColor(palette.statusError).withAlphaComponent(0.14)
+        let addedBackground = NSColor(palette.statusSuccess).withAlphaComponent(0.08)
+        let removedBackground = NSColor(palette.statusError).withAlphaComponent(0.08)
+        let addedWord = NSColor(palette.statusSuccess).withAlphaComponent(0.32)
+        let removedWord = NSColor(palette.statusError).withAlphaComponent(0.32)
 
         for (index, row) in rows.enumerated() {
             if index > 0 {
@@ -139,6 +141,16 @@ enum UnifiedDiffRenderer {
             }
 
             rowRanges.append(NSRange(location: startLocation, length: result.length - startLocation))
+        }
+
+        for pair in DiffWordHighlights.pairs(in: rows) {
+            guard let highlights = DiffWordHighlights.highlights(old: rows[pair.removed].text, new: rows[pair.added].text) else { continue }
+            for (ranges, rowIndex, color) in [(highlights.old, pair.removed, removedWord), (highlights.new, pair.added, addedWord)] {
+                let rowRange = rowRanges[rowIndex]
+                for range in ranges where NSMaxRange(range) <= rowRange.length {
+                    result.addAttribute(.backgroundColor, value: color, range: NSRange(location: rowRange.location + range.location, length: range.length))
+                }
+            }
         }
 
         return (result, rowRanges)
@@ -244,6 +256,9 @@ extension NSAttributedString.Key {
 
 /// Forces TextKit 1 (`NSLayoutManager`/`NSTextContainer` built directly): TextKit 2 doesn't expose per-line background drawing.
 private final class DiffRowBackgroundLayoutManager: NSLayoutManager {
+    var focusedRange: NSRange?
+    var focusColor: NSColor = .clear
+
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         // Drawing is always on the main thread, but NSLayoutManager's override point isn't main-actor-isolated; this bridges to read `textView.bounds`.
         if let textContainer = textContainers.first,
@@ -265,8 +280,24 @@ private final class DiffRowBackgroundLayoutManager: NSLayoutManager {
                 color.setFill()
                 fillRect.fill()
             }
+            drawFocusOutline(width: fullWidth, origin: origin, textLength: textStorage.length)
         }
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+    }
+}
+
+extension DiffRowBackgroundLayoutManager {
+    fileprivate func drawFocusOutline(width: CGFloat, origin: NSPoint, textLength: Int) {
+        guard let focusedRange, NSMaxRange(focusedRange) <= textLength else { return }
+        var union = NSRect.null
+        let glyphRange = glyphRange(forCharacterRange: focusedRange, actualCharacterRange: nil)
+        enumerateLineFragments(forGlyphRange: glyphRange) { rect, _, _, _, _ in union = union.union(rect) }
+        guard !union.isNull else { return }
+        let outline = NSRect(x: 1, y: union.minY + origin.y + 0.5, width: max(width, union.maxX + origin.x) - 2, height: union.height - 1)
+        focusColor.setStroke()
+        let path = NSBezierPath(rect: outline)
+        path.lineWidth = 1
+        path.stroke()
     }
 }
 
@@ -290,6 +321,7 @@ private final class DiffGutterView: NSView {
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     private static let horizontalPadding: CGFloat = 8
     private static let columnGap: CGFloat = 4
+    private static let changeBarWidth: CGFloat = 3
     private static let markerColumnWidth: CGFloat = {
         ("\u{2212}" as NSString).size(withAttributes: [.font: font]).width
     }()
@@ -318,7 +350,7 @@ private final class DiffGutterView: NSView {
     }
 
     var preferredWidth: CGFloat {
-        columnMaxXs.marker + Self.horizontalPadding
+        columnMaxXs.marker + Self.horizontalPadding + Self.changeBarWidth
     }
 
     override var isFlipped: Bool { true }
@@ -369,7 +401,10 @@ private final class DiffGutterView: NSView {
 
         let (oldColumnMaxX, newColumnMaxX, markerColumnMaxX) = columnMaxXs
 
-        func drawRightAligned(_ string: String, maxX: CGFloat, lineOriginY: CGFloat, lineHeight: CGFloat) {
+        func drawRightAligned(
+            _ string: String, maxX: CGFloat, lineOriginY: CGFloat, lineHeight: CGFloat,
+            attributes: [NSAttributedString.Key: Any] = attributes
+        ) {
             guard !string.isEmpty else { return }
             let size = (string as NSString).size(withAttributes: attributes)
             let point = NSPoint(x: maxX - size.width, y: lineOriginY + (lineHeight - size.height) / 2)
@@ -392,12 +427,23 @@ private final class DiffGutterView: NSView {
                 drawRightAligned(String(new), maxX: newColumnMaxX, lineOriginY: lineOriginInGutter.y, lineHeight: fragmentRect.height)
             }
             let marker: String
+            let statusColor: NSColor
             switch info.kind {
-            case .added: marker = "+"
-            case .removed: marker = "\u{2212}"
-            case .context: marker = ""
+            case .added:
+                marker = "+"
+                statusColor = NSColor(self.palette.statusSuccess)
+            case .removed:
+                marker = "\u{2212}"
+                statusColor = NSColor(self.palette.statusError)
+            case .context:
+                return
             }
-            drawRightAligned(marker, maxX: markerColumnMaxX, lineOriginY: lineOriginInGutter.y, lineHeight: fragmentRect.height)
+            drawRightAligned(
+                marker, maxX: markerColumnMaxX, lineOriginY: lineOriginInGutter.y, lineHeight: fragmentRect.height,
+                attributes: [.font: Self.font, .foregroundColor: statusColor.withAlphaComponent(0.55)]
+            )
+            statusColor.setFill()
+            NSRect(x: self.bounds.width - Self.changeBarWidth, y: lineOriginInGutter.y, width: Self.changeBarWidth, height: fragmentRect.height).fill()
         }
     }
 }
@@ -408,6 +454,7 @@ final class DiffScrollView: NSScrollView {
     weak var gutterView: NSView?
     /// Keeps `NSAccessibilityCustomRotor.itemSearchDelegate` (a weak reference) alive.
     var rotorSearchDelegates: [NSObject] = []
+    var appliedFocus: NSRange?
 
     override func tile() {
         super.tile()
@@ -466,6 +513,7 @@ private final class DiffLineKindRotorDelegate: NSObject, @MainActor NSAccessibil
 struct DiffTextView: NSViewRepresentable {
     let attributedText: NSAttributedString
     let palette: BSidePalette
+    var focusedRange: NSRange?
 
     func makeNSView(context: Context) -> DiffScrollView {
         let textStorage = NSTextStorage()
@@ -517,7 +565,7 @@ struct DiffTextView: NSViewRepresentable {
         apply(palette: palette, to: textView, scrollView: scrollView, gutter: gutter)
         textView.textStorage?.setAttributedString(attributedText)
         updateAccessibilityLabel(textView: textView)
-        scrollToStart(scrollView)
+        syncFocus(in: scrollView, textView: textView, textChanged: true)
 
         return scrollView
     }
@@ -526,12 +574,42 @@ struct DiffTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         let gutter = scrollView.subviews.compactMap { $0 as? DiffGutterView }.first
         apply(palette: palette, to: textView, scrollView: scrollView, gutter: gutter)
-        if textView.attributedString() != attributedText {
+        let textChanged = textView.attributedString() != attributedText
+        if textChanged {
             textView.textStorage?.setAttributedString(attributedText)
             gutter?.metrics = UnifiedDiffRenderer.gutterMetrics(in: attributedText)
             updateAccessibilityLabel(textView: textView)
             gutter?.needsDisplay = true
+        }
+        syncFocus(in: scrollView, textView: textView, textChanged: textChanged)
+    }
+
+    private func syncFocus(in scrollView: DiffScrollView, textView: NSTextView, textChanged: Bool) {
+        (textView.layoutManager as? DiffRowBackgroundLayoutManager)?.focusedRange = focusedRange
+        guard textChanged || focusedRange != scrollView.appliedFocus else { return }
+        scrollView.appliedFocus = focusedRange
+        textView.needsDisplay = true
+        if let focusedRange {
+            scrollToFocus(focusedRange, in: scrollView, textView: textView)
+        } else if textChanged {
             scrollToStart(scrollView)
+        }
+    }
+
+    private static let contextLinesAboveFocus: CGFloat = 3
+
+    private func scrollToFocus(_ range: NSRange, in scrollView: DiffScrollView, textView: NSTextView) {
+        DispatchQueue.main.async {
+            guard let layoutManager = textView.layoutManager, let container = textView.textContainer,
+                  NSMaxRange(range) <= (textView.textStorage?.length ?? 0) else { return }
+            layoutManager.ensureLayout(for: container)
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let lineRect = layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
+            let clip = scrollView.contentView
+            let maxY = max(0, textView.frame.height - clip.bounds.height)
+            let y = lineRect.minY + textView.textContainerInset.height - lineRect.height * Self.contextLinesAboveFocus
+            clip.scroll(to: NSPoint(x: 0, y: min(max(0, y), maxY)))
+            scrollView.reflectScrolledClipView(clip)
         }
     }
 
@@ -553,6 +631,9 @@ struct DiffTextView: NSViewRepresentable {
             .foregroundColor: NSColor(palette.selectionForeground),
         ]
         scrollView.backgroundColor = background
+        if let layoutManager = textView.layoutManager as? DiffRowBackgroundLayoutManager {
+            layoutManager.focusColor = NSColor(palette.accent).withAlphaComponent(0.7)
+        }
         gutter?.palette = palette
     }
 
@@ -572,8 +653,11 @@ struct DiffPaneView: View {
     let diffText: String
     let filePath: String
     let palette: BSidePalette
+    var focusedBlock: DiffChangeBlock?
 
     @State private var displayed = NSAttributedString()
+    @State private var rowRanges: [NSRange] = []
+    @State private var renderedDiffText: String?
 
     private struct RenderKey: Equatable {
         let filePath: String
@@ -584,15 +668,24 @@ struct DiffPaneView: View {
     private static let highlighter = Highlight()
 
     var body: some View {
-        DiffTextView(attributedText: displayed, palette: palette)
+        DiffTextView(attributedText: displayed, palette: palette, focusedRange: focusedRange)
             .task(id: RenderKey(filePath: filePath, diffText: diffText, palette: palette)) {
                 await render()
             }
     }
 
+    private var focusedRange: NSRange? {
+        guard renderedDiffText == diffText, let focusedBlock,
+              focusedBlock.lastRow < rowRanges.count else { return nil }
+        let first = rowRanges[focusedBlock.firstRow]
+        return NSRange(location: first.location, length: NSMaxRange(rowRanges[focusedBlock.lastRow]) - first.location)
+    }
+
     private func render() async {
         let rows = UnifiedDiffRenderer.parse(diffText)
         let (plain, rowRanges) = UnifiedDiffRenderer.renderRows(rows, palette: palette)
+        self.rowRanges = rowRanges
+        renderedDiffText = diffText
         displayed = plain
         guard rows.count <= DiffSyntaxHighlighter.maxHighlightableRowCount else { return }
 
