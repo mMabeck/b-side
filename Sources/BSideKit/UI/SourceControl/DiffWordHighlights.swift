@@ -7,6 +7,8 @@ enum DiffWordHighlights {
     }
 
     private static let maxTokensPerLine = 400
+    /// Total old×new token comparisons per diff; bounds the worst case to a handful of maximal pairs.
+    static let comparisonBudget = 2_000_000
     private static let minCommonRatio = 0.3
     private static let maxRunSizeRatio = 3
 
@@ -34,10 +36,13 @@ enum DiffWordHighlights {
     }
 
     /// `nil` when the lines are too dissimilar to be worth word-level emphasis.
-    static func highlights(old: String, new: String) -> Highlights? {
+    static func highlights(old: String, new: String, budget: inout Int) -> Highlights? {
         let oldTokens = tokens(in: old)
         let newTokens = tokens(in: new)
         guard oldTokens.count <= maxTokensPerLine, newTokens.count <= maxTokensPerLine else { return nil }
+        let cost = oldTokens.count * newTokens.count
+        guard cost <= budget else { return nil }
+        budget -= cost
 
         let oldTexts = oldTokens.map(\.text)
         let newTexts = newTokens.map(\.text)

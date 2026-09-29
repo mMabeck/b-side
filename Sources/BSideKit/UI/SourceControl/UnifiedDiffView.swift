@@ -10,7 +10,7 @@ enum UnifiedDiffRenderer {
         case separator
     }
 
-    struct Row {
+    struct Row: Equatable {
         let kind: RowKind
         let oldLineNumber: Int?
         let newLineNumber: Int?
@@ -143,8 +143,12 @@ enum UnifiedDiffRenderer {
             rowRanges.append(NSRange(location: startLocation, length: result.length - startLocation))
         }
 
-        for pair in DiffWordHighlights.pairs(in: rows) {
-            guard let highlights = DiffWordHighlights.highlights(old: rows[pair.removed].text, new: rows[pair.added].text) else { continue }
+        var wordBudget = DiffWordHighlights.comparisonBudget
+        let pairs = rows.count <= DiffSyntaxHighlighter.maxHighlightableRowCount ? DiffWordHighlights.pairs(in: rows) : []
+        for pair in pairs {
+            guard let highlights = DiffWordHighlights.highlights(
+                old: rows[pair.removed].text, new: rows[pair.added].text, budget: &wordBudget
+            ) else { continue }
             for (ranges, rowIndex, color) in [(highlights.old, pair.removed, removedWord), (highlights.new, pair.added, addedWord)] {
                 let rowRange = rowRanges[rowIndex]
                 for range in ranges where NSMaxRange(range) <= rowRange.length {
@@ -651,6 +655,7 @@ struct DiffTextView: NSViewRepresentable {
 
 struct DiffPaneView: View {
     let diffText: String
+    let rows: [UnifiedDiffRenderer.Row]
     let filePath: String
     let palette: BSidePalette
     var focusedBlock: DiffChangeBlock?
@@ -682,7 +687,6 @@ struct DiffPaneView: View {
     }
 
     private func render() async {
-        let rows = UnifiedDiffRenderer.parse(diffText)
         let (plain, rowRanges) = UnifiedDiffRenderer.renderRows(rows, palette: palette)
         self.rowRanges = rowRanges
         renderedDiffText = diffText

@@ -20,7 +20,7 @@ struct ChangesOverlaySheet: View {
     private static let treeWidthRange: ClosedRange<CGFloat> = 200...360
 
     private var selectionBinding: Binding<String?> {
-        Binding(get: { store.selectedPath }, set: { store.select($0) })
+        Binding(get: { store.focusedRowID }, set: { store.focusRow($0) })
     }
 
     var body: some View {
@@ -194,8 +194,12 @@ struct ChangesOverlaySheet: View {
                 .listStyle(.plain)
                 .environment(\.defaultMinListRowHeight, ChangesRowStyle.rowHeight)
                 .scrollContentBackground(.hidden)
-                .onChange(of: store.selectedPath) { _, path in
-                    if let path { proxy.scrollTo(path) }
+                .onKeyPress(.leftArrow) { handleTreeKey { store.collapseFocusedOrMoveToParent() } }
+                .onKeyPress(.rightArrow) { handleTreeKey { store.expandFocusedOrMoveToFirstChild() } }
+                .onKeyPress(.space) { handleTreeKey(foldersOnly: true) { store.toggleFocusedFolder() } }
+                .onKeyPress(.return) { handleTreeKey(foldersOnly: true) { store.toggleFocusedFolder() } }
+                .onChange(of: store.focusedRowID) { _, id in
+                    if let id { proxy.scrollTo(id) }
                 }
             }
         }
@@ -213,8 +217,20 @@ struct ChangesOverlaySheet: View {
                 folder: folder,
                 isExpanded: !store.collapsedFolderIDs.contains(folder.id),
                 palette: theme.palette
-            ) { store.toggleFolder(folder.id) }
+            ) {
+                store.focusRow(folder.id)
+                store.toggleFolder(folder.id)
+            }
+            .tag(folder.id)
         }
+    }
+
+    private func handleTreeKey(foldersOnly: Bool = false, _ action: () -> Void) -> KeyPress.Result {
+        guard let id = store.focusedRowID else { return .ignored }
+        let isFile = store.files.contains { $0.path == id }
+        if isFile && foldersOnly { return .ignored }
+        action()
+        return .handled
     }
 
     private var treeHeader: some View {
@@ -386,7 +402,7 @@ struct ChangesOverlaySheet: View {
                         SheetTruncationBanner(palette: theme.palette)
                     }
                     DiffPaneView(
-                        diffText: diffText.text, filePath: selectedPath, palette: theme.palette,
+                        diffText: diffText.text, rows: store.diffRows, filePath: selectedPath, palette: theme.palette,
                         focusedBlock: store.currentChangeBlock
                     )
                 }

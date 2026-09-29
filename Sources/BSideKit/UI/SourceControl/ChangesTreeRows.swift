@@ -39,7 +39,7 @@ struct ChangesFolderRow: View {
         .accessibilityLabel("\(folder.displayName), folder")
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: isExpanded ? "Collapse" : "Expand", toggle)
+        .accessibilityAction(.default, toggle)
     }
 }
 
