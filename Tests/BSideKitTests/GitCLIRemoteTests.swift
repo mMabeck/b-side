@@ -5,8 +5,6 @@ import Testing
 
 @Suite("GitCLI+Remote")
 struct GitCLIRemoteTests {
-    /// Adds a local bare repo as `origin` and pushes `main` so the working repo
-    /// starts with an upstream already configured.
     private static func addOriginAndPush(root: URL, repoURL: URL) async throws {
         let remoteURL = root.appendingPathComponent("origin.git")
         _ = try await GitCLI.run(["init", "--bare", remoteURL.path], in: root)
@@ -135,10 +133,7 @@ struct GitCLIRemoteTests {
         #expect(diff.text.contains("patched.txt"))
     }
 
-    // A push to a local bare repo finishes near-instantly, so cancelling it
-    // races the process rather than reliably landing mid-flight. This only
-    // checks that cancelling doesn't hang or crash `runStreaming`'s
-    // cancellation handling, not that the push is guaranteed to fail.
+    // A local push finishes near-instantly, so this only checks that cancelling doesn't hang or crash.
     @Test("cancelling a push does not hang")
     func cancellingPushDoesNotHang() async throws {
         let root = try TestRepo.makeTempDirectory()

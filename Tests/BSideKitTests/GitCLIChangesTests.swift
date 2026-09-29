@@ -3,8 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Thread-safe accumulator for lines delivered by a `@Sendable` streaming
-/// callback from a test's perspective, matching `DataAccumulator` in `GitCLI.swift`.
 private final class LineCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
@@ -36,7 +34,6 @@ private final class LineCollector: @unchecked Sendable {
         _ = try await GitCLI.run(["add", "orig-name.txt"], in: repoURL)
         _ = try await GitCLI.run(["commit", "-m", "add orig-name"], in: repoURL)
 
-        // Everything below is uncommitted, staged in whatever order it's applied.
         try FileManager.default.removeItem(at: repoURL.appendingPathComponent("to-delete.txt"))
         _ = try await GitCLI.run(["mv", "orig-name.txt", "new-name.txt"], in: repoURL)
 
@@ -159,11 +156,7 @@ private final class LineCollector: @unchecked Sendable {
         #expect(!changes.contains { $0.path == "README.md" && $0.area == .unstaged })
     }
 
-    // A staged-new file has no `HEAD` entry. `restore --source=HEAD` on such a
-    // path deletes it outright rather than reverting it; regression for the
-    // bug this guards against, at the level `discardTracked` itself can be
-    // tested (`SourceControlStoreTests` covers the store-level fallback that
-    // avoids ever calling it this way).
+    // `restore --source=HEAD` on a staged-new file (no HEAD entry) deletes it outright.
     @Test func discardTrackedDeletesAPathWithNoHeadEntry() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
@@ -179,9 +172,7 @@ private final class LineCollector: @unchecked Sendable {
         #expect(!changes.contains { $0.path == "new.txt" })
     }
 
-    // Discarding only a rename's new name via `restore --source=HEAD` (or
-    // `restore --staged`) leaves the old name's deletion staged (`D old`);
-    // both the new and the old path must be passed together.
+    // Restoring only a rename's new name leaves `D old` staged; both paths must be passed.
     @Test func discardTrackedOnBothRenamePathsFullyRevertsTheRename() async throws {
         let root = try TestRepo.makeTempDirectory()
         defer { TestRepo.removeTempDirectory(root) }
@@ -269,8 +260,7 @@ private final class LineCollector: @unchecked Sendable {
         let binary = Data("diff --git a/x b/x\nBinary files a/x and b/x differ\n".utf8)
         #expect(GitCLI.makeDiffText(from: binary).isBinary)
 
-        // A marker past the cap is never scanned, and a multi-byte character
-        // split by the cap doesn't stop detection within it.
+        // A marker past the cap is never scanned; a multi-byte char split by the cap doesn't stop detection.
         let filler = String(repeating: "+æ\n", count: GitCLI.diffSizeLimit)
         let huge = GitCLI.makeDiffText(from: Data((filler + "Binary files a/y and b/y differ\n").utf8))
         #expect(!huge.isBinary)
@@ -345,8 +335,7 @@ private final class LineCollector: @unchecked Sendable {
         defer { TestRepo.removeTempDirectory(root) }
         let repoURL = try await TestRepo.makeRepo(in: root)
 
-        // The literal phrase appears inside tracked *text* content, not as
-        // git's own binary-file marker line — must not be misread as binary.
+        // The phrase appears in tracked text, not as git's binary marker; must not read as binary.
         try "Binary files can differ from text files.\nsecond line\n".write(
             to: repoURL.appendingPathComponent("README.md"), atomically: true, encoding: .utf8
         )

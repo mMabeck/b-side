@@ -3,9 +3,6 @@ import Foundation
 import Testing
 @testable import BSideKit
 
-/// Pure tests for ``ThemeOverride`` and its wiring into
-/// `GhosttyBridge.resolveUserConfig`: no terminal surface, no libghostty
-/// runtime, no real `UserDefaults` reads for the pure-function cases.
 @MainActor
 struct ThemeOverrideTests {
     @Test("directive(mode:) defers to the config in useConfig mode, and in single mode is fixed unless the name is empty", arguments: [

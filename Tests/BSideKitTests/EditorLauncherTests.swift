@@ -4,8 +4,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Editor resolution order/fallback (via the injected resolver) and target-
-/// folder logic — pure, no real app lookup or launch.
 @MainActor
 @Suite("EditorLauncher resolution")
 struct EditorLauncherTests {
@@ -30,9 +28,6 @@ struct EditorLauncherTests {
     }
 }
 
-/// Which folder "Open in VS Code" opens, given the current `MainSelection` —
-/// pure, no store or database needed. Mirrors
-/// `ProjectCommandsDefaultTargetTests`'s pattern.
 @Suite("EditorCommands target folder")
 struct EditorCommandsTargetFolderTests {
     private static let project = Project(id: 1, path: "/tmp/project-a", displayName: "a")
@@ -60,8 +55,6 @@ struct EditorCommandsTargetFolderTests {
     }
 }
 
-/// The "Open in VS Code" key equivalent, as plain data — same rationale as
-/// `WindowLayoutTests`.
 @Suite("Editor shortcut")
 struct EditorShortcutTests {
     @Test("doesn't collide with the other app shortcuts")

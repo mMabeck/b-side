@@ -3,10 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `ProjectsStore`'s selection model against a real in-memory
-/// database, per the pattern the sidebar snapshot tests use: `start()` and
-/// wait for `ValueObservation` to populate `projects`/`tasksByProject`
-/// before asserting.
 
 @MainActor
 @Suite("ProjectsStore selection")
@@ -49,7 +45,6 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedProjectID == projectA.id)
     }
 
-    // MARK: - Selection reconciliation (pure)
 
     @Test(
         "reconcileSelection handles live/stale/vanished tasks and projects",
@@ -102,7 +97,6 @@ struct ProjectsStoreSelectionTests {
         #expect(store.selectedProjectID == projectA.id)
     }
 
-    // MARK: - Unread tracking
 
     @Test("Selecting a task clears its unread flag")
     func selectingTaskClearsUnread() async throws {

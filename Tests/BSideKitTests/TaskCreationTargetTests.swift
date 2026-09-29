@@ -3,9 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Which project a bare "new task" action (Cmd+N, File \u203a New Task) should
-/// target, given the current `MainSelection` \u2014 pure, no store or database
-/// needed.
 @Suite("Task-creation target resolution")
 struct TaskCreationTargetTests {
     private static let project = Project(id: 1, path: "/tmp/project", displayName: "project")

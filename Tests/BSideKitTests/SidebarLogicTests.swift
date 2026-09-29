@@ -7,7 +7,6 @@ import Testing
 @MainActor
 @Suite("Sidebar pure logic")
 struct SidebarLogicTests {
-    // MARK: - Collapse-state persistence
 
     @Test("Collapse state round-trips through its RawRepresentable string, empty or not")
     func collapseStateRoundTrips() {
@@ -25,7 +24,6 @@ struct SidebarLogicTests {
         #expect(roundTripped?.collapsedProjectIDs == [1, 42])
     }
 
-    // MARK: - Status derivation priority
 
     @Test("Status derivation prioritises attention, then activity, then open/unread/read, then inactive")
     func statusDerivationPriority() {
@@ -37,7 +35,6 @@ struct SidebarLogicTests {
         #expect(TaskStatus.derive(isBlocked: false, isVanished: false, activeChildCount: 0, isOpen: true, isUnread: false) == .read)
     }
 
-    // MARK: - Per-project task overflow
 
     private func task(_ id: Int64) -> TaskRecord {
         TaskRecord(
@@ -66,7 +63,6 @@ struct SidebarLogicTests {
         #expect(expanded == tasks)
     }
 
-    // MARK: - Selection reconciliation
 
     @Test(
         "reconciledRow leaves a current row untouched when it already represents the store selection, and only re-derives it otherwise",
@@ -87,7 +83,6 @@ struct SidebarLogicTests {
         #expect(result == expected)
     }
 
-    // MARK: - Branch-sync summary formatting
 
     @Test("Branch sync summary formatting")
     func branchSyncSummaryFormatting() {

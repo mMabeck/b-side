@@ -12,10 +12,7 @@ struct LiveStripStateTests {
         return run
     }
 
-    /// Polls `condition` until it's true or `timeout` elapses, instead of a
-    /// fixed `Task.sleep` \u2014 the ticker's own poll interval is 100ms, but a
-    /// heavily loaded test run can stall any single task far longer than
-    /// that, so a fixed wait is inherently flaky here.
+    /// Polls instead of a fixed sleep: a loaded run can stall a task far past the 100ms tick.
     private func waitUntil(timeout: TimeInterval = 5, _ condition: @MainActor () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
@@ -49,8 +46,7 @@ struct LiveStripStateTests {
 
         await waitUntil { !live.isAnyRunActive }
         let countAfterSettling = callCount
-        // Give the loop every chance to tick again if it wrongly kept
-        // going, then confirm it didn't.
+        // Give the loop a chance to tick again if it wrongly kept going.
         try? await Task.sleep(for: .milliseconds(200))
         #expect(callCount == countAfterSettling)
     }

@@ -5,7 +5,6 @@ import Testing
 
 @Suite("Task alert classification and debounce")
 struct TaskAlertTests {
-    // MARK: - Classification
 
     @Test("Title/body keywords classify as question or finished, case-insensitively and regardless of session prefix", arguments: [
         (title: "Pi has a question", body: "Ready?", expected: TaskAlertKind.question),
@@ -20,7 +19,6 @@ struct TaskAlertTests {
         #expect(TaskAlertClassifier.classify(title: title, body: body) == expected)
     }
 
-    // MARK: - Debounce
 
     @Test("A duplicate within the debounce interval is dropped")
     func duplicateWithinIntervalIsDebounced() {

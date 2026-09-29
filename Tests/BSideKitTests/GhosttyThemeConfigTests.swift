@@ -2,10 +2,6 @@ import Foundation
 import Testing
 @testable import BSideKit
 
-/// Pure config-parsing tests: no terminal surface, no libghostty runtime.
-/// Exercises the `theme = ...` extraction/resolution pipeline in
-/// `GhosttyBridge` that keeps a name it cannot resolve from rejecting the
-/// rest of the user's config.
 @MainActor
 struct GhosttyThemeConfigTests {
     @Test("Plain `theme = Name` is extracted and the line removed")
@@ -87,16 +83,14 @@ struct GhosttyThemeConfigTests {
 
         let resolved = GhosttyBridge.resolveUserConfig(override: nil)
         #expect(resolved.themeDefinition == nil)
-        // Generated, not `.none`: the unbinds below must reach the surface
-        // even when the user has no Ghostty config at all.
+        // Generated, not `.none`: unbinds must reach the surface even with no user config.
         #expect(resolved.configSource == .generated(GhosttyBridge.appOwnedKeybinds))
     }
 
     @Test("A config file that exists but can't be read still falls back to the generated unbinds")
     func unreadableConfigFileFallsBackToGenerated() throws {
         guard getuid() != 0 else {
-            // root ignores POSIX permission bits, so chmod-based
-            // unreadability doesn't apply when tests run elevated.
+            // root ignores POSIX permission bits, so chmod-based unreadability doesn't apply.
             return
         }
 
@@ -122,7 +116,6 @@ struct GhosttyThemeConfigTests {
             }
         }
 
-        // The file exists, so this is a read failure, not an absent config.
         #expect(GhosttyBridge.userConfigFilePath != nil)
 
         let resolved = GhosttyBridge.resolveUserConfig(override: nil)
@@ -130,11 +123,7 @@ struct GhosttyThemeConfigTests {
         #expect(resolved.configSource == .generated(GhosttyBridge.appOwnedKeybinds))
     }
 
-    /// `AppTerminalView.performKeyEquivalent` consumes any key Ghostty binds
-    /// before the main menu is offered it, so a shortcut the app's own menu
-    /// owns has to be released from Ghostty's defaults or the menu item
-    /// silently never fires. `cmd+,` (Ghostty's `open_config`) is the one
-    /// that actually broke Settings.
+    /// Ghostty consumes bound keys before the menu, so menu-owned shortcuts must be unbound; `cmd+,` (open_config) broke Settings.
     @Test("Every config path unbinds the key equivalents the app's own menus own")
     func generatedConfigUnbindsAppOwnedKeys() throws {
         let configHome = FileManager.default.temporaryDirectory
@@ -153,9 +142,7 @@ struct GhosttyThemeConfigTests {
             }
         }
 
-        // Both branches that read a real file: one with a `theme` directive
-        // to strip and one without, since they build their config source
-        // separately and either could drop the unbinds.
+        // Both file-reading branches build their config separately; either could drop the unbinds.
         for contents in ["theme = Ayu Mirage\nfont-size = 14\n", "font-size = 14\n"] {
             try contents.write(
                 to: configDir.appendingPathComponent("config"),
@@ -169,7 +156,6 @@ struct GhosttyThemeConfigTests {
                 return
             }
             #expect(generated.contains("keybind = cmd+,=unbind"))
-            // The user's own settings must survive the append.
             #expect(generated.contains("font-size = 14"))
         }
     }
@@ -197,9 +183,7 @@ struct GhosttyThemeConfigTests {
             }
         }
 
-        // A private instance, not `.shared`: other suites (e.g.
-        // `ContentViewThemeSnapshotTests`) read/write the process-global
-        // singleton concurrently, so asserting against it here would race.
+        // Private instance: other suites mutate the process-global singleton concurrently.
         let target = GhosttyResolvedTheme()
         #expect(target.definition == nil)
 

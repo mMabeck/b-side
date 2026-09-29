@@ -80,8 +80,6 @@ struct DiffSyntaxHighlighterTests {
         let highlighted = NSAttributedString(result.attributedText)
         #expect(highlighted.string == "let x = \"a\" // c\nfunc f() {}")
 
-        // Reconstruct the row plumbing `DiffPaneView.render` builds: the blank
-        // line then the indented one, laid out back to back as separate rows.
         let rows = ["", "    let x = \"a\" // c"]
         let rowRanges = [NSRange(location: 0, length: 0), NSRange(location: 0, length: (rows[1] as NSString).length)]
         let rowTextLengths = rows.map { ($0 as NSString).length }
@@ -93,9 +91,7 @@ struct DiffSyntaxHighlighterTests {
             rowTextLengths: rowTextLengths, rowRanges: rowRanges, leadingIndent: trim.indent, in: rendered
         )
 
-        // The "let" keyword should be coloured at its own offset (4) on the
-        // indented row, not shifted onto the blank row or left at the
-        // trimmed output's offset (0).
+        // "let" must be coloured at the indented row's offset (4), not the trimmed offset (0).
         #expect(rendered.attribute(.foregroundColor, at: 4, effectiveRange: nil) != nil)
         #expect(rendered.attribute(.foregroundColor, at: 0, effectiveRange: nil) == nil)
     }

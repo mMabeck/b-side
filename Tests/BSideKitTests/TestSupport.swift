@@ -2,8 +2,7 @@ import Foundation
 
 @testable import BSideKit
 
-/// Polls until `condition` holds or `timeout` elapses, rather than a fixed
-/// sleep, since GRDB observation and window layout can lag under load.
+/// Polls instead of sleeping: GRDB observation and window layout can lag under load.
 @MainActor
 func waitUntil(_ timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async throws {
     let deadline = ContinuousClock.now + timeout
@@ -13,9 +12,6 @@ func waitUntil(_ timeout: Duration = .seconds(5), _ condition: @MainActor () -> 
     }
 }
 
-/// Helpers for building real, throwaway git repositories for the git-layer and
-/// task/worktree tests. Every test that uses these owns cleaning its temp
-/// directory up in a `defer`.
 enum TestRepo {
     static func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
@@ -24,7 +20,6 @@ enum TestRepo {
         return url
     }
 
-    /// Creates a git repo at `<root>/repo` on branch `main` with one commit.
     static func makeRepo(in root: URL, name: String = "repo") async throws -> URL {
         let repoURL = root.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)

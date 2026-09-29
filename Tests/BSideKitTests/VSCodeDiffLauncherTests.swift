@@ -29,8 +29,7 @@ struct VSCodeDiffLauncherTests {
             (try? FileManager.default.contentsOfDirectory(at: tempRoot, includingPropertiesForKeys: nil))?.map(\.lastPathComponent) ?? []
         )
 
-        // "/usr/bin/true" exits immediately without touching the file arguments, so this
-        // exercises real file writing without depending on a `code` install being present.
+        // /usr/bin/true stands in for `code`, exercising real file writing without a VS Code install.
         try launcher.openDiff(fileName: "Example.swift", baseContent: nil, currentContent: Data("hello".utf8), codePath: "/usr/bin/true")
 
         let after = try FileManager.default.contentsOfDirectory(at: tempRoot, includingPropertiesForKeys: nil)

@@ -3,13 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `SidebarFocusGuard.Coordinator` against a real, offscreen
-/// `NSWindow` and a programmatically constructed `NSEvent` — never a real
-/// OS-level synthetic click — checking that a mouse-down inside the marker
-/// view's bounds reasserts terminal focus (via
-/// `ProjectsStore.requestTerminalFocus()`, observed here as a
-/// `focusRequestToken` bump) only when a task is actually selected, and that
-/// a mouse-down outside those bounds, or in another window, is ignored.
 @MainActor
 @Suite("SidebarFocusGuard")
 struct SidebarFocusGuardTests {
@@ -89,9 +82,7 @@ struct SidebarFocusGuardTests {
             backing: .buffered,
             defer: false
         )
-        // The marker only covers the sidebar's own region, not the whole
-        // window \u2014 same as `.background(SidebarFocusGuard(...))` sizing it
-        // to the sidebar's `VStack`, not the whole content view.
+        // The marker covers only the sidebar's region, not the whole window.
         let marker = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 400))
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
         container.addSubview(marker)

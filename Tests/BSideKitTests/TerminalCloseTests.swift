@@ -4,14 +4,9 @@ import Testing
 
 @testable import BSideKit
 
-/// `Cmd+W` closes a task's terminal: `ProjectsStore.closeTerminal` drops it
-/// from `openTerminalTaskIDs` and picks the next sensible selection, the
-/// `TerminalCloseShortcut` key equivalent stays what `TerminalCommands`
-/// binds, and Ghostty's own keybinds no longer swallow it or Cmd+Q first.
 @MainActor
 @Suite("Terminal close (Cmd+W) and quit (Cmd+Q)")
 struct TerminalCloseTests {
-    // MARK: - ProjectsStore.nextActiveTaskID (pure)
 
     @Test("nextActiveTaskID picks the task that took the closed slot, falls back to the new last entry, or nil", arguments: [
         (closing: Int64(20), open: [10, 20, 30], expected: Int64(30)),
@@ -24,7 +19,6 @@ struct TerminalCloseTests {
         #expect(ProjectsStore.nextActiveTaskID(afterClosing: closing, in: openIDs) == expected)
     }
 
-    // MARK: - ProjectsStore.closeTerminal (integration, real store)
 
     private func makeStore() async throws -> (store: ProjectsStore, project: Project, taskA: TaskRecord, taskB: TaskRecord) {
         let database = try AppDatabase.openInMemory()
@@ -68,7 +62,6 @@ struct TerminalCloseTests {
         #expect(store.closedTerminalTaskID == taskA.id)
     }
 
-    // MARK: - GhosttyBridge.appOwnedKeybinds
 
     @Test("Cmd+Q, Cmd+W, and other standard app shortcuts Ghostty could swallow are unbound so AppKit's menu handles them")
     func standardShortcutsAreUnboundFromGhostty() {

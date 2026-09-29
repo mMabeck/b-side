@@ -6,7 +6,6 @@ import Testing
 
 @Suite("Task alert sounds and settings")
 struct TaskAlertSoundTests {
-    // MARK: - Defaults
 
     @Test("Resolving a sound falls back to the kind's default when nothing/unknown is stored, and uses a valid stored name", arguments: [
         (kind: TaskAlertKind.finished, stored: nil, expected: TaskAlertSound.glass),
@@ -18,7 +17,6 @@ struct TaskAlertSoundTests {
         #expect(TaskAlertSoundPlayer.resolvedSound(for: kind, storedName: stored) == expected)
     }
 
-    // MARK: - Loudness
 
     @Test("normalising scales the peak to the target and leaves silence alone")
     func normalisationHitsTargetPeak() {

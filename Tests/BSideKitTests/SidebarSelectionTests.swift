@@ -4,10 +4,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Regression for List-selection bugs: opening a terminal for the selected task must not
-/// silently move the highlight from the project row to the newly inserted Active row in the
-/// same table update, and the List clearing its selection to `nil` must not leave every row
-/// unhighlighted.
 @MainActor
 @Suite("Sidebar selection stability")
 struct SidebarSelectionTests {
@@ -55,8 +51,7 @@ struct SidebarSelectionTests {
             window.contentView = nil
         }
 
-        // `List` renders a header row per `Section`, which occupies a real NSTableView row
-        // index; `nil` marks those so selection lookups only ever match a real content row.
+        // `List` header rows occupy real table rows; nil marks them so lookups match only content rows.
         func layout() -> [SidebarView.SidebarRowID?] {
             var rows: [SidebarView.SidebarRowID?] = []
             if !store.openTerminalTaskIDs.isEmpty {
@@ -103,15 +98,11 @@ struct SidebarSelectionTests {
             table.selectRowIndexes([index], byExtendingSelection: false)
         }
 
-        // (a) selecting a task with no open terminal, then opening one, must not move the
-        // highlight off the row under the project.
         store.selectTask(alpha, project: project)
         try await expectSelection(.task(alpha.id!))
         store.noteTerminalOpened(taskID: alpha.id!)
         try await expectSelection(.task(alpha.id!))
 
-        // (b) clicking a task row under its project while it already has an Active row keeps
-        // the highlight under the project, including across activity reorders.
         store.noteTerminalOpened(taskID: beta.id!)
         try await settle()
         try click(.task(beta.id!))
@@ -121,7 +112,6 @@ struct SidebarSelectionTests {
         store.bumpTaskActivity(beta.id!)
         try await expectSelection(.task(beta.id!))
 
-        // (c) clicking the Active row keeps the highlight there across bumps.
         try click(.activeTask(beta.id!))
         try await expectSelection(.activeTask(beta.id!))
         store.bumpTaskActivity(alpha.id!)
@@ -129,13 +119,9 @@ struct SidebarSelectionTests {
         store.bumpTaskActivity(beta.id!)
         try await expectSelection(.activeTask(beta.id!))
 
-        // (d) a programmatic select (⌘-digit style) of an already-open task highlights the
-        // Active row directly.
         store.selectTask(alpha, project: project)
         try await expectSelection(.activeTask(alpha.id!))
 
-        // (e) the List clearing its selection (empty-space click, ⌘-click the selected row)
-        // must restore the highlight rather than leave the table unselected.
         table.deselectAll(nil)
         try await expectSelection(.activeTask(alpha.id!))
     }
