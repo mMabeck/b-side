@@ -5,6 +5,7 @@ public enum TitleGenerationMode: String, CaseIterable, Identifiable, Sendable {
     case claude
     case codex
     case localModel
+    case openAICompatible
 
     public var id: String { rawValue }
 
@@ -14,6 +15,7 @@ public enum TitleGenerationMode: String, CaseIterable, Identifiable, Sendable {
         case .claude: "Claude CLI"
         case .codex: "Codex CLI"
         case .localModel: "Local Model"
+        case .openAICompatible: "OpenAI-Compatible API"
         }
     }
 }
@@ -41,6 +43,8 @@ public struct TitleGenerationSettings: Equatable, Sendable {
         public static let huggingFaceRepo = "settings.titleGeneration.huggingFaceRepo"
         public static let huggingFaceQuant = "settings.titleGeneration.huggingFaceQuant"
         public static let modelFilePath = "settings.titleModel.path"
+        public static let openAIBaseURL = "settings.titleGeneration.openAIBaseURL"
+        public static let openAIModel = "settings.titleGeneration.openAIModel"
         public static let promptTemplate = "settings.titleGeneration.promptTemplate"
     }
 
@@ -54,6 +58,7 @@ public struct TitleGenerationSettings: Equatable, Sendable {
         Question: {prompt}
         """
 
+    public static let defaultOpenAIBaseURL = "http://localhost:11434/v1"
     public static let defaultClaudeModel = "haiku"
     public static let defaultHuggingFaceRepo = "Mabeck/qwen3.5-0.8b-kth8-titles"
     public static let defaultHuggingFaceQuant = "Q8_0"
@@ -67,6 +72,10 @@ public struct TitleGenerationSettings: Equatable, Sendable {
     public var huggingFaceRepo = defaultHuggingFaceRepo
     public var huggingFaceQuant = defaultHuggingFaceQuant
     public var modelFilePath = defaultModelFilePath
+    public var openAIBaseURL = defaultOpenAIBaseURL
+    public var openAIModel = ""
+    /// Read from the Keychain, and only when `mode` is `.openAICompatible`.
+    public var openAIKey = ""
     public var promptTemplate = defaultPromptTemplate
 
     public init() {}
@@ -83,6 +92,9 @@ public struct TitleGenerationSettings: Equatable, Sendable {
         if let value = string(Keys.huggingFaceRepo) { settings.huggingFaceRepo = value }
         if let value = string(Keys.huggingFaceQuant) { settings.huggingFaceQuant = value }
         if let value = string(Keys.modelFilePath) { settings.modelFilePath = value }
+        if let value = string(Keys.openAIBaseURL) { settings.openAIBaseURL = value }
+        if let value = string(Keys.openAIModel) { settings.openAIModel = value }
+        if settings.mode == .openAICompatible { settings.openAIKey = TitleAPIKeychain.read() ?? "" }
         if let value = string(Keys.promptTemplate) { settings.promptTemplate = value }
         return settings
     }

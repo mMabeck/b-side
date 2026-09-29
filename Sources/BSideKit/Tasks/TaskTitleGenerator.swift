@@ -66,6 +66,8 @@ public enum TaskTitleGenerator {
                 gracePeriod: terminationGracePeriod,
                 onLaunch: onLaunch
             )
+        case .openAICompatible:
+            return await requestTitle(settings: settings, prompt: prompt)
         case .claude, .codex:
             let binaryName = settings.mode == .claude ? "claude" : "codex"
             guard let binaryPath = resolveBinary(named: binaryName) else {
@@ -152,7 +154,7 @@ public enum TaskTitleGenerator {
             ]
             if !settings.codexModel.isEmpty { arguments += ["--model", settings.codexModel] }
             return arguments + [instruction]
-        case .firstWords, .localModel:
+        case .firstWords, .localModel, .openAICompatible:
             return []
         }
     }
@@ -195,6 +197,79 @@ public enum TaskTitleGenerator {
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     }
 
+    // MARK: - OpenAI-compatible endpoint
+
+    /// Accepts the `/v1` base, with or without a trailing slash, or a pasted
+    /// full `.../chat/completions` URL.
+    static func chatCompletionsURL(baseURL: String) -> URL? {
+        var text = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix("/") { text.removeLast() }
+        if !text.hasSuffix("/chat/completions") { text += "/chat/completions" }
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+            scheme == "http" || scheme == "https", url.host != nil
+        else { return nil }
+        return url
+    }
+
+    static func chatRequest(settings: TitleGenerationSettings, prompt: String) -> Result<URLRequest, TitleGenerationFailure> {
+        guard let url = chatCompletionsURL(baseURL: settings.openAIBaseURL) else {
+            return .failure(.invalidURL(settings.openAIBaseURL))
+        }
+        let model = settings.openAIModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else { return .failure(.disabled) }
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [["role": "user", "content": instruction(template: settings.promptTemplate, prompt: prompt)]],
+            "temperature": 0,
+            "max_tokens": 32,
+            "stream": false,
+        ]
+        var request = URLRequest(url: url, timeoutInterval: cliTimeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let key = settings.openAIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        return .success(request)
+    }
+
+    /// Extracts `choices[0].message.content`, drops `<think>` blocks, and
+    /// cleans the rest like the other backends' output.
+    static func parseChatResponse(_ data: Data) -> Result<String, TitleGenerationFailure> {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let choice = (root["choices"] as? [[String: Any]])?.first,
+            let content = (choice["message"] as? [String: Any])?["content"] as? String
+        else { return .failure(.unparseableResponse) }
+        let visible = content.replacingOccurrences(of: "<think>[\\s\\S]*?</think>", with: "", options: .regularExpression)
+        guard let title = cleanTitle(fromRawOutput: visible) else { return .failure(.rejectedOutput(raw: content)) }
+        return .success(title)
+    }
+
+    private static func requestTitle(settings: TitleGenerationSettings, prompt: String) async -> Result<String, TitleGenerationFailure> {
+        let request: URLRequest
+        switch chatRequest(settings: settings, prompt: prompt) {
+        case .success(let built): request = built
+        case .failure(let failure): return .failure(failure)
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let snippet = String(decoding: data.prefix(200), as: UTF8.self)
+                return .failure(.httpStatus(http.statusCode, body: snippet))
+            }
+            return parseChatResponse(data)
+        } catch is CancellationError {
+            return .failure(.cancelled)
+        } catch let error as URLError where error.code == .cancelled {
+            return .failure(.cancelled)
+        } catch let error as URLError where error.code == .timedOut {
+            return .failure(.timedOut)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
     // MARK: - Failure logging
 
     /// Missing binaries/models are expected on machines without them
@@ -209,7 +284,8 @@ public enum TaskTitleGenerator {
             )
         case .rejectedOutput(let raw):
             logger.error("title generator output failed validation: \(raw, privacy: .private)")
-        case .launchFailed, .timedOut, .signaled, .undecodableOutput:
+        case .launchFailed, .timedOut, .signaled, .undecodableOutput, .invalidURL, .httpStatus,
+            .unparseableResponse, .network:
             logger.error("title generation failed: \(failure.description, privacy: .public)")
         }
     }
@@ -293,6 +369,10 @@ public enum TitleGenerationFailure: Error, Sendable, CustomStringConvertible {
     case signaled(signal: Int32)
     case undecodableOutput
     case rejectedOutput(raw: String)
+    case invalidURL(String)
+    case httpStatus(Int, body: String)
+    case unparseableResponse
+    case network(String)
 
     public var description: String {
         switch self {
@@ -307,6 +387,10 @@ public enum TitleGenerationFailure: Error, Sendable, CustomStringConvertible {
         case .signaled(let signal): "Killed by signal \(signal)."
         case .undecodableOutput: "Output was not valid UTF-8."
         case .rejectedOutput(let raw): "Output didn't look like a title: \(raw.prefix(120))"
+        case .invalidURL(let url): "Not a valid endpoint URL: \(url)"
+        case .httpStatus(let status, let body): "HTTP \(status). \(body)"
+        case .unparseableResponse: "The response had no choices[0].message.content."
+        case .network(let reason): "Network error: \(reason)"
         }
     }
 }
