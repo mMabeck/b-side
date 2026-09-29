@@ -29,6 +29,26 @@ reopening the app resumes the same Pi session instead of starting over.
 
 ![A task with two subagents running](docs/screenshots/subagents.png)
 
+## Task titles
+
+B-Side renames a task from its first Pi prompt. Pick how in Settings → Titles:
+
+- **First words of the prompt.** A heuristic; nothing leaves the Mac.
+- **Local Model** (default). Runs a GGUF model with llama.cpp's
+  `llama-completion` (`brew install llama.cpp`). The default is the
+  Hugging Face repo `Mabeck/qwen3.5-0.8b-kth8-titles`, downloaded from the tab.
+- **Claude CLI.** One-shot `claude -p` with no tools and no saved session.
+- **Codex CLI.** One-shot `codex exec` in a read-only sandbox.
+- **OpenAI-Compatible API.** Any `/chat/completions` endpoint: Ollama, LM
+  Studio, llama-server, vLLM, OpenRouter, OpenAI. For Ollama, set the base URL
+  to `http://localhost:11434/v1` and the model to e.g. `qwen3:4b`. An optional
+  API key is kept in the Keychain.
+
+The prompt template is editable; `{prompt}` is replaced by the first prompt.
+If a backend fails or returns something that isn't a title, B-Side falls back
+to the first-words heuristic. The tab has a Test button that shows the exact
+input sent and the time taken.
+
 ## Requirements
 
 macOS 26 on Apple Silicon only — the libghostty XCFramework is arm64.
