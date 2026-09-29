@@ -62,11 +62,7 @@ struct PiSessionServiceTests {
             taskName: "Fix the thing"
         )
 
-        // Same session id underlies both commands...
         #expect(firstCommand.contains(sessionID))
-        // ...but the second, once the transcript is known, targets that exact
-        // file rather than re-deriving the session id, and is a different
-        // command shape from the first launch.
         #expect(secondCommand == "'/usr/local/bin/pi' --session '\(transcriptPath)' --name 'Fix the thing'")
         #expect(secondCommand != firstCommand)
     }
@@ -293,7 +289,6 @@ struct PiSessionServiceTests {
         #expect(rewrittenHeader["version"] as? Int == 3)
         #expect(rewrittenHeader["timestamp"] as? String == "2026-09-22T18:47:13.521Z")
 
-        // Every line after the header survives the rewrite byte-for-byte.
         #expect(Array(rewrittenLines.dropFirst()) == bodyLines + [""])
     }
 }
@@ -437,10 +432,7 @@ struct PiSessionServiceResolveTranscriptForResumeTests {
         let realTranscriptURL = sessionsRoot.appendingPathComponent("--slug--/20260101_000000_aaa.jsonl")
         try writeTranscript(id: sessionID, cwd: cwd, at: realTranscriptURL)
 
-        // The stored path is stale: it names a file that no longer exists
-        // (e.g. a repair relocated the transcript but crashed before
-        // persisting the new path), while a transcript for this session id
-        // genuinely exists elsewhere under the sessions root.
+        // Stale stored path: the transcript was relocated but the new path never persisted.
         let staleStoredPath = sessionsRoot.appendingPathComponent("--gone--/20260101_000000_aaa.jsonl").path
         let locations = makeLocations(sessionsRoot: sessionsRoot)
         let conversation = Conversation(taskId: 1, sessionId: sessionID, transcriptPath: staleStoredPath)
@@ -538,9 +530,6 @@ struct PiSessionServiceConversationBindingTests {
         let first = try await store.startConversation(for: task, sessionID: sessionID)
         try await store.recordTranscriptPath("/tmp/sessions/proj/session.jsonl", for: first)
 
-        // Simulate the app restarting / the task being reopened: the second
-        // "launch" looks up the active conversation rather than starting a
-        // fresh one.
         let reused = await store.activeConversation(forTaskId: task.id!)
         #expect(reused?.id == first.id)
         #expect(reused?.sessionId == sessionID)
@@ -566,12 +555,7 @@ struct PiSessionServiceConversationBindingTests {
         let (store, task, database) = try await makeStore()
         let gate = ConversationLaunchGate()
 
-        // Both calls start from the same "no conversation yet" state and
-        // race through the real reuse path (`ConversationLaunchGate` wraps
-        // `ProjectsStore.activeConversation`/`startConversation` exactly as
-        // `MainAreaView.ensureHost` does); only the gate's claim should let
-        // one of them actually resolve a conversation, mirroring how only
-        // one of two racing `ensureHost` calls should ever assign a host.
+        // Both calls race the real reuse path; only the gate's claim may resolve a conversation.
         async let first = gate.ensureConversation(for: task, store: store)
         async let second = gate.ensureConversation(for: task, store: store)
         let results = await [first, second]

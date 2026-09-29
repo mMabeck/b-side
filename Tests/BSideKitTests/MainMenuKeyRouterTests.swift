@@ -3,14 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `MainMenuKeyRouter.route(_:)` against a real `NSMenu` set as
-/// `NSApplication.shared.mainMenu` — no synthetic desktop keystrokes, just the same
-/// `NSMenu.performKeyEquivalent(with:)` call the router itself makes. Covers
-/// the guarantee `BSideApp` relies on: a key equivalent one of the app's
-/// real `Commands` claims fires even when asked directly, independent of
-/// whatever a focused Ghostty terminal surface would have done with the
-/// same event, and a key nothing claims (or one with no modifier at all)
-/// is left alone for the terminal to handle as before.
 @MainActor
 @Suite("MainMenuKeyRouter")
 struct MainMenuKeyRouterTests {
@@ -48,7 +40,6 @@ struct MainMenuKeyRouterTests {
         let target = ActionRecorder()
         NSApplication.shared.mainMenu = Self.menu(keyEquivalent: "1", modifiers: [.command], target: target)
 
-        // Same modifier, different character: nothing in the menu claims "2".
         let event = try Self.keyEvent(characters: "2", modifiers: [.command])
         #expect(!MainMenuKeyRouter.route(event))
         #expect(!target.fired)
@@ -59,9 +50,7 @@ struct MainMenuKeyRouterTests {
         let previousMenu = NSApplication.shared.mainMenu
         defer { NSApplication.shared.mainMenu = previousMenu }
 
-        // A menu item with no key equivalent modifiers at all would still
-        // theoretically match plain "c", so this proves the router's own
-        // modifier gate — not an empty menu — is what declines it.
+        // With no modifiers a menu item could match plain "c", so this proves the router's own modifier gate declines it.
         let target = ActionRecorder()
         let item = NSMenuItem(title: "Bogus", action: #selector(ActionRecorder.act), keyEquivalent: "c")
         item.keyEquivalentModifierMask = []

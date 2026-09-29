@@ -1,9 +1,7 @@
 import Foundation
 import Observation
 
-/// Drives the "Changes" overlay: a file tree plus the selected file's diff,
-/// over one of three views (see `Mode`). Separate from `SourceControlStore`
-/// since the overlay opens rarely and its modes are pointless work on every sidebar refresh.
+/// Separate from `SourceControlStore`: the overlay opens rarely and its modes are wasted work on every sidebar refresh.
 @MainActor
 @Observable
 public final class ChangesOverlayStore {
@@ -39,9 +37,7 @@ public final class ChangesOverlayStore {
     public private(set) var diffErrorMessage: String?
     public private(set) var branchName: String?
     /// The task's baseline for `.all`/`.committed`, `"HEAD"` for `.uncommitted`.
-    /// `nil` only when a baseline couldn't be resolved.
     public private(set) var baseRefLabel: String?
-    /// Diffs with the whole file as context instead of only the changed hunks.
     public private(set) var showsFullFile = false
 
     public var totalAdded: Int { files.reduce(0) { $0 + ($1.linesAdded ?? 0) } }
@@ -55,7 +51,6 @@ public final class ChangesOverlayStore {
 
     public init() {}
 
-    /// Resets to `.all` with no selection, and starts a watcher so it live-refreshes while open.
     public func present(task: TaskRecord) {
         self.task = task
         mode = .all
@@ -96,7 +91,6 @@ public final class ChangesOverlayStore {
         Task { await loadDiff() }
     }
 
-    /// No-op if already selected, or if `path` is a folder row's id (folders have no diff of their own).
     public func select(_ path: String?) {
         guard path != selectedPath else { return }
         if let path, !files.contains(where: { $0.path == path }) { return }
@@ -156,8 +150,7 @@ public final class ChangesOverlayStore {
         tree = ChangesTreeBuilder.build(files)
         loadState = .loaded
 
-        // Keep the current selection if still present, else fall back to the
-        // first file. Either way reload the diff: a preserved selection's content may have changed.
+        // Keep the selection if still present, else the first file; reload the diff either way since content may have changed.
         if selectedPath == nil || !files.contains(where: { $0.path == selectedPath }) {
             selectedPath = files.first?.path
         }
@@ -204,8 +197,7 @@ public final class ChangesOverlayStore {
                     )
                 }
             }
-            // A newer `loadDiff()` may have finished while this one awaited its
-            // diff; the generation counter catches even a reselection of the same path.
+            // A newer `loadDiff()` may have finished meanwhile; the generation counter catches even a reselection of the same path.
             guard generation == diffLoadGeneration else { return }
             diffText = diff
             diffErrorMessage = nil

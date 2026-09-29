@@ -1,10 +1,5 @@
 import Foundation
 
-/// Working-tree/index status and diffs for the Source Control sidebar.
-///
-/// Status and line counts are separate calls (`changedFiles` / `lineCounts`) so the
-/// UI can render file kinds immediately and fill in +/- counts once numstat comes
-/// back, rather than blocking the first paint on a second diff pass.
 extension GitCLI {
     public struct FileChange: Sendable, Equatable, Identifiable {
         public enum Kind: Sendable, Equatable {
@@ -48,8 +43,7 @@ extension GitCLI {
             self.isBinary = isBinary
         }
 
-        // A file with both staged and unstaged changes produces two `FileChange`
-        // values with the same `path`; `area` is what keeps them distinct.
+        // A file with staged and unstaged changes yields two `FileChange`s with the same `path`; `area` keeps them distinct.
         public var id: String {
             "\(area == .staged ? "staged" : "unstaged"):\(path)"
         }
@@ -61,7 +55,6 @@ extension GitCLI {
         public let isBinary: Bool
     }
 
-    /// Independent of staged/unstaged state (see `branchChanges`).
     public struct BranchFileChange: Sendable, Equatable, Identifiable {
         public var path: String
         public var origPath: String?
@@ -73,7 +66,6 @@ extension GitCLI {
         public var id: String { path }
     }
 
-    /// Full diffs beyond `diffSizeLimit` are truncated; binary files never get diff text.
     public struct DiffText: Sendable, Equatable {
         public let text: String
         public let isBinary: Bool
@@ -86,7 +78,6 @@ extension GitCLI {
 
     // MARK: - Status
 
-    /// A file with both staged and unstaged changes appears twice, once per area.
     public static func changedFiles(at path: URL) async throws -> [FileChange] {
         let data = try await run(
             ["status", "--porcelain=v2", "-z", "--untracked-files=all"],
@@ -107,8 +98,7 @@ extension GitCLI {
             case "1":
                 changes.append(contentsOf: parseOrdinaryStatusRecord(token))
             case "2":
-                // The rename/copy record is followed by an extra NUL-separated
-                // origPath token that isn't part of the space-separated fields.
+                // Rename/copy records are followed by an extra NUL-separated origPath token.
                 guard index < tokens.count else { continue }
                 let origPath = tokens[index]
                 index += 1
@@ -156,8 +146,7 @@ extension GitCLI {
         return changes
     }
 
-    // `2 XY sub mH mI mW hH hI X<score> path` — 9 space-separated fields before path;
-    // origPath arrives as a separate NUL token handled by the caller.
+    // `2 XY sub mH mI mW hH hI X<score> path` — origPath arrives as a separate NUL token handled by the caller.
     private static func parseRenamedStatusRecord(_ token: String, origPath: String) -> [FileChange] {
         let fields = token.split(separator: " ", maxSplits: 9, omittingEmptySubsequences: false).map(String.init)
         guard fields.count == 10 else { return [] }
@@ -190,7 +179,6 @@ extension GitCLI {
 
     // MARK: - Line counts
 
-    /// Loaded separately from `changedFiles` so the sidebar can show file kinds before diff stats land.
     public static func lineCounts(at path: URL) async throws -> (staged: [String: LineCount], unstaged: [String: LineCount]) {
         async let stagedData = run(["diff", "--cached", "--numstat", "-z"], in: path)
         async let unstagedData = run(["diff", "--numstat", "-z"], in: path)
@@ -210,11 +198,7 @@ extension GitCLI {
         return counts[filePath] ?? LineCount(added: 0, removed: 0, isBinary: false)
     }
 
-    // `--numstat -z` prints `added\tremoved\tpath\0` per file, except for renames
-    // (and the /dev/null-vs-file untracked comparison, which looks like a rename
-    // from git's point of view): those print `added\tremoved\t\0` with an empty
-    // path field, followed by the old and new paths as their own NUL tokens.
-    // `-\t-` marks a binary file. Renames are keyed on the new path.
+    // `--numstat -z` prints an empty path for renames (and untracked /dev/null comparisons), followed by old and new paths as NUL tokens; `-\t-` marks binary.
     static func parseNumstat(_ data: Data) -> [String: LineCount] {
         let tokens = splitNulDelimited(data)
         var result: [String: LineCount] = [:]
@@ -270,24 +254,18 @@ extension GitCLI {
         }
     }
 
-    /// One atomic `restore` (index + worktree) so neither side lands out of
-    /// sync if interrupted. Every path must already exist in `HEAD` — a
-    /// newly-added or renamed path has no `HEAD` entry, so `restore
-    /// --source=HEAD` would delete it instead of reverting it. Route those
-    /// through `unstage` + Trash instead; see `SourceControlStore.discard`.
+    /// One atomic `restore`. Every path must exist in `HEAD`, or `--source=HEAD` deletes instead of reverting; route new/renamed paths through `unstage` + Trash.
     public static func discardTracked(_ paths: [String], at path: URL) async throws {
         guard !paths.isEmpty else { return }
         _ = try await run(["restore", "--staged", "--worktree", "--source=HEAD", "--"] + paths, in: path)
     }
 
-    /// From the index (`restore`'s default source), leaving staged state untouched.
     public static func discardWorktree(_ paths: [String], at path: URL) async throws {
         guard !paths.isEmpty else { return }
         _ = try await run(["restore", "--worktree", "--"] + paths, in: path)
     }
 
-    /// Anchored with a leading `/`; glob metacharacters, a leading `#`/`!`,
-    /// and trailing spaces are escaped so an arbitrary path can't be misread.
+    /// Escapes glob metacharacters, a leading `#`/`!`, and trailing spaces so an arbitrary path can't be misread.
     public static func addToGitignore(_ filePath: String, at path: URL) throws {
         let gitignoreURL = path.appendingPathComponent(".gitignore")
         let existing = (try? String(contentsOf: gitignoreURL, encoding: .utf8)) ?? ""
@@ -304,8 +282,7 @@ extension GitCLI {
     }
 
     static func gitignorePattern(for filePath: String) -> String {
-        // Trailing spaces are split off first and each re-added escaped, so a
-        // path ending in a backslash and then a space keeps its space.
+        // Trailing spaces are split off and re-added escaped so a path ending in backslash+space keeps its space.
         let body = String(filePath.reversed().drop(while: { $0 == " " }).reversed())
         let trailingSpaces = filePath.count - body.count
         var escaped = ""
@@ -327,8 +304,6 @@ extension GitCLI {
 
     // MARK: - Combined working-tree changes (Changes overlay)
 
-    /// Shared by the Changes overlay's `.all`/`.uncommitted` modes, which fold
-    /// untracked files (never part of `git diff`'s output) into a combined view.
     public static func untrackedPaths(at path: URL) async throws -> [String] {
         let data = try await run(
             ["status", "--porcelain=v2", "-z", "--untracked-files=all"],
@@ -340,7 +315,6 @@ extension GitCLI {
     /// Above this many, per-file `diff --no-index` is too much process spawning for one refresh.
     public static let untrackedLineCountThreshold = 200
 
-    /// Bounded to `maxConcurrent` `diff --no-index` processes at a time.
     public static func lineCounts(forUntracked paths: [String], at path: URL, maxConcurrent: Int = 8) async -> [String: LineCount] {
         guard !paths.isEmpty, paths.count <= untrackedLineCountThreshold else { return [:] }
         var result: [String: LineCount] = [:]
@@ -366,7 +340,6 @@ extension GitCLI {
         return result
     }
 
-    /// Tracked modifications (staged+unstaged combined) plus untracked files.
     /// `.uncommitted` mode passes `"HEAD"`; `.all` passes the task's baseline commit.
     public static func workingTreeChanges(against ref: String, at path: URL) async throws -> [BranchFileChange] {
         async let nameStatusData = run(["diff", "--name-status", "-z", ref], in: path)
@@ -374,8 +347,7 @@ extension GitCLI {
         let counts = parseNumstat(try await numstatData)
         var changes = parseNameStatusRecords(try await nameStatusData, counts: counts)
 
-        // A path can appear in both the diff (deleted since `ref`) and as
-        // recreated untracked file; keep only the diff's entry so `id` (just `path`) stays unique.
+        // A path deleted since `ref` and recreated untracked appears in both; keep the diff's entry so `id` stays unique.
         let existingPaths = Set(changes.map(\.path))
         let untracked = try await untrackedPaths(at: path).filter { !existingPaths.contains($0) }
         guard !untracked.isEmpty else { return changes }
@@ -395,13 +367,10 @@ extension GitCLI {
         return changes
     }
 
-    /// Raw content of `filePath` as recorded at `ref`, e.g. a diff's base revision, for
-    /// the "Open Diff in VS Code" button — `code --diff` needs real files, not a patch.
     public static func fileContent(_ filePath: String, at ref: String, in path: URL) async throws -> Data {
         try await run(["show", "\(ref):\(filePath)"], in: path)
     }
 
-    /// Per-file counterpart to `workingTreeChanges`; untracked files go through `diffForUntracked` instead.
     public static func workingTreeDiff(
         for filePath: String, origPath: String? = nil, against ref: String, fullFile: Bool = false, at path: URL
     ) async throws -> DiffText {
@@ -419,7 +388,6 @@ extension GitCLI {
         fullFile ? ["--unified=\(Int32.max)"] : []
     }
 
-    /// The diff for a single file, staged or unstaged against the working tree.
     public static func diff(for filePath: String, staged: Bool, at path: URL) async throws -> DiffText {
         var arguments = ["diff"]
         if staged { arguments.append("--cached") }
@@ -428,7 +396,6 @@ extension GitCLI {
         return makeDiffText(from: data)
     }
 
-    /// The diff for an untracked file, shown as a full addition against `/dev/null`.
     public static func diffForUntracked(_ filePath: String, at path: URL) async throws -> DiffText {
         let data = try await run(
             ["diff", "--no-index", "/dev/null", filePath],
@@ -438,7 +405,6 @@ extension GitCLI {
         return makeDiffText(from: data)
     }
 
-    /// `git diff baseline..HEAD` — committed work only, never against the dirty working tree.
     public static func branchChanges(since baseline: String, at path: URL) async throws -> [BranchFileChange] {
         let range = "\(baseline)..HEAD"
         async let nameStatusData = run(["diff", "--name-status", "-z", range], in: path)
@@ -447,7 +413,6 @@ extension GitCLI {
         return parseNameStatusRecords(try await nameStatusData, counts: counts)
     }
 
-    /// The diff for a single file's committed changes since `baseline`.
     public static func branchDiff(
         for filePath: String, origPath: String? = nil, since baseline: String, fullFile: Bool = false, at path: URL
     ) async throws -> DiffText {
@@ -469,8 +434,7 @@ extension GitCLI {
         }
     }
 
-    // `--name-status -z` prints `status\0path\0` per file, or `R<score>\0old\0new\0`
-    // for a rename/copy.
+    // `--name-status -z` prints `status\0path\0`, or `R<score>\0old\0new\0` for a rename/copy.
     static func parseNameStatusRecords(_ data: Data, counts: [String: LineCount]) -> [BranchFileChange] {
         let tokens = splitNulDelimited(data)
         var changes: [BranchFileChange] = []
@@ -510,11 +474,9 @@ extension GitCLI {
         return changes
     }
 
-    /// `detectBinary` is `false` for `showCommit`: a multi-file commit's patch
-    /// can mix binary and text, and flagging the whole thing binary would hide every other file's diff.
+    /// `detectBinary` is `false` for `showCommit`: a mixed binary/text patch would otherwise hide every file's diff.
     static func makeDiffText(from data: Data, detectBinary: Bool = true) -> DiffText {
-        // Cap before scanning for the binary marker, so a huge diff is never
-        // decoded in full; a binary file's marker line is near the top anyway.
+        // Cap before scanning for the binary marker so a huge diff is never decoded in full.
         let isTruncated = data.count > diffSizeLimit
         let capped = isTruncated ? data.prefix(diffSizeLimit) : data
         if detectBinary, containsBinaryMarker(capped) {
@@ -525,10 +487,7 @@ extension GitCLI {
 
     private static let binaryMarkerRegex = try! NSRegularExpression(pattern: #"(?m)^Binary files .* differ$"#)
 
-    // `git diff` marks binary files with a "Binary files ... differ" line
-    // instead of hunks. Matched as a whole line, not a substring anywhere in
-    // the output, so a text diff that merely contains that phrase in its
-    // content isn't misread as a binary file.
+    // Matched as a whole line so a text diff merely containing the phrase isn't misread as binary.
     private static func containsBinaryMarker(_ data: Data) -> Bool {
         // Lossy decoding: the cap can split a multi-byte character at the end.
         let text = String(decoding: data, as: UTF8.self)

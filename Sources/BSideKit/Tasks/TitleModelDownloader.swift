@@ -1,8 +1,7 @@
 import Foundation
 
-/// Fetches a GGUF quant from a Hugging Face repo into Application Support.
-/// Done in-app rather than via llama.cpp's `-hf`, which rejects some valid
-/// (long, OAuth-style) HF tokens as "invalid" and so can't reach private repos.
+/// In-app rather than llama.cpp's `-hf`, which rejects some valid long OAuth-style HF tokens
+/// and so can't reach private repos.
 @MainActor
 public final class TitleModelDownloader: ObservableObject {
     public enum State: Equatable, Sendable {

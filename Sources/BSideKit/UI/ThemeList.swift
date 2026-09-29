@@ -1,9 +1,6 @@
 import SwiftUI
 
-/// The theme catalog as a standard selectable `List`, grouped into dark and
-/// light (``ThemeCatalogSource/groups``). A list rather than a menu `Picker`
-/// so the arrow keys step through themes, each step applying live. Must not
-/// be nested in a `Form`, where a `List` does not scroll reliably.
+/// A `List`, not a menu `Picker`, so arrow keys step through themes; don't nest it in a `Form`, where it won't scroll.
 struct ThemeList: View {
     @Binding var selection: String?
 

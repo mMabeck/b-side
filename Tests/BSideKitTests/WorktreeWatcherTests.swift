@@ -3,11 +3,7 @@ import Testing
 
 @testable import BSideKit
 
-/// `WorktreeWatcher`'s FSEvents streams themselves aren't exercised here (no
-/// other test in this target drives real FSEvents either — too flaky under
-/// CI timing); this covers the git-dir resolution the watcher's `start()`
-/// depends on to find the *shared* refs a linked worktree doesn't have its
-/// own copy of.
+/// FSEvents streams aren't exercised (too flaky under CI timing); this covers git-dir resolution.
 @MainActor
 @Suite("WorktreeWatcher")
 struct WorktreeWatcherTests {

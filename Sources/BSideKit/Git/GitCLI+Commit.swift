@@ -4,8 +4,6 @@ import OSLog
 extension GitCLI {
     private static let commitLogger = Logger(subsystem: "dev.mabeck.bside", category: "git-commit")
 
-    /// Thrown when a streamed git invocation exits non-zero. All output was
-    /// already delivered to `onOutput` before this is thrown.
     public struct StreamingCommandError: Error, Sendable, CustomStringConvertible {
         public let arguments: [String]
         public let status: Int32
@@ -34,8 +32,6 @@ extension GitCLI {
         )
     }
 
-    /// Distinct from `run`, which collects machine-readable output in full;
-    /// this is for commands whose output needs to reach the UI as it happens.
     /// Cancellation sends `SIGINT`, then `SIGTERM` if still running shortly after.
     static func runStreaming(
         args: [String],

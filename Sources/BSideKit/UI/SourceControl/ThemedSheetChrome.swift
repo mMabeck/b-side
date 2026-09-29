@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Centred, secondary-text placeholder for a sheet's content area — "No
-/// changes", "Binary file", a load error, etc. Shared by `DiffSheet` and
-/// `ChangesOverlaySheet`.
 struct SheetCenteredMessage: View {
     let message: String
     let palette: BSidePalette
@@ -15,8 +12,6 @@ struct SheetCenteredMessage: View {
     }
 }
 
-/// Banner shown above a diff whose text was capped before reaching the
-/// view — shared by `DiffSheet` and `ChangesOverlaySheet`.
 struct SheetTruncationBanner: View {
     let palette: BSidePalette
 

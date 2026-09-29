@@ -1,7 +1,5 @@
 import Foundation
 
-/// A minimal untyped JSON value, used to hold event payloads and tool-call
-/// arguments whose shape is defined by the upstream agent, not by us.
 public enum JSONValue: Sendable, Equatable {
     case string(String)
     case number(Double)

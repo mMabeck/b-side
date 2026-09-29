@@ -1,12 +1,7 @@
 import CoreServices
 import Foundation
 
-/// Watches a project's git refs (`HEAD`, `refs/**`, `packed-refs`), not its
-/// working tree, powering `ProjectsStore`'s live ahead/behind/merged re-check
-/// from anywhere a branch or base ref moves.
-///
-/// Narrower than `WorktreeWatcher`: no working-tree file edits, only ref
-/// changes, so it never fires on high-frequency agent file churn, and one instance per project suffices.
+/// Narrower than `WorktreeWatcher`: refs only, so it never fires on high-frequency agent file churn.
 @MainActor
 final class ProjectRefsWatcher {
     private let projectURL: URL
@@ -40,8 +35,7 @@ final class ProjectRefsWatcher {
         stop()
         guard let gitDir = WorktreeWatcher.resolveGitDir(forWorktree: projectURL) else { return }
 
-        // `HEAD` in the project's own (possibly private) git dir — cheap to
-        // include and correct for the rarer detached-HEAD base case.
+        // `HEAD` in the project's own git dir, for the rarer detached-HEAD base case.
         gitDirStream = WorktreeWatcher.makeStream(paths: [gitDir.standardizedFileURL.path], latency: 0.3) { [weak self] paths in
             MainActor.assumeIsolated {
                 let relevant = paths.contains { (($0 as NSString).lastPathComponent) == "HEAD" }

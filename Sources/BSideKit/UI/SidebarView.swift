@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Just the id; `SidebarView` resolves source/destination indexes from `store.projects` itself.
 private struct ProjectDragPayload: Codable, Transferable {
     let projectID: Int64
 
@@ -15,23 +14,16 @@ private extension UTType {
     static var bSideProjectID: UTType { UTType(exportedAs: "dev.mabeck.bside.project-id") }
 }
 
-/// Left sidebar: projects with tasks nested beneath.
-///
-/// Uses a themed SwiftUI `List`, not `NSOutlineView`, over the system's
-/// Liquid Glass sidebar chrome. Revisit if this grows large.
+/// Themed SwiftUI `List`, not `NSOutlineView`, over the system's Liquid Glass sidebar chrome.
 struct SidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
     @AppStorage("sidebarCollapsedProjectIDs") private var collapseState = SidebarCollapseState()
 
-    /// Which projects show all their tasks instead of just the 5 most recent. Session-only:
-    /// unlike `collapseState`, there's no expectation this survives a relaunch.
     @State private var expandedTaskListProjectIDs: Set<Int64> = []
 
     @State private var pendingDeleteTask: (task: TaskRecord, project: Project)?
 
-    /// How many of a project's most-recent tasks (`tasksByProject` is already
-    /// sorted that way) show before the "Show more" row.
     private static let collapsedTaskLimit = 5
 
     var body: some View {
@@ -42,8 +34,7 @@ struct SidebarView: View {
                 List(selection: $selection) {
                     if !activeTaskRows.isEmpty {
                         Section("Active") {
-                            // A second reorder landing before NSTableView's row-move
-                            // animation settles composites one row's content under another's.
+                            // A second reorder before NSTableView's row-move animation settles composites one row's content under another's.
                             ForEach(activeTaskRows) { entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: entry.shortcutIndex)
                                     .tag(SidebarRowID.activeTask(entry.taskID))
@@ -106,8 +97,7 @@ struct SidebarView: View {
                 .overlayScrollers()
                 .onAppear { syncSelectionFromStore() }
                 .onChange(of: selection) { _, newValue in
-                    // The List clears selection to nil when clicking empty space or
-                    // \u2318-clicking the selected row; treat that as a revert, not a deselect.
+                    // The List clears selection to nil on empty-space or Cmd-clicks of the selected row; treat that as a revert.
                     guard let newValue else {
                         syncSelectionFromStore()
                         return
@@ -165,8 +155,7 @@ struct SidebarView: View {
         }
     }
 
-    // A task shows in both Active and its project; distinct tags keep the two rows
-    // from sharing a selection identity, which left the native highlight stuck.
+    // Distinct tags for a task shown in both Active and its project; a shared identity left the native highlight stuck.
     enum SidebarRowID: Hashable {
         case project(Int64)
         case task(Int64)
@@ -175,8 +164,6 @@ struct SidebarView: View {
 
     @State private var selection: SidebarRowID?
 
-    /// Whether `row` already represents the store's current selection, so pushing it back
-    /// to the store or re-deriving it from the store would be a no-op.
     static func matches(_ row: SidebarRowID, selectedTaskID: Int64?, selectedProjectID: Int64?) -> Bool {
         switch row {
         case .task(let id), .activeTask(let id):
@@ -186,8 +173,7 @@ struct SidebarView: View {
         }
     }
 
-    /// Keeps `current` whenever it still represents the store's selection: re-deriving it when
-    /// a terminal opens would move the highlight mid-insert and leave a stale row drawn selected.
+    /// Keeps `current` if it still represents the selection: re-deriving when a terminal opens moves the highlight mid-insert.
     static func reconciledRow(current: SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64]) -> SidebarRowID? {
         if let current, matches(current, selectedTaskID: selectedTaskID, selectedProjectID: selectedProjectID) {
             return current
@@ -224,27 +210,21 @@ struct SidebarView: View {
         var id: SidebarRowID { .activeTask(taskID) }
     }
 
-    /// Same order `NavigationShortcuts.activeTaskID(atIndex:in:)` indexes
-    /// into, so a row's position always matches its ⌘-digit. An archived/deleted
-    /// task's entry resolves to `nil` and is dropped, normally momentary at most.
+    /// Same order as `NavigationShortcuts.activeTaskID`, so a row's position matches its Cmd-digit.
     private var activeTaskRows: [ActiveTaskEntry] {
         store.openTerminalTaskIDs.enumerated().compactMap { index, id in
             store.taskAndProject(forID: id).map { ActiveTaskEntry(taskID: id, task: $0.task, project: $0.project, shortcutIndex: index) }
         }
     }
 
-    /// The single place combining `TaskStatus.derive`'s inputs so `taskRow` and `activeTaskRow` never disagree.
     private struct TaskStatusInfo {
         let status: TaskStatus
         let summary: TaskChildSummary
         let isVanished: Bool
-        /// Merged into base ref *and* no uncommitted changes on top; hidden on a closed task, where it's just noise.
         let isMerged: Bool
-        /// Mutually exclusive with `isMerged`.
         let hasPendingWork: Bool
         let pendingAhead: Int
         let hasUncommittedChanges: Bool
-        /// `nil` when `isMerged`, so the two never say the same thing twice.
         let syncText: String?
     }
 
@@ -277,7 +257,6 @@ struct SidebarView: View {
         )
     }
 
-    /// The ⌘-digit shortcut (only the first 9 entries have one) surfaces only as a `.help` tooltip, not a visible label.
     private func activeTaskRow(_ task: TaskRecord, project: Project, shortcutIndex: Int) -> some View {
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
@@ -322,7 +301,6 @@ struct SidebarView: View {
         }
     }
 
-    /// Accepted without moving when ids match; rejected if either id can't be resolved (e.g. a stale payload).
     private func reorderProject(draggedID: Int64, ontoID: Int64?) -> Bool {
         guard let ontoID, draggedID != ontoID else { return true }
         guard let fromIndex = store.projects.firstIndex(where: { $0.id == draggedID }),
@@ -332,7 +310,6 @@ struct SidebarView: View {
         return true
     }
 
-    /// Branch and path live on the project dashboard instead, keeping the sidebar scannable.
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
         let primary = theme.palette.textPrimary
         let secondary = theme.palette.textSecondary
@@ -379,13 +356,11 @@ struct SidebarView: View {
         }
     }
 
-    /// Disables Move Up/Down at the ends of the list, matching `.onMove`'s own behaviour.
     private func canMoveProject(_ project: Project, direction: ProjectMoveDirection) -> Bool {
         guard let index = store.projects.firstIndex(where: { $0.id == project.id }) else { return false }
         return direction == .up ? index > 0 : index < store.projects.count - 1
     }
 
-    /// Nested inside `projectRow`'s own `Button` label; SwiftUI resolves the tap to whichever hit area was touched.
     private func addTaskButton(for project: Project) -> some View {
         Button {
             store.pendingTaskCreationProject = project
@@ -400,15 +375,11 @@ struct SidebarView: View {
         .help("New Task in \(project.displayName)")
     }
 
-    /// Shown instead of the stored display name, falling back to it only if the path has no usable name.
     static func folderName(of project: Project) -> String {
         let name = URL(fileURLWithPath: project.path).lastPathComponent
         return name.isEmpty || name == "/" ? project.displayName : name
     }
 
-    /// `tasks` is already ordered most-recent-first. Collapsed shows the first
-    /// `limit`, plus the selected task appended if it would otherwise be
-    /// hidden, so switching projects never hides the task you're looking at.
     static func visibleTasks(_ tasks: [TaskRecord], limit: Int, expanded: Bool, selectedTaskID: Int64?) -> [TaskRecord] {
         guard !expanded, tasks.count > limit else { return tasks }
         var visible = Array(tasks.prefix(limit))
@@ -419,7 +390,6 @@ struct SidebarView: View {
         return visible
     }
 
-    /// Standard disclosure affordance for a project's overflowed tasks, not a nested `DisclosureGroup`, so it reads as one extra row rather than another collapsible section.
     private func showMoreRow(hiddenCount: Int, projectID: Int64) -> some View {
         Button {
             expandedTaskListProjectIDs.insert(projectID)
@@ -444,7 +414,6 @@ struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
-    /// The leading status-dot column is reserved at a fixed width even with no dot, so every title starts at the same x.
     private func taskRow(_ task: TaskRecord, project: Project) -> some View {
         let info = taskStatusInfo(for: task)
         let summary = info.summary
@@ -507,7 +476,6 @@ struct SidebarView: View {
         }
     }
 
-    /// Tinted with `statusSuccess`, independent of native selection so it stays legible either way.
     private func mergedBadge() -> some View {
         let tint = theme.palette.statusSuccess
         return HStack(spacing: 3) {
@@ -525,7 +493,6 @@ struct SidebarView: View {
         )
     }
 
-    /// Styled like `mergedBadge` but tinted `statusRunning`: the opposite state, work outstanding rather than landed.
     private func pendingPill(ahead: Int, hasUncommittedChanges: Bool) -> some View {
         let tint = theme.palette.statusRunning
         return HStack(spacing: 3) {
@@ -549,7 +516,6 @@ struct SidebarView: View {
         .accessibilityLabel(BranchSyncSummary.accessibilityLabel(ahead: ahead, hasUncommittedChanges: hasUncommittedChanges) ?? "")
     }
 
-    /// Pinned below the list, not a `List` row, so it never scrolls out of view.
     private var addProjectFooter: some View {
         Button {
             ProjectCreation.addProject(store: store)

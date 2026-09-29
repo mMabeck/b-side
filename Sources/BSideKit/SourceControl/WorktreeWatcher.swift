@@ -1,11 +1,7 @@
 import CoreServices
 import Foundation
 
-/// FSEvents-backed watcher behind the Source Control sidebar's live refresh.
-/// Watches the worktree root (for tracked/untracked
-/// edits, ignoring its own `.git`) and the real git directory, restricted to
-/// `index`/`HEAD`/`refs/**` — the only paths that change git status/branch
-/// output. Both streams coalesce bursts into one refresh roughly every 300ms (`debounceInterval`).
+/// Watches the worktree root (ignoring its `.git`) and the real git dir restricted to `index`/`HEAD`/`refs/**`, coalescing bursts (`debounceInterval`).
 @MainActor
 final class WorktreeWatcher {
     private let worktreeURL: URL
@@ -66,9 +62,7 @@ final class WorktreeWatcher {
             }
         }
 
-        // For a linked worktree, `refs/heads`/`refs/remotes`/`packed-refs` live
-        // in the *common* git dir shared by every worktree, not in `gitDir`'s
-        // own private `worktrees/<name>/`; without this the sidebar never sees a commit/fetch made elsewhere.
+        // A linked worktree's shared refs live in the *common* git dir, not `gitDir`; without this the sidebar never sees a commit/fetch made elsewhere.
         if let gitDir, let commonGitDir = Self.resolveCommonGitDir(forGitDir: gitDir), commonGitDir != gitDir {
             commonGitDirStream = Self.makeStream(paths: [commonGitDir.standardizedFileURL.path], latency: 0.2) { [weak self] paths in
                 MainActor.assumeIsolated {
@@ -110,14 +104,12 @@ final class WorktreeWatcher {
         DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: workItem)
     }
 
-    /// Only `index`, `HEAD`, and `refs/**` change what the sidebar shows; everything else is noise.
     private static func isRelevantGitDirPath(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         if name == "index" || name == "HEAD" { return true }
         return path.contains("/refs/") || path.hasSuffix("/refs")
     }
 
-    /// Only branch/remote-tracking refs matter, not e.g. `refs/stash` or `refs/bisect`.
     static func isRelevantCommonGitDirPath(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         if name == "packed-refs" { return true }
@@ -125,9 +117,7 @@ final class WorktreeWatcher {
             || path.contains("/refs/remotes/") || path.hasSuffix("/refs/remotes")
     }
 
-    /// Analogue of `git rev-parse --git-common-dir`, without shelling out. A
-    /// linked worktree's git dir has a `commondir` file pointing at the
-    /// shared dir; the main checkout has none and *is* the common dir.
+    /// `git rev-parse --git-common-dir` without shelling out: a linked worktree has a `commondir` file; the main checkout is itself the common dir.
     static func resolveCommonGitDir(forGitDir gitDir: URL) -> URL? {
         let commondirFile = gitDir.appendingPathComponent("commondir")
         guard let contents = try? String(contentsOf: commondirFile, encoding: .utf8) else {
@@ -141,8 +131,7 @@ final class WorktreeWatcher {
         return resolved.standardizedFileURL
     }
 
-    /// For a linked worktree, `.git` is a file containing `gitdir: <path>`,
-    /// not a directory; resolves that pointer to the real location.
+    /// A linked worktree's `.git` is a file containing `gitdir: <path>`.
     static func resolveGitDir(forWorktree worktreeURL: URL) -> URL? {
         let gitPath = worktreeURL.appendingPathComponent(".git")
         var isDirectory: ObjCBool = false
@@ -172,10 +161,7 @@ final class WorktreeWatcher {
             init(_ callback: @escaping ([String]) -> Void) { self.callback = callback }
         }
 
-        // `info` is handed unretained: the `retain` callback below gives the
-        // stream its own +1 when the context is copied. `passRetained` here
-        // too double-counted the retain, so `release` never brought it back
-        // below 1, leaking `box` for the life of the process.
+        // `info` is passed unretained: the `retain` callback gives the stream its own +1, so `passRetained` here would leak `box`.
         let box = CallbackBox(callback)
         var context = FSEventStreamContext(
             version: 0,

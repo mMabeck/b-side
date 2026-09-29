@@ -2,11 +2,8 @@ import AppKit
 import OSLog
 import SwiftUI
 
-/// File tree on the left, selected file's diff on the right. Unlike `DiffSheet`
-/// (fixed content size), this is a large, resizable sheet.
 struct ChangesOverlaySheet: View {
     let task: TaskRecord
-    /// Shows an "Open in Editor" button for the selected file when non-nil.
     var onOpenInEditor: ((String) -> Void)?
 
     @State private var store = ChangesOverlayStore()
@@ -105,7 +102,6 @@ struct ChangesOverlaySheet: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// A 7-40 character hex string is shortened to 7 for the header; anything else (a branch/tag name) is shown in full.
     private static func shortRef(_ ref: String) -> String {
         guard ref.count > 7, ref.range(of: "^[0-9a-f]{7,40}$", options: .regularExpression) != nil else {
             return ref
@@ -153,7 +149,6 @@ struct ChangesOverlaySheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// An empty file list here means "couldn't compare", not "nothing changed".
     private var noBaselineState: some View {
         SheetCenteredMessage(message: "Couldn't determine this task's base commit", palette: theme.palette)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -170,9 +165,7 @@ struct ChangesOverlaySheet: View {
         .listStyle(.sidebar)
     }
 
-    /// A plain `Divider()` with a drag gesture, not `HSplitView` (AppKit
-    /// `updateConstraints` crash risk — see `TaskTerminalAreaView`). Global
-    /// coordinate space keeps the gesture in sync with the moving divider.
+    /// Plain `Divider()` with a drag gesture, not `HSplitView` (`updateConstraints` crash); global coordinates keep the drag in sync.
     private var treeWidthDivider: some View {
         Divider()
             .frame(width: 8)
@@ -405,30 +398,9 @@ struct ChangesOverlaySheet: View {
     }
 }
 
-/// Grants `.resizable`, which SwiftUI sheets don't get by default. Mirrors `ThemedWindowModifier`'s `WindowAccessor` pattern.
-private struct ResizableSheetWindowAccessor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            view.window?.styleMask.insert(.resizable)
-        }
-        return view
-    }
-
-    // Mirrors `WindowAccessor` (`ThemedWindow.swift`): `makeNSView` can run
-    // before the view is attached to a window, so `view.window` is nil and
-    // the style mask never gets set. Retrying here on every body update
-    // catches the window once it exists; the insert is a no-op once already
-    // applied.
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            nsView.window?.styleMask.insert(.resizable)
-        }
-    }
-}
-
 extension View {
+    /// Grants `.resizable`, which SwiftUI sheets don't get by default.
     fileprivate func resizableSheetWindow() -> some View {
-        background(ResizableSheetWindowAccessor())
+        background(WindowAccessor { $0.styleMask.insert(.resizable) })
     }
 }

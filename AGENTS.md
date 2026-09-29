@@ -70,6 +70,9 @@ swift test --filter GitCLITests
 ## Conventions
 
 - Conventional Commits with a scope, e.g. `fix(subagents): ...`.
+- Keep comments and tests to a minimum. Code should speak for itself through
+  clear names and small, focused functions; rename or extract before
+  reaching for a comment.
 - Comments are rare and short: only a non-obvious why, an AppKit/libghostty
   quirk, or a concurrency/ordering invariant. At most 1–3 lines, and
   none that restate the name or signature. No `- Parameter`/`- Returns:`

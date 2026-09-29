@@ -3,8 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Pure logic for the three collapsible-region toggles: no live window, no
-/// rendered menu, no terminal.
 @MainActor
 @Suite("Window layout toggles and shortcuts")
 struct WindowLayoutTests {
@@ -66,8 +64,6 @@ struct WindowLayoutTests {
     }
 }
 
-/// A `UserDefaults` suite unique to each call, so tests never read or write
-/// the app's real persisted layout state (or each other's).
 private func makeIsolatedDefaults() -> UserDefaults {
     let suiteName = "WindowLayoutTests.\(UUID().uuidString)"
     return UserDefaults(suiteName: suiteName)!

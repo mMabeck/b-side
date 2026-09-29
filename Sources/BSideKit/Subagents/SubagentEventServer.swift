@@ -2,27 +2,7 @@ import Foundation
 import Network
 import OSLog
 
-/// The local HTTP endpoint agent processes POST lifecycle and subagent
-/// events to (§5, §6). Loopback-only, ephemeral port. Every response has an
-/// empty body — anything returned is liable to be injected into the agent's context.
-///
-/// Routes:
-/// - `POST /subagents/{taskId}/{childId}/begin` — `{"agent","taskLabel","openingLine"?}`
-/// - `POST /subagents/{taskId}/{childId}/events` — one or more `\n`-terminated JSON event lines
-/// - `POST /subagents/{taskId}/{childId}/done` — the `done.json` payload
-/// - `POST /subagents/{taskId}/{childId}/spawn` — `{"label","cwd","command"}`;
-///   creates a child surface running `command` directly (not a login shell)
-///   in `cwd`. `204` once created; `404` unknown task; `429` at
-///   `SubagentPaneStore.maxPanesPerTask` (caller falls back to headless); `400` malformed.
-/// - `POST /subagents/{taskId}/{childId}/close` — tears down that child's pane. Always `204`, idempotent.
-/// - `POST /agent/{taskId}/busy` / `.../idle` — parent Pi loop started/ended working. `204`/`404`.
-/// - `POST /agent/{taskId}/alert` — `{"kind":"finished"|"question","title","body"}`,
-///   routed like a terminal alert. `204`/`404`/`400` for a bad body or `kind`.
-///
-/// `spawn`/`close` hop to the main actor and respond only once resolved,
-/// since the caller needs `spawn`'s real outcome (in particular `429`) before falling back to headless.
-
-/// Guards a resume-once flag since `NWListener` may deliver state updates from an arbitrary queue.
+/// Guards a resume-once flag: `NWListener` may deliver state updates from an arbitrary queue.
 private final class ResumeBox: @unchecked Sendable {
     private let lock = NSLock()
     private var resumed = false
@@ -36,6 +16,8 @@ private final class ResumeBox: @unchecked Sendable {
     }
 }
 
+/// Loopback HTTP endpoint for agent lifecycle and subagent events. Responses stay empty-bodied: anything returned may be injected into the agent's context.
+/// `spawn`/`close` respond only after the main actor resolves them, so callers see a real `429` before falling back to headless.
 public final class SubagentEventServer: @unchecked Sendable {
     private static let logger = Logger(subsystem: "dev.mabeck.bside", category: "subagent-server")
 
@@ -43,7 +25,7 @@ public final class SubagentEventServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.mabeck.bside.subagent-server")
     private let store: SubagentFeedStore
 
-    /// Per-child, since events may arrive split across multiple HTTP requests.
+    /// Per-child: events may arrive split across HTTP requests.
     private var lineParsers: [String: SubagentEventLineParser] = [:]
 
     public private(set) var port: UInt16?
@@ -229,7 +211,6 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
     }
 
-    /// Always `204` — closing an already-gone pane is not an error.
     private func handleClose(taskId: Int64, childId: String, on connection: NWConnection) {
         Task { @MainActor [weak self] in
             guard let self else {
@@ -280,7 +261,6 @@ public final class SubagentEventServer: @unchecked Sendable {
         }
     }
 
-    /// `nil` for anything unrecognised, which `handleAgentStatus` turns into a `400`.
     private static func alertKind(fromWireValue value: String) -> TaskAlertKind? {
         switch value {
         case "finished": return .finished

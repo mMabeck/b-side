@@ -1,9 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Right sidebar: Source Control (subagent activity lives in each task's
-/// `SubagentStripView`). Modelled on VS Code's SCM view, scoped to the
-/// selected task's worktree.
 struct RightSidebarView: View {
     var store: ProjectsStore
     @ObservedObject var theme: GhosttyResolvedTheme = .shared
@@ -238,8 +235,6 @@ struct RightSidebarView: View {
             }
     }
 
-    /// The multi-selection if `row` is part of it, else just `row` — so a
-    /// right-click outside the selection acts on that row alone.
     private func selectedRowsOrThis(_ row: SourceControlStore.Row) -> [SourceControlStore.Row] {
         guard selection.contains(row.id) else { return [row] }
         let all = scStore.staged + scStore.unstaged + scStore.branchChanges
@@ -330,8 +325,7 @@ struct RightSidebarView: View {
 
     // MARK: - Diff sheet
 
-    /// `requestedTaskId` is captured before the `await` so a stale result
-    /// from a since-changed selection is dropped instead of overwriting the new task's sheet.
+    /// `requestedTaskId` is captured before the `await` so a stale result can't overwrite the new task's sheet.
     private func openDiff(for row: SourceControlStore.Row) {
         let requestedTaskId = scStore.task?.id
         Task {
@@ -392,7 +386,6 @@ struct RightSidebarView: View {
     }
 }
 
-/// Everything `DiffSheet` needs, resolved before the sheet is shown so `DiffSheet` itself stays git-agnostic.
 private struct DiffSheetData: Identifiable {
     let id: String
     let title: String
@@ -400,9 +393,7 @@ private struct DiffSheetData: Identifiable {
     let diffText: String
     let isBinary: Bool
     let isTruncated: Bool
-    /// Shown instead of the diff text or misleading "No changes" state.
     let errorMessage: String?
-    /// `nil` for a commit from History — hides "Open in Editor", which only makes sense for a specific file.
     let row: SourceControlStore.Row?
 }
 
@@ -412,8 +403,6 @@ private struct DiscardConfirmation: Identifiable {
     var id: String { rows.map(\.id).joined(separator: ",") }
 }
 
-/// Renders a `ChangesTreeRowNode`: folders as expanded-by-default `DisclosureGroup`s
-/// with combined +/− counts (and, if given, whole-folder stage/unstage on hover), files via `rowContent`.
 private struct SourceControlTreeRow<RowContent: View>: View {
     let node: ChangesTreeRowNode
     let palette: BSidePalette

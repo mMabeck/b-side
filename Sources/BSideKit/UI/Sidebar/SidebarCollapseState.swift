@@ -1,8 +1,5 @@
 import Foundation
 
-/// Which projects the sidebar's collapsible sections have collapsed, keyed
-/// by project id. `RawRepresentable` as a comma-joined id list so it can back
-/// an `@AppStorage` property directly.
 public struct SidebarCollapseState: Equatable, Sendable {
     public var collapsedProjectIDs: Set<Int64>
 

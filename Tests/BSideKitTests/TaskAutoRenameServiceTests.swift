@@ -116,8 +116,7 @@ struct TaskAutoRenameServiceApplyRenameTests {
         #expect(renamed.awaitingAutoRename == false)
         #expect(renamed.branchName == "task/fix-the-login-bug")
 
-        // The worktree directory must never move — doing so out from under a
-        // live pi process breaks its tools and its session transcript lookup.
+        // Moving the worktree under a live pi breaks its tools and transcript lookup.
         #expect(renamed.worktreePath == task.worktreePath)
         #expect(FileManager.default.fileExists(atPath: renamed.worktreePath))
 
@@ -199,7 +198,6 @@ struct TaskAutoRenameServiceApplyRenameTests {
         let repoURL = try await TestRepo.makeRepo(in: root)
         let project = Project(id: 1, path: repoURL.path, displayName: "repo", baseRef: "main")
 
-        // An unrelated existing task already occupies the branch the rename would target.
         _ = try await TaskWorktreeService.createWorktree(for: project, taskName: "Fix the bug", baseRef: "main")
 
         let setupResult = try await TaskWorktreeService.createWorktree(
@@ -222,7 +220,6 @@ struct TaskAutoRenameServiceApplyRenameTests {
         let renamed = await TaskAutoRenameService.applyRename(task: task, project: project, newName: "Fix the bug")
 
         #expect(renamed.branchName == "task/fix-the-bug-2")
-        // The worktree directory never moves, dedupe or not.
         #expect(renamed.worktreePath == task.worktreePath)
     }
 }
@@ -259,8 +256,6 @@ struct ProjectsStoreAutoRenameTests {
         #expect(refetchedPlaceholder?.name == "fix the login bug")
         #expect(refetchedPlaceholder?.awaitingAutoRename == false)
 
-        // Calling it again must not re-fire: the flag is already clear, so a
-        // caller guarding on it (as `MainAreaView`'s watcher does) will stop.
         await store.applyAutoRename(task: refetchedPlaceholder!, project: insertedProject, prompt: "a different prompt entirely")
         let refetchedAgain = try await database.dbQueue.read { db in
             try TaskRecord.fetchOne(db, key: placeholderTask.id!)
@@ -413,10 +408,7 @@ struct AutoRenameSessionResumeTests {
             awaitingAutoRename: true
         )
 
-        // A real transcript, as pi would have written it while the task's
-        // worktree was still at its pre-rename path: the header `cwd` names
-        // that original worktree, and the file itself sits under a sessions
-        // subdirectory keyed by that same (now stale) path.
+        // Transcript as pi wrote it before the rename: header cwd and sessions subdirectory use the old path.
         let sessionID = PiSessionService.newSessionID()
         let resolvedOldWorktreePath = URL(fileURLWithPath: task.worktreePath).resolvingSymlinksInPath().path
         let header = "{\"type\":\"session\",\"version\":3,\"id\":\"\(sessionID)\"," +
@@ -438,11 +430,7 @@ struct AutoRenameSessionResumeTests {
             pathBinaryFinder: { nil }
         )
 
-        // Simulate a task whose worktree was already relocated by an older
-        // build's auto-rename, before it stopped moving worktree
-        // directories — `TaskAutoRenameService.applyRename` no longer does
-        // this itself, but tasks already moved by a prior version still need
-        // to resume correctly.
+        // A worktree already relocated by an older build's auto-rename must still resume.
         let movedWorktreePath = "\(repoURL.path)-worktrees/fix-the-login-bug"
         try await GitCLI.moveWorktree(
             from: URL(fileURLWithPath: task.worktreePath),
@@ -468,7 +456,6 @@ struct AutoRenameSessionResumeTests {
         #expect(repairedHeader["cwd"] as? String == resolvedNewWorktreePath)
         #expect(repairedHeader["id"] as? String == sessionID)
         #expect(repairedHeader["version"] as? Int == 3)
-        // Every remaining line survives the rewrite byte-for-byte.
         #expect(Array(repairedLines.dropFirst()) == [bodyLine, ""])
 
         let afterRenameCommand = PiSessionService.launchCommand(

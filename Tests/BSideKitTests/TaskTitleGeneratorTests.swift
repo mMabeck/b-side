@@ -65,10 +65,7 @@ struct TaskTitleGeneratorRealModelTests {
     }
 }
 
-/// Whether the real title-gen binary and model file this task's tests were
-/// written against are installed on the machine running the suite \u2014 gates
-/// `TaskTitleGeneratorRealModelTests` so CI machines without them just skip
-/// it instead of failing.
+/// Gates real-model tests so machines without the binary and model skip instead of failing.
 enum TaskTitleGeneratorRealModelAvailability {
     static var isAvailable: Bool {
         let binaryCandidates = ["/opt/homebrew/bin/llama-completion", "/usr/local/bin/llama-completion"]
@@ -80,9 +77,6 @@ enum TaskTitleGeneratorRealModelAvailability {
     }
 }
 
-/// Exercises `TaskTitleGenerator.generateResult`'s process-handling with
-/// fake `#!/bin/sh` scripts standing in for `llama-completion`, so these run
-/// on any machine regardless of whether the real model is installed.
 @Suite("TaskTitleGenerator process handling")
 struct TaskTitleGeneratorProcessTests {
     private static let fakeModelPath = "/dev/null"
@@ -343,11 +337,7 @@ struct TaskTitleGeneratorProcessTests {
         defer { try? FileManager.default.removeItem(at: script) }
 
         let launchedBox = PidBox()
-        // A task added to an already-cancelled group starts cancelled, so
-        // `withTaskCancellationHandler` inside `generateResult` invokes its
-        // `onCancel` before `run()`'s operation closure ever begins —
-        // unlike `Task.cancel()` called after creation, which races the
-        // task actually starting.
+        // A task added to an already-cancelled group starts cancelled, so onCancel fires before the operation begins, unlike a racy Task.cancel().
         let result: Result<String, TitleGenerationFailure> = await withTaskGroup(
             of: Result<String, TitleGenerationFailure>.self
         ) { group in
@@ -386,10 +376,7 @@ struct TaskTitleGeneratorProcessTests {
         )
         defer {
             try? FileManager.default.removeItem(at: script)
-            // The leaked grandchild is reparented and outside the runner's
-            // reach (it only signals the process it launched); clean it up
-            // here so the suite doesn't leave it running. Runs even if a
-            // `guard`/`#require` above exits the test early.
+            // The reparented grandchild is outside the runner's reach; kill it even if an early exit skipped the assertions.
             if let pidText = try? String(contentsOf: childPidFile, encoding: .utf8),
                 let grandchildPid = pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines))
             {
@@ -422,8 +409,7 @@ struct TaskTitleGeneratorProcessTests {
     }
 }
 
-/// Polls for `url` to exist, used to confirm a fake script has installed its
-/// signal trap before the test acts on the process it launched.
+/// Waits for a fake script to install its signal trap before the test signals it.
 private func waitForFile(at url: URL, timeout: TimeInterval = 5) async throws {
     let deadline = Date().addingTimeInterval(timeout)
     while !FileManager.default.fileExists(atPath: url.path) {
@@ -435,8 +421,7 @@ private func waitForFile(at url: URL, timeout: TimeInterval = 5) async throws {
     }
 }
 
-/// Thread-safe box for a child pid captured from an `onLaunch` hook, which
-/// fires on a background dispatch queue.
+/// Child pid from `onLaunch`, which fires on a background queue.
 private final class PidBox: @unchecked Sendable {
     private var pid: pid_t?
     private let lock = NSLock()
@@ -454,9 +439,6 @@ private final class PidBox: @unchecked Sendable {
     }
 }
 
-/// Signals once, from a background dispatch queue, that a value is ready —
-/// used here so the cancellation test waits for the child to actually be
-/// launched before cancelling it.
 private final class LaunchedSignal: @unchecked Sendable {
     private let semaphore = DispatchSemaphore(value: 0)
 

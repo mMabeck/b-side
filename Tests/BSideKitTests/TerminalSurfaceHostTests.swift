@@ -4,10 +4,7 @@ import SwiftUI
 import Testing
 @testable import BSideKit
 
-/// Exercises the real `.exec` backend end to end: a live pty, not a mock.
-/// `TerminalViewState.surface` only appears once a platform view attaches (see
-/// GhosttyBridge.swift), so each test hosts its `TerminalHostView` in a real,
-/// never-ordered-front `NSWindow` positioned off any actual screen.
+/// The surface exists only once a view attaches, so tests host it in an offscreen, never-ordered-front NSWindow.
 @MainActor
 struct TerminalSurfaceHostTests {
     private func makeAttachedHost(workingDirectory: URL) -> (TerminalSurfaceHost, NSWindow) {
@@ -23,9 +20,6 @@ struct TerminalSurfaceHostTests {
         return (host, window)
     }
 
-    /// Keyboard input (`sendReturn`, a real key-press path) reaches the shell,
-    /// and a paste is a genuinely distinct path from keystrokes: a pasted
-    /// `\r` sits in the shell's edit line instead of submitting it.
     @Test func pasteDoesNotSubmitButReturnDoes() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("terminal-host-test-\(UUID().uuidString)")
@@ -46,8 +40,6 @@ struct TerminalSurfaceHostTests {
         window.orderOut(nil)
     }
 
-    /// A surface marked not-visible keeps running rather than being torn
-    /// down: input still lands and output is still produced while hidden.
     @Test func hiddenSurfaceKeepsRunning() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("terminal-host-test-\(UUID().uuidString)")
@@ -67,10 +59,6 @@ struct TerminalSurfaceHostTests {
         window.orderOut(nil)
     }
 
-    /// Regression test for `MainAreaView.syncFocus()`: mounts two hosts the
-    /// way it does, then checks that focus survives a re-render of the
-    /// focused host and moves (or is dropped) exactly as `focus()`/
-    /// `resignFocus()` direct.
     @Test func requestFocusMovesFirstResponderDeterministically() async throws {
         let dirA = FileManager.default.temporaryDirectory
             .appendingPathComponent("terminal-host-focus-test-a-\(UUID().uuidString)")
@@ -91,27 +79,20 @@ struct TerminalSurfaceHostTests {
         window.setIsVisible(true)
         try await Task.sleep(for: .seconds(2))
 
-        // Establish hostA as focused the same deterministic way
-        // `syncFocus()` does on first mount.
         hostA.focus()
         try await Task.sleep(for: .milliseconds(500))
         #expect(window.firstResponder === hostA.state.attachedPlatformView)
 
-        // A re-render of the focused host (a title change, a bell, ...) must
-        // not take focus away: the old `@FocusState` bridge resigned first
-        // responder on every `updateNSView` once SwiftUI reset the state.
         hostA.objectWillChange.send()
         hostB.objectWillChange.send()
         try await Task.sleep(for: .milliseconds(500))
         #expect(window.firstResponder === hostA.state.attachedPlatformView)
 
-        // Switch to hostB the way `syncFocus()` does.
         hostB.focus()
         hostA.resignFocus()
         try await Task.sleep(for: .milliseconds(500))
         #expect(window.firstResponder === hostB.state.attachedPlatformView)
 
-        // With no task visible, resigning leaves no terminal focused.
         hostB.resignFocus()
         try await Task.sleep(for: .milliseconds(500))
         #expect(!hostA.hasKeyboardFocus && !hostB.hasKeyboardFocus)
@@ -119,9 +100,6 @@ struct TerminalSurfaceHostTests {
         window.orderOut(nil)
     }
 
-    /// Exercises what `SubagentPaneStore.spawn` relies on: a `command`
-    /// script actually starts running in the given `workingDirectory`, the
-    /// way the app opens a child subagent's pane.
     @Test func commandStartsInGivenWorkingDirectory() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("terminal-host-cwd-test-\(UUID().uuidString)")
@@ -150,8 +128,6 @@ struct TerminalSurfaceHostTests {
     }
 }
 
-/// Mounts two hosts the way `MainAreaView` does: both in the tree, only one
-/// visible/hit-testable at a time.
 private struct TwoHostFocusHarness: View {
     var hostA: TerminalSurfaceHost
     var hostB: TerminalSurfaceHost
@@ -166,13 +142,7 @@ private struct TwoHostFocusHarness: View {
     }
 }
 
-/// libghostty rejects an *entire* config when a single directive fails to
-/// parse — the failure mode that once cost this app its whole theme over one
-/// `theme =` line. The `keybind = …=unbind` directives `GhosttyBridge`
-/// appends to release the app's own key equivalents are therefore checked
-/// against a real surface here, not merely asserted as strings, so a syntax
-/// mistake surfaces as a test failure instead of silently discarding every
-/// setting the user wrote.
+/// libghostty rejects the entire config if one directive fails to parse, so unbinds are checked against a real surface.
 @MainActor
 struct GeneratedKeybindConfigTests {
     @Test("A real surface accepts the generated config, unbinds included")
@@ -220,10 +190,6 @@ struct GeneratedKeybindConfigTests {
         #expect(issue == nil)
     }
 
-    /// `envVars` (what `MainAreaView.ensureHost` fills with
-    /// `PiSessionService.launchEnvironment`) must actually reach the
-    /// spawned process's environment, not just get threaded through to
-    /// `TerminalSurfaceOptions` and dropped.
     @Test func envVarsReachTheSpawnedProcess() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("terminal-host-env-test-\(UUID().uuidString)")

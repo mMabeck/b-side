@@ -71,10 +71,7 @@ import Testing
             file("a/b/Two.swift"),
             file("a/Other.swift"),
         ])
-        // "a" has two entries directly under it (the "b" folder and
-        // "Other.swift"), so it cannot compress into "a/b" — but "b" itself
-        // has only files (no further single-child folder chain) so it stays
-        // a folder named "b" nested under "a".
+        // "a" has two children so it cannot compress into "a/b"; "b" holds only files so stays a folder.
         #expect(tree.count == 1)
         guard case .folder(let a) = tree[0] else {
             Issue.record("expected a top-level folder")

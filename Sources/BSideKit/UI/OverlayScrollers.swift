@@ -2,9 +2,7 @@ import AppKit
 import SwiftUI
 
 extension View {
-    /// Scroll bars that appear while scrolling and fade out, even when a mouse
-    /// makes macOS's "Automatic" setting fall back to always-visible ones.
-    /// Apply to a `List` or `ScrollView`; SwiftUI exposes no scroller style.
+    /// Overlay scrollers even with a mouse; SwiftUI exposes no scroller style.
     func overlayScrollers() -> some View {
         background(OverlayScrollerAccessor())
     }
@@ -30,8 +28,7 @@ private struct OverlayScrollerAccessor: NSViewRepresentable {
         private var observer: NSObjectProtocol?
 
         init() {
-            // AppKit rewrites every scroll view's style when the preferred one
-            // changes (e.g. a mouse is plugged in), so re-apply afterwards.
+            // AppKit rewrites every scroll view's style when the preferred one changes; re-apply.
             observer = NotificationCenter.default.addObserver(
                 forName: NSScroller.preferredScrollerStyleDidChangeNotification,
                 object: nil,
@@ -53,8 +50,6 @@ private struct OverlayScrollerAccessor: NSViewRepresentable {
             scrollView.scrollerStyle = .overlay
         }
 
-        /// The background anchor is a sibling of the scroll view it backs, so
-        /// search outward for the nearest scroll view covering the anchor.
         private static func scrollView(behind anchor: NSView) -> NSScrollView? {
             guard anchor.window != nil else { return nil }
             let anchorFrame = anchor.convert(anchor.bounds, to: nil)

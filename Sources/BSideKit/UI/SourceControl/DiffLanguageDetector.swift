@@ -1,10 +1,6 @@
 import Foundation
 import HighlightSwift
 
-/// Maps a file path to a `HighlightSwift` language by extension. Pure and
-/// side-effect-free so `DiffSyntaxHighlighter` can fall back to the
-/// library's own auto-detection (`HighlightMode.automatic`) only when this
-/// returns `nil`.
 enum DiffLanguageDetector {
     static func language(forPath path: String) -> HighlightLanguage? {
         let name = (path as NSString).lastPathComponent

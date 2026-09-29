@@ -6,13 +6,7 @@ import Testing
 
 @testable import BSideKit
 
-/// Renders the app window offscreen and samples real pixel values to prove
-/// the resolved Ghostty theme reaches the main area. The title bar and both
-/// sidebars are Liquid Glass system chrome (`ThemedWindowModifier`) and
-/// deliberately sample the desktop behind the window, so only the opaque
-/// main content area is checked here. Uses a real, never-key, never-onscreen
-/// `NSWindow` driven only by programmatic APIs (see `TerminalSurfaceHostTests`
-/// for the same pattern): no synthetic clicks or keystrokes are used anywhere here.
+/// Samples real pixels offscreen; sidebars and title bar are Liquid Glass sampling the desktop, so only the opaque main area is checked.
 @MainActor
 struct ContentViewThemeSnapshotTests {
     @Test("The main area picks up the resolved theme")
@@ -42,8 +36,7 @@ struct ContentViewThemeSnapshotTests {
         let expectedPalette = BSidePalette.themed(from: ayuMirage)
         let expectedBackground = NSColor(expectedPalette.windowBackground)
 
-        // Ensure the split view opens with both sidebars visible regardless
-        // of state a previous run may have persisted to UserDefaults.
+        // Force both sidebars visible regardless of persisted UserDefaults.
         UserDefaults.standard.set(false, forKey: "leftSidebarCollapsed")
         UserDefaults.standard.set(false, forKey: "rightSidebarCollapsed")
         UserDefaults.standard.set(true, forKey: "terminalDrawerCollapsed")
@@ -60,9 +53,6 @@ struct ContentViewThemeSnapshotTests {
         window.contentView = NSHostingView(rootView: ContentView(store: store))
         window.setIsVisible(true)
 
-        // MainAreaView's `TerminalSurfaceHost` resolves the same theme
-        // through the real config file above, matching production: the
-        // terminal grid and the rest of the chrome are proven to agree.
         try await Task.sleep(for: .milliseconds(800))
 
         guard let contentView = window.contentView, let frameView = contentView.superview else {
@@ -72,11 +62,7 @@ struct ContentViewThemeSnapshotTests {
         frameView.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
 
-        // Captured via a manual `NSView` draw pass, not WindowServer: the
-        // main content area is a plain SwiftUI-hosted `NSHostingView`
-        // (unlike a `List`'s per-row hosting views, which only ever paint
-        // through WindowServer's real compositor), so `cacheDisplay` faithfully
-        // reproduces it without needing Screen Recording permission for a headless test run.
+        // Manual NSView draw pass: the main area is a plain NSHostingView, so `cacheDisplay` works without Screen Recording permission.
         guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) else {
             Issue.record("Failed to create bitmap for content view")
             window.orderOut(nil)
@@ -91,8 +77,7 @@ struct ContentViewThemeSnapshotTests {
         }
         try pngData.write(to: URL(fileURLWithPath: "/tmp/bside-themed-window.png"))
 
-        // Map AppKit points (origin bottom-left) to bitmap pixels (origin
-        // top-left), accounting for the backing scale factor.
+        // AppKit points (bottom-left origin) to bitmap pixels (top-left origin), scaled.
         let scaleX = CGFloat(bitmap.pixelsWide) / contentView.bounds.width
         let scaleY = CGFloat(bitmap.pixelsHigh) / contentView.bounds.height
         func sample(atPointX x: CGFloat, appKitY y: CGFloat) -> NSColor? {
@@ -117,15 +102,10 @@ struct ContentViewThemeSnapshotTests {
             report("expectedBackground", expectedBackground),
         ].joined(separator: " | "))
 
-        // Shouldn't read as plain white/light-system default — the main
-        // area should be close to the theme's dark background family.
         #expect(isCloseToDarkThemeFamily(mainAreaColor, background: expectedBackground))
     }
 }
 
-/// True if `color` is dark (low luminance, matching a dark Ghostty theme)
-/// and reasonably close to the theme's own background — i.e. not a light
-/// system default and not an unrelated hardcoded colour.
 private func isCloseToDarkThemeFamily(_ color: NSColor, background: NSColor, tolerance: CGFloat = 0.25) -> Bool {
     guard let color = color.usingColorSpace(.deviceRGB), let background = background.usingColorSpace(.deviceRGB) else {
         return false

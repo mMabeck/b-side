@@ -3,11 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Exercises `ProjectsStore`'s recent-activity ordering: `setTaskBusy`, a
-/// genuine `clearTaskBusy` transition, and an accepted question alert should
-/// all move a task to the top of its project's list and to the front of
-/// `openTerminalTaskIDs`; mere selection and a redundant `clearTaskBusy`
-/// should not.
 @MainActor
 @Suite("ProjectsStore activity ordering")
 struct ProjectsStoreActivityOrderingTests {
@@ -90,14 +85,12 @@ struct ProjectsStoreActivityOrderingTests {
         store.noteTerminalOpened(taskID: idA)
         store.noteTerminalOpened(taskID: idB)
 
-        // taskA was never marked busy, so clearing it is a no-op: no bump.
         store.clearTaskBusy(idA)
         #expect(store.openTerminalTaskIDs == [idA, idB])
 
         store.setTaskBusy(idB)
         #expect(store.openTerminalTaskIDs == [idB, idA])
 
-        // Genuine busy -> idle transition for taskA: bumps it to the front.
         store.setTaskBusy(idA)
         #expect(store.openTerminalTaskIDs == [idA, idB])
         store.clearTaskBusy(idB)
@@ -107,7 +100,6 @@ struct ProjectsStoreActivityOrderingTests {
         }
         #expect(store.tasksByProject[project.id!]?.first?.id == idB)
 
-        // Now idle already; clearing again is a no-op and must not re-bump.
         let orderBeforeNoOpClear = store.openTerminalTaskIDs
         store.clearTaskBusy(idB)
         #expect(store.openTerminalTaskIDs == orderBeforeNoOpClear)
@@ -127,7 +119,6 @@ struct ProjectsStoreActivityOrderingTests {
         store.setTaskBusy(idA)
         #expect(store.openTerminalTaskIDs == [idA, idB])
 
-        // idA is already busy; a repeated ping must not move it again.
         store.setTaskBusy(idA)
         #expect(store.openTerminalTaskIDs == [idA, idB])
     }

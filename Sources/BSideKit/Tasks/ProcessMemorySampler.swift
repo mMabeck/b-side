@@ -1,9 +1,8 @@
 import Darwin
 import Foundation
 
-/// Polls a child's peak resident memory. Resident size rather than Activity
-/// Monitor's footprint, which leaves out mmapped GGUF weights; the lifetime
-/// max footprint is folded in to catch allocations between samples.
+/// Resident size, not Activity Monitor's footprint, which omits mmapped GGUF weights; the lifetime
+/// max footprint is folded in to catch spikes between samples.
 public final class ProcessMemorySampler: @unchecked Sendable {
     private let lock = NSLock()
     private var timer: DispatchSourceTimer?
@@ -22,7 +21,6 @@ public final class ProcessMemorySampler: @unchecked Sendable {
         timer.resume()
     }
 
-    /// Stops sampling and returns the peak in bytes, or nil if no sample landed.
     public func stop() -> UInt64? {
         lock.withLock {
             timer?.cancel()

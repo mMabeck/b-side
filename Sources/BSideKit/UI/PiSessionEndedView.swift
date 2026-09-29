@@ -1,17 +1,6 @@
 import SwiftUI
 
-/// Replaces a task's dead terminal surface once its Pi process exits on its
-/// own. Ghostty's own "Process exited" overlay is a dead end here since this
-/// app never adopts a `TerminalSurfaceViewDelegate` to act on its keypress,
-/// so this view stands in for the dead surface instead, in the same slot
-/// `TerminalHostView` normally fills, themed off the resolved Ghostty palette.
-///
-/// `onResume` relaunches along the same `PiSessionService.launchCommand`
-/// path a normal reopen uses, so resuming reattaches to the same session.
-///
-/// Shares `focusedTaskID` with `TerminalHostView` rather than a separate
-/// `@FocusState`: while exited, nothing else competes to bind that id, so
-/// `MainAreaView.syncFocus()` lands the Resume button focus the same way it lands terminal focus.
+/// Stands in for the dead surface: Ghostty's "Process exited" overlay is a dead end since the app never adopts a `TerminalSurfaceViewDelegate`.
 struct PiSessionEndedView: View {
     var taskID: Int64
     var focusedTaskID: FocusState<Int64?>.Binding
@@ -35,8 +24,7 @@ struct PiSessionEndedView: View {
             .buttonStyle(.glassProminent)
             .tint(theme.palette.accent)
             .controlSize(.large)
-            // Return works before explicit first-responder focus; `.focused`
-            // below still gives it real focus once `syncFocus()` sets `focusedTaskID`.
+            // Return works before first-responder focus lands; `.focused` takes over once `syncFocus()` runs.
             .keyboardShortcut(.defaultAction)
             .focused(focusedTaskID, equals: taskID)
         }

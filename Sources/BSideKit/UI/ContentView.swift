@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// The app's single window: left sidebar, main area, right sidebar, and a
-/// collapsible bottom terminal drawer. All three regions are independently
-/// collapsible and persist their collapsed state.
 public struct ContentView: View {
     @ObservedObject private var layout = WindowLayoutState.shared
     @ObservedObject private var theme = GhosttyResolvedTheme.shared
@@ -26,7 +23,6 @@ public struct ContentView: View {
         )
     }
 
-    // Drives `.inspector` from the same flag the toolbar button and menu item toggle, one source of truth.
     private var rightSidebarPresented: Binding<Bool> {
         Binding(
             get: { !layout.rightSidebarCollapsed },
@@ -45,7 +41,6 @@ public struct ContentView: View {
     public var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(store: store)
-                // The default column is narrow enough to truncate most task names.
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 420)
         } detail: {
             VStack(spacing: 0) {
@@ -59,8 +54,7 @@ public struct ContentView: View {
                 if drawerOpen {
                     Rectangle().fill(theme.palette.separator).frame(height: 1)
                 }
-                // Always mounted, collapsed to zero height: removing it would
-                // deinit its surface instead of marking it not-visible.
+                // Always mounted, collapsed to zero height: removing it would deinit its surface instead of marking it not-visible.
                 TerminalDrawerView(store: store, isCollapsed: !drawerOpen)
                     .frame(
                         maxWidth: .infinity,
@@ -71,8 +65,6 @@ public struct ContentView: View {
                     .allowsHitTesting(drawerOpen)
                     .clipped()
             }
-            // The left sidebar already has NavigationSplitView's native toggle;
-            // everything else with no other on-screen affordance earns a toolbar slot too.
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -111,16 +103,14 @@ public struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .background(theme.palette.windowBackground)
         .themedWindow(theme.palette)
-        .registersTaskWindow()
-        // The one place the task-creation sheet is presented; every trigger
-        // just sets `store.pendingTaskCreationProject` so it's never shown twice.
+        .focusedSceneValue(\.projectsStore, store)
+        // The sole presentation site for the task-creation sheet; triggers only set `store.pendingTaskCreationProject`.
         .sheet(item: pendingTaskCreationProjectBinding) { project in
             // `project` can be stale if choices were persisted moments earlier; prefer the current store copy.
             TaskCreationView(project: store.projects.first(where: { $0.id == project.id }) ?? project, store: store) {
                 store.pendingTaskCreationProject = nil
             }
         }
-        // Same one-presentation-site rationale as above.
         .sheet(item: pendingChangesOverlayTaskBinding) { task in
             ChangesOverlaySheet(task: task) { path in
                 editorLauncher.openFile(

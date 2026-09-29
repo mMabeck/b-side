@@ -55,9 +55,7 @@ struct MigrationTests {
         let dbQueue = try DatabaseQueue()
         var migrator = DatabaseMigrator()
         Migrations.register(in: &migrator)
-        // Migrate through v3 only, then simulate a dev DB that already added
-        // the project columns under a different (now-dropped) migration name
-        // before v4/v5 ran.
+        // Migrate through v3, then simulate a dev DB that already added the project columns under a dropped migration name.
         try migrator.migrate(dbQueue, upTo: "v3_task_awaiting_auto_rename")
         try dbQueue.write { db in
             try db.alter(table: "project") { t in

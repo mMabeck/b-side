@@ -1,14 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Takes over the File menu's standard Close (Cmd+W) slot instead of adding
-/// a competing item, since Cmd+W closing the whole window would be
-/// destructive: every task's terminal stays mounted for the app's lifetime,
-/// so "close" in the task window means "end this one task's terminal". Sheets
-/// and other windows (Settings) get closed instead; see `TaskWindowFocus.close`.
+/// Replaces the standard Close slot: Cmd+W ends the task's terminal instead of closing the whole window.
 public struct TerminalCommands: Commands {
     private var store: ProjectsStore
-    @ObservedObject private var focus = TaskWindowFocus.shared
+    @FocusedValue(\.projectsStore) private var focusedStore
 
     public init(store: ProjectsStore) {
         self.store = store
@@ -16,9 +12,9 @@ public struct TerminalCommands: Commands {
 
     public var body: some Commands {
         CommandGroup(replacing: .saveItem) {
-            Button(focus.keyWindowRole == .task ? "Close Task Terminal" : "Close") {
+            Button(focusedStore != nil ? "Close Task Terminal" : "Close") {
                 // Re-read at click time: a sheet or Settings may have become key since the menu was built.
-                focus.close(NSApplication.shared.keyWindow) {
+                CommandWindowRouting.close(NSApplication.shared.keyWindow, isTaskWindow: focusedStore != nil) {
                     if case .task(let task, let project) = store.mainSelection {
                         store.closeTerminal(for: task, project: project)
                     }
@@ -26,15 +22,13 @@ public struct TerminalCommands: Commands {
             }
             .keyboardShortcut(TerminalCloseShortcut.closeTask)
 
-            // Works whether the process is alive (kills then relaunches) or
-            // already exited (same as the "Pi session ended" Resume button).
             Button("Restart Pi Session") {
                 if case .task(let task, _) = store.mainSelection {
                     store.requestRestartTerminal(for: task)
                 }
             }
             .keyboardShortcut(TerminalCloseShortcut.restartSession)
-            .disabled(!isTaskSelected || !focus.isTaskWindowInFront)
+            .disabled(!isTaskSelected || focusedStore == nil)
         }
     }
 
@@ -47,6 +41,6 @@ public struct TerminalCommands: Commands {
 public enum TerminalCloseShortcut {
     public static let closeTask = KeyboardShortcut("w", modifiers: [.command])
 
-    /// Cmd+Shift+R rather than plain Cmd+R, which Ghostty's defaults bind to `reload_config`.
+    /// Cmd+Shift+R, since Ghostty binds plain Cmd+R to `reload_config`.
     public static let restartSession = KeyboardShortcut("r", modifiers: [.command, .shift])
 }

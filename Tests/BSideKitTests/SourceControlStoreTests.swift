@@ -3,9 +3,6 @@ import Testing
 
 @testable import BSideKit
 
-/// Thread-safe accumulator for URLs handed to the `@Sendable` `recycle`
-/// closure injected into `SourceControlStore` under test, matching
-/// `LineCollector` in `GitCLIChangesTests.swift`.
 private final class RecycledURLsBox: @unchecked Sendable {
     private let lock = NSLock()
     private var urls: [URL] = []
@@ -23,9 +20,6 @@ private final class RecycledURLsBox: @unchecked Sendable {
     }
 }
 
-/// Exercises `SourceControlStore` against a real throwaway git repo (via
-/// `TestRepo`), never a mock git layer — the same rationale as
-/// `GitCLIChangesTests`.
 @MainActor
 @Suite("SourceControlStore")
 struct SourceControlStoreTests {
@@ -102,9 +96,7 @@ struct SourceControlStoreTests {
 
         try await waitUntil { !store.staged.contains { $0.path == "new.txt" } }
         #expect(recycled.all.map(\.lastPathComponent) == ["new.txt"])
-        // `recycle` is faked to just record the call, not actually trash the
-        // file — it surviving on disk here is what distinguishes this from the
-        // old `restore --source=HEAD` behaviour, which deleted it outright.
+        // `recycle` is faked; the file surviving on disk distinguishes this from `restore --source=HEAD`, which deleted it.
         #expect(FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("new.txt").path))
     }
 
@@ -135,12 +127,7 @@ struct SourceControlStoreTests {
         #expect(FileManager.default.fileExists(atPath: repoURL.appendingPathComponent("orig.txt").path))
     }
 
-    // Regression for leaving `D orig.txt` *staged* after only the new path
-    // was unstaged — not for whether an unstaged deletion shows up at all.
-    // `orig.txt` no longer existing on disk (it was physically `git mv`'d to
-    // `new.txt`) while the index reverts to expecting it, post-unstage, is
-    // real and expected: the same thing VS Code's own "Unstage" does, since
-    // unstaging never touches the working tree.
+    // The file missing on disk is expected; unstaging never touches the worktree.
     @Test("Unstaging a rename unstages both the old and new path, leaving neither staged")
     func unstageRenameClearsBothPaths() async throws {
         let root = try TestRepo.makeTempDirectory()
@@ -374,10 +361,7 @@ struct SourceControlStoreTests {
         #expect(store.staged.isEmpty)
         #expect(store.unstaged.isEmpty)
 
-        // A worktree that genuinely is a repository (`rev-parse
-        // --is-inside-work-tree` succeeds) but where `git status` itself
-        // fails — a corrupt index, here — must surface as `.error`, not
-        // `.notARepository` and never as a silently empty list.
+        // A real repo whose `git status` fails (corrupt index) must surface as `.error`, not `.notARepository` or an empty list.
         let brokenRepo = try await TestRepo.makeRepo(in: root, name: "broken-repo")
         try "garbage-not-an-index".write(to: brokenRepo.appendingPathComponent(".git/index"), atomically: true, encoding: .utf8)
 

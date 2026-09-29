@@ -1,8 +1,6 @@
 import Foundation
 import OSLog
 
-/// Observable store of child runs, keyed by task then a stable child id.
-/// Everything here is presentation-free.
 @MainActor
 @Observable
 public final class SubagentFeedStore {
@@ -12,13 +10,10 @@ public final class SubagentFeedStore {
 
     public init() {}
 
-    /// Runs for `taskId`, oldest first.
     public func runs(forTask taskId: Int64) -> [ChildRun] {
         runsByTask[taskId] ?? []
     }
 
-    /// Summary for the left sidebar's task row: how many children are
-    /// currently running, and whether any is blocked on the user.
     public func summary(forTask taskId: Int64) -> TaskChildSummary {
         let runs = runsByTask[taskId] ?? []
         let active = runs.filter { $0.state == .active }.count
@@ -26,7 +21,6 @@ public final class SubagentFeedStore {
         return TaskChildSummary(activeCount: active, totalCount: runs.count, isBlocked: blocked)
     }
 
-    /// Idempotent: re-registering an existing id updates its labels in place rather than duplicating the card.
     public func beginRun(
         taskId: Int64,
         childId: String,
@@ -53,8 +47,7 @@ public final class SubagentFeedStore {
         runsByTask[taskId] = runs
     }
 
-    /// Creates a placeholder run if none was registered yet (events can race
-    /// registration). Tool rows come only from a `message_end` tool-call part.
+    /// Creates a placeholder run if none is registered yet: events can race registration.
     public func ingest(taskId: Int64, childId: String, event: SubagentEvent) {
         mutate(taskId: taskId, childId: childId) { run in
             switch event {
@@ -90,15 +83,12 @@ public final class SubagentFeedStore {
                     }
                 }
                 if let stopReason, stopReason == "error" {
-                    // Mid-run error stopReason (e.g. a transient rate limit) is not
-                    // a terminal state — Pi retries and the run carries on. Only
-                    // `markDone`, sourced from done.json, ends a run.
+                    // A mid-run error stopReason (e.g. rate limit) isn't terminal: Pi retries. Only `markDone` ends a run.
                     run.errorMessage = errorMessage
                 }
             case let .toolResult(toolCallId, isError):
                 guard let toolCallId, let index = run.toolCallRows.firstIndex(where: { $0.id == toolCallId }) else { return }
-                // A failing tool call is routine (e.g. `find` exiting non-zero) and
-                // marks only that row; the run keeps going until `markDone`.
+                // A failing tool call (e.g. `find` exiting non-zero) marks only its row.
                 run.toolCallRows[index].state = isError ? .failed : .completed
             case let .toolExecutionUpdate(toolCallId, toolName), let .toolExecutionEnd(toolCallId, toolName):
                 guard let toolCallId, let index = run.toolCallRows.firstIndex(where: { $0.id == toolCallId }) else { return }
@@ -128,7 +118,6 @@ public final class SubagentFeedStore {
         }
     }
 
-    /// Clears all runs for a task, called when its conversation clears.
     public func clear(taskId: Int64) {
         runsByTask.removeValue(forKey: taskId)
     }
@@ -151,7 +140,6 @@ public final class SubagentFeedStore {
     }
 }
 
-/// Per-task rollup consumed by the left sidebar's task row.
 public struct TaskChildSummary: Sendable, Equatable {
     public var activeCount: Int
     public var totalCount: Int
