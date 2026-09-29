@@ -23,45 +23,46 @@ struct WindowLayoutTests {
         }
     }
 
-    @Test("Each toggle flips only its own region, independent of the others")
-    func togglesAreIndependent() {
+    @Test("Each sidebar toggle flips only its own region, and a double toggle restores it")
+    func sidebarToggles() {
         let state = WindowLayoutState(defaults: makeIsolatedDefaults())
-        let (left, right, drawer) = (state.leftSidebarCollapsed, state.rightSidebarCollapsed, state.terminalDrawerCollapsed)
+        let (left, right) = (state.leftSidebarCollapsed, state.rightSidebarCollapsed)
 
         state.toggleLeftSidebar()
         #expect(state.leftSidebarCollapsed == !left)
         #expect(state.rightSidebarCollapsed == right)
-        #expect(state.terminalDrawerCollapsed == drawer)
 
         state.toggleRightSidebar()
-        #expect(state.rightSidebarCollapsed == !right)
-        #expect(state.terminalDrawerCollapsed == drawer)
-
-        state.toggleTerminalDrawer()
-        #expect(state.terminalDrawerCollapsed == !drawer)
+        state.toggleRightSidebar()
+        #expect(state.rightSidebarCollapsed == right)
     }
 
-    @Test("Toggling twice returns a region to its original state")
-    func doubleToggleIsIdentity() {
-        let state = WindowLayoutState(defaults: makeIsolatedDefaults())
-        let original = state.terminalDrawerCollapsed
-
-        state.toggleTerminalDrawer()
-        state.toggleTerminalDrawer()
-
-        #expect(state.terminalDrawerCollapsed == original)
-    }
-
-    @Test("Layout state persists collapsed flags under the app's established UserDefaults keys")
-    func persistsUnderEstablishedKeys() {
+    @Test("The terminal drawer opens for one task only, survives relaunch, and is forgotten once the task is deleted")
+    func terminalDrawerIsPerTask() {
         let defaults = makeIsolatedDefaults()
+        let project = Project(id: 7, path: "/tmp/project", displayName: "P", baseRef: "main")
+        func task(_ id: Int64) -> MainSelection {
+            .task(
+                TaskRecord(
+                    id: id, projectId: 7, name: "T", branchName: "b\(id)", worktreePath: "/tmp/w\(id)",
+                    harness: "claude", permissionLevel: "default"
+                ),
+                project
+            )
+        }
         let state = WindowLayoutState(defaults: defaults)
 
-        state.toggleLeftSidebar()
-        state.toggleTerminalDrawer()
+        state.toggleTerminalDrawer(for: task(1))
+        #expect(state.isTerminalDrawerOpen(for: task(1)))
+        #expect(!state.isTerminalDrawerOpen(for: task(2)))
+        #expect(!state.isTerminalDrawerOpen(for: .project(project)))
+        #expect(!state.isTerminalDrawerOpen(for: .none))
 
-        #expect(defaults.object(forKey: "leftSidebarCollapsed") as? Bool == state.leftSidebarCollapsed)
-        #expect(defaults.object(forKey: "terminalDrawerCollapsed") as? Bool == state.terminalDrawerCollapsed)
+        let relaunched = WindowLayoutState(defaults: defaults)
+        #expect(relaunched.isTerminalDrawerOpen(for: task(1)))
+
+        relaunched.forgetTerminalDrawers([.task(1)])
+        #expect(!relaunched.isTerminalDrawerOpen(for: task(1)))
     }
 }
 

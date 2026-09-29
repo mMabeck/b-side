@@ -61,7 +61,7 @@ struct BSideApp: App {
             // add `CommandGroup(replacing: .appSettings)` here: it duplicates
             // that item rather than replacing it, and neither copy opens a
             // window.
-            WindowLayoutCommands()
+            WindowLayoutCommands(store: store)
             ProjectCommands(store: store)
             EditorCommands(store: store)
             NavigationCommands(store: store)

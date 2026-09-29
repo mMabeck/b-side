@@ -5,9 +5,11 @@ import SwiftUI
 /// rather than torn down on selection change or collapse so
 /// a running command survives; `ContentView` keeps this mounted at zero height.
 struct TerminalDrawerView: View {
-    enum DrawerKey: Hashable {
-        case task(Int64)
-        case project(Int64)
+    typealias DrawerKey = TerminalDrawerKey
+
+    private struct DrawerState: Equatable {
+        let key: DrawerKey?
+        let isCollapsed: Bool
     }
 
     var store: ProjectsStore
@@ -17,7 +19,7 @@ struct TerminalDrawerView: View {
     @State private var hostsByKey: [DrawerKey: TerminalSurfaceHost] = [:]
 
     private var currentKey: DrawerKey? {
-        Self.key(for: store.mainSelection)
+        DrawerKey(store.mainSelection)
     }
 
     /// Every key the current projects and tasks still back; `purgeHosts` drops the rest.
@@ -40,24 +42,22 @@ struct TerminalDrawerView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
         .background(theme.palette.elevatedSurfaceBackground)
-        .task(id: currentKey) {
-            guard !isCollapsed else { return }
-            ensureHost(for: currentKey)
+        .onChange(of: DrawerState(key: currentKey, isCollapsed: isCollapsed), initial: true) { old, new in
+            if !new.isCollapsed { ensureHost(for: new.key) }
             syncVisibility()
-        }
-        .onChange(of: isCollapsed) { _, collapsed in
-            if collapsed {
-                if let key = currentKey { hostsByKey[key]?.resignFocus() }
-                syncVisibility()
+            // Focus moves only on a toggle; switching to a task whose drawer
+            // is open leaves focus with that task's main terminal.
+            guard old.key == new.key, old.isCollapsed != new.isCollapsed, let key = new.key else { return }
+            if new.isCollapsed {
+                hostsByKey[key]?.resignFocus()
                 store.requestTerminalFocus()
             } else {
-                ensureHost(for: currentKey)
-                syncVisibility()
-                if let key = currentKey { hostsByKey[key]?.focus() }
+                hostsByKey[key]?.focus()
             }
         }
-        .onChange(of: liveKeys) { _, keys in
+        .onChange(of: liveKeys) { old, keys in
             purgeHosts(keeping: keys)
+            WindowLayoutState.shared.forgetTerminalDrawers(old.subtracting(keys))
         }
     }
 
@@ -76,16 +76,5 @@ struct TerminalDrawerView: View {
 
     private func purgeHosts(keeping keys: Set<DrawerKey>) {
         hostsByKey = hostsByKey.filter { keys.contains($0.key) }
-    }
-
-    static func key(for selection: MainSelection) -> DrawerKey? {
-        switch selection {
-        case .none:
-            return nil
-        case .project(let project):
-            return project.id.map(DrawerKey.project)
-        case .task(let task, _):
-            return task.id.map(DrawerKey.task)
-        }
     }
 }

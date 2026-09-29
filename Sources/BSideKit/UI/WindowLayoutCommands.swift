@@ -8,9 +8,12 @@ import SwiftUI
 /// so there is one source of truth, not parallel state.
 public struct WindowLayoutCommands: Commands {
     @ObservedObject private var layout = WindowLayoutState.shared
+    private var store: ProjectsStore
     @ObservedObject private var focus = TaskWindowFocus.shared
 
-    public init() {}
+    public init(store: ProjectsStore) {
+        self.store = store
+    }
 
     public var body: some Commands {
         CommandGroup(replacing: .sidebar) {
@@ -27,9 +30,10 @@ public struct WindowLayoutCommands: Commands {
                 }
                 .keyboardShortcut(WindowLayoutShortcut.rightSidebar)
 
-                Button(layout.terminalDrawerCollapsed ? "Show Terminal" : "Hide Terminal") {
-                    layout.toggleTerminalDrawer()
+                Button(layout.isTerminalDrawerOpen(for: store.mainSelection) ? "Hide Terminal" : "Show Terminal") {
+                    layout.toggleTerminalDrawer(for: store.mainSelection)
                 }
+                .disabled(store.mainSelection == .none)
                 .keyboardShortcut(WindowLayoutShortcut.terminalDrawer)
             }
             .disabled(!focus.isTaskWindowInFront)

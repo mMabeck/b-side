@@ -38,6 +38,10 @@ public struct ContentView: View {
         )
     }
 
+    private var drawerOpen: Bool {
+        layout.isTerminalDrawerOpen(for: store.mainSelection)
+    }
+
     public var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(store: store)
@@ -52,19 +56,19 @@ public struct ContentView: View {
                             .inspectorColumnWidth(min: 260, ideal: 300, max: 480)
                     }
 
-                if !layout.terminalDrawerCollapsed {
+                if drawerOpen {
                     Rectangle().fill(theme.palette.separator).frame(height: 1)
                 }
                 // Always mounted, collapsed to zero height: removing it would
                 // deinit its surface instead of marking it not-visible.
-                TerminalDrawerView(store: store, isCollapsed: layout.terminalDrawerCollapsed)
+                TerminalDrawerView(store: store, isCollapsed: !drawerOpen)
                     .frame(
                         maxWidth: .infinity,
-                        minHeight: layout.terminalDrawerCollapsed ? 0 : 160,
-                        maxHeight: layout.terminalDrawerCollapsed ? 0 : 240
+                        minHeight: drawerOpen ? 160 : 0,
+                        maxHeight: drawerOpen ? 240 : 0
                     )
-                    .opacity(layout.terminalDrawerCollapsed ? 0 : 1)
-                    .allowsHitTesting(!layout.terminalDrawerCollapsed)
+                    .opacity(drawerOpen ? 1 : 0)
+                    .allowsHitTesting(drawerOpen)
                     .clipped()
             }
             // The left sidebar already has NavigationSplitView's native toggle;
@@ -84,12 +88,12 @@ public struct ContentView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        layout.toggleTerminalDrawer()
+                        layout.toggleTerminalDrawer(for: store.mainSelection)
                     } label: {
                         Label("Toggle Terminal", systemImage: "terminal")
                     }
-                    .help(layout.terminalDrawerCollapsed ? "Show Terminal (⌘æ)" : "Hide Terminal (⌘æ)")
-                    .accessibilityLabel(layout.terminalDrawerCollapsed ? "Show Terminal" : "Hide Terminal")
+                    .help(drawerOpen ? "Hide Terminal (⌘æ)" : "Show Terminal (⌘æ)")
+                    .accessibilityLabel(drawerOpen ? "Hide Terminal" : "Show Terminal")
                     .disabled(store.mainSelection == .none)
                 }
                 ToolbarItem(placement: .primaryAction) {
