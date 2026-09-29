@@ -89,7 +89,7 @@ struct SubagentStripView: View {
 
 /// Mutable, reference-type mirror of `SubagentStripView`'s per-render state
 /// so long-lived closures always read the latest values (see `live`). Also
-/// owns the ~10fps render ticker, stopped once no run is active.
+/// owns the once-a-second render ticker, stopped once no run is active.
 @MainActor
 final class LiveStripState {
     var runs: [ChildRun] = []
@@ -104,7 +104,7 @@ final class LiveStripState {
         runs.contains { $0.state == .active || $0.state == .blocked }
     }
 
-    func startTicking(interval: Duration = .milliseconds(100), _ render: @escaping () -> Void) {
+    func startTicking(interval: Duration = .seconds(1), _ render: @escaping () -> Void) {
         tickTask?.cancel()
         guard isAnyRunActive else { return }
         tickTask = Task { [weak self] in

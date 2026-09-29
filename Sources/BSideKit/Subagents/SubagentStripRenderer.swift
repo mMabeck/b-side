@@ -150,7 +150,9 @@ public enum SubagentStripRenderer {
         let statusColor: String
         switch run.state {
         case .active:
-            let frame = spinnerFrames[Int(now.timeIntervalSinceReferenceDate * 10) % spinnerFrames.count]
+            // Stepped with the elapsed seconds so the card changes at most once a second;
+            // each change costs a terminal redraw, so a faster spinner keeps the GPU awake.
+            let frame = spinnerFrames[max(0, Int(elapsed)) % spinnerFrames.count]
             statusText = "\(frame) working  \(formatElapsed(elapsed))"
             statusColor = color
         case .blocked:
