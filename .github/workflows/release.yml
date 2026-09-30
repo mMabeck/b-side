@@ -51,8 +51,10 @@ jobs:
 
       - name: Package
         run: |
-          ditto -c -k --keepParent dist/B-Side.app "B-Side-${GITHUB_REF_NAME}-arm64.zip"
-          shasum -a 256 "B-Side-${GITHUB_REF_NAME}-arm64.zip" > "B-Side-${GITHUB_REF_NAME}-arm64.zip.sha256"
+          mkdir release
+          ./scripts/make-dmg.sh dist/B-Side.app "release/B-Side-${GITHUB_REF_NAME}-arm64.dmg"
+          ditto -c -k --keepParent dist/B-Side.app "release/B-Side-${GITHUB_REF_NAME}-arm64.zip"
+          (cd release && shasum -a 256 ./*.dmg ./*.zip > SHA256SUMS)
 
       - name: Publish release
         env:
@@ -60,9 +62,7 @@ jobs:
         run: |
           prerelease=()
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" \
-            "B-Side-${GITHUB_REF_NAME}-arm64.zip" \
-            "B-Side-${GITHUB_REF_NAME}-arm64.zip.sha256" \
+          gh release create "$GITHUB_REF_NAME" release/* \
             --title "B-Side ${GITHUB_REF_NAME#v}" \
             --generate-notes \
             "${prerelease[@]}"

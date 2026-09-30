@@ -94,12 +94,12 @@ git push origin main v0.1.1
 
 The tag runs `.github/workflows/release.yml`: it rejects tags that don't match
 `VERSION` or aren't on `main`, then tests, bundles, launch-smoke-tests and
-publishes a GitHub Release with a zipped `.app` and its SHA-256. Tags with a
+publishes a GitHub Release with a `.dmg`, a zipped `.app` and `SHA256SUMS`. Tags with a
 suffix (`v0.3.0-beta.1`) are marked pre-release.
 
 The app is ad-hoc signed and not notarized, so a downloaded copy is quarantined
-by Gatekeeper. Clear it after unzipping:
+by Gatekeeper. Clear it after installing:
 
 ```sh
-xattr -dr com.apple.quarantine B-Side.app
+xattr -dr com.apple.quarantine /Applications/B-Side.app
 ```
