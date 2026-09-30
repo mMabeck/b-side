@@ -450,6 +450,8 @@ struct ChangesOverlaySheet: View {
 extension View {
     /// Grants `.resizable`, which SwiftUI sheets don't get by default.
     fileprivate func resizableSheetWindow() -> some View {
-        background(WindowAccessor { $0.styleMask.insert(.resizable) })
+        background(WindowAccessor { window in
+            if !window.styleMask.contains(.resizable) { window.styleMask.insert(.resizable) }
+        })
     }
 }

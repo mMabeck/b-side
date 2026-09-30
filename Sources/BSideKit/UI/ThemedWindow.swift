@@ -10,10 +10,19 @@ struct ThemedWindowModifier: ViewModifier {
 
     private func apply(_ window: NSWindow) {
         // `NSApp` too: menus, popovers and sheets without their own appearance resolve from `NSApp.effectiveAppearance`.
-        NSApplication.shared.appearance = palette.preferredAppearance
-        window.appearance = palette.preferredAppearance
-        window.titlebarAppearsTransparent = true
-        window.titlebarSeparatorStyle = .none
+        let appearance = palette.preferredAppearance
+        if NSApplication.shared.appearance?.name != appearance?.name {
+            NSApplication.shared.appearance = appearance
+        }
+        if window.appearance?.name != appearance?.name {
+            window.appearance = appearance
+        }
+        if !window.titlebarAppearsTransparent {
+            window.titlebarAppearsTransparent = true
+        }
+        if window.titlebarSeparatorStyle != .none {
+            window.titlebarSeparatorStyle = .none
+        }
     }
 }
 
@@ -32,7 +41,16 @@ struct WindowAccessor: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let window { configure(window) }
+            scheduleConfigure()
+        }
+
+        // Window setters relayout the frame view synchronously; doing that inside a SwiftUI
+        // update re-enters the hosting view's graph and AttributeGraph aborts.
+        func scheduleConfigure() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let window = self.window else { return }
+                self.configure(window)
+            }
         }
     }
 
@@ -44,6 +62,6 @@ struct WindowAccessor: NSViewRepresentable {
 
     func updateNSView(_ nsView: View, context: Context) {
         nsView.configure = configure
-        if let window = nsView.window { configure(window) }
+        nsView.scheduleConfigure()
     }
 }
