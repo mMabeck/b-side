@@ -41,31 +41,21 @@ struct SidebarView: View {
                                 }
                             )
                             DisclosureGroup(isExpanded: isExpandedBinding) {
-                                if tasks.isEmpty {
-                                    Text("No tasks")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(theme.palette.textSecondary)
-                                        .padding(.leading, TaskRowLayout.statusDotColumnWidth + 6)
-                                        .padding(.vertical, 6)
-                                } else {
-                                    let isExpandable = tasks.count > Self.collapsedTaskLimit
-                                    let isExpanded = project.id.map { expandedTaskListProjectIDs.contains($0) } ?? false
-                                    let visible = Self.visibleTasks(
-                                        tasks,
-                                        limit: Self.collapsedTaskLimit,
-                                        expanded: isExpanded,
-                                        selectedTaskID: store.selectedTaskID
-                                    )
-                                    ForEach(visible.map(TaskRowEntry.init)) { entry in
-                                        taskRow(entry.task, project: project)
-                                            .tag(SidebarRowID.task(entry.task.id ?? -1))
-                                    }
-                                    if isExpandable, let projectID = project.id {
-                                        if isExpanded {
-                                            showLessRow(projectID: projectID)
-                                        } else {
-                                            showMoreRow(hiddenCount: tasks.count - visible.count, projectID: projectID)
-                                        }
+                                ForEach(childRows(for: project, tasks: tasks)) { row in
+                                    switch row {
+                                    case .empty:
+                                        Text("No tasks")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(theme.palette.textSecondary)
+                                            .padding(.leading, TaskRowLayout.statusDotColumnWidth + 6)
+                                            .padding(.vertical, 6)
+                                    case .task(let task):
+                                        taskRow(task, project: project)
+                                            .tag(SidebarRowID.task(task.id ?? -1))
+                                    case .showMore(let hiddenCount, let projectID):
+                                        showMoreRow(hiddenCount: hiddenCount, projectID: projectID)
+                                    case .showLess(let projectID):
+                                        showLessRow(projectID: projectID)
                                     }
                                 }
                             } label: {
@@ -182,9 +172,37 @@ struct SidebarView: View {
     }
 
     // Row ids must be unique across the whole List, not just per ForEach.
-    private struct TaskRowEntry: Identifiable {
-        let task: TaskRecord
-        var id: SidebarRowID { .task(task.id ?? -1) }
+    /// One `ForEach` for all of a project's rows, so a project drop lands below the last one.
+    private enum ProjectChildRow: Identifiable {
+        case empty
+        case task(TaskRecord)
+        case showMore(hiddenCount: Int, projectID: Int64)
+        case showLess(projectID: Int64)
+
+        var id: String {
+            switch self {
+            case .empty: "empty"
+            case .task(let task): "task-\(task.id ?? -1)"
+            case .showMore: "show-more"
+            case .showLess: "show-less"
+            }
+        }
+    }
+
+    private func childRows(for project: Project, tasks: [TaskRecord]) -> [ProjectChildRow] {
+        guard !tasks.isEmpty else { return [.empty] }
+        let isExpanded = project.id.map { expandedTaskListProjectIDs.contains($0) } ?? false
+        let visible = Self.visibleTasks(
+            tasks,
+            limit: Self.collapsedTaskLimit,
+            expanded: isExpanded,
+            selectedTaskID: store.selectedTaskID
+        )
+        var rows = visible.map(ProjectChildRow.task)
+        if tasks.count > Self.collapsedTaskLimit, let projectID = project.id {
+            rows.append(isExpanded ? .showLess(projectID: projectID) : .showMore(hiddenCount: tasks.count - visible.count, projectID: projectID))
+        }
+        return rows
     }
 
     private struct ActiveTaskEntry: Identifiable {
