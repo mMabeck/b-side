@@ -18,8 +18,9 @@ cd "$(dirname "$0")/.."
 APP_NAME="${BSIDE_APP_NAME:-B-Side}"
 BUNDLE_ID="${BSIDE_BUNDLE_ID:-dev.mabeck.bside}"
 DIST_DIR="${BSIDE_DIST_DIR:-dist}"
-VERSION="${BSIDE_VERSION:-0.1.0}"
-BUILD_NUMBER="${BSIDE_BUILD_NUMBER:-1}"
+VERSION="${BSIDE_VERSION:-$(cat VERSION)}"
+# Commit count only grows along main, so builds stay orderable without a counter.
+BUILD_NUMBER="${BSIDE_BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 if [ "$INSTALL" = 1 ] && { [ "$APP_NAME" != "B-Side" ] || [ "$BUNDLE_ID" != "dev.mabeck.bside" ]; }; then
     echo "error: --install is only for the default app" >&2
     exit 2

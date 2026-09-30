@@ -84,13 +84,18 @@ and user notifications need a real bundle identifier.
 
 ## Release
 
-Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`: tests, bundle,
-launch smoke test, then a GitHub Release with a zipped `.app` and its SHA-256.
-Tags with a suffix (`v0.2.0-beta.1`) are marked pre-release.
+`VERSION` holds the app version; the build number is the commit count. Cut a
+release from a clean `main`, then push the tag:
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+./scripts/release.sh patch        # or minor, major, or an explicit 0.3.0-beta.1
+git push origin main v0.1.1
 ```
+
+The tag runs `.github/workflows/release.yml`: it rejects tags that don't match
+`VERSION` or aren't on `main`, then tests, bundles, launch-smoke-tests and
+publishes a GitHub Release with a zipped `.app` and its SHA-256. Tags with a
+suffix (`v0.3.0-beta.1`) are marked pre-release.
 
 The app is ad-hoc signed and not notarized, so a downloaded copy is quarantined
 by Gatekeeper. Clear it after unzipping:

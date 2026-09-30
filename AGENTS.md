@@ -26,6 +26,8 @@ worktrees. Visual identity is in [`docs/brand.md`](docs/brand.md).
 | `BSideKit/Terminal/` | libghostty interop and theming. |
 | `BSideKit/Subagents/` | Loopback HTTP/JSONL feed of Pi child events, card strip, pane swap. |
 | `scripts/bundle.sh` | Release build + `dist/B-Side.app` assembly. |
+| `VERSION`, `scripts/release.sh` | App version; bump, commit and tag a release (tag push publishes it). |
+| `.github/workflows/` | CI (build, test, launch smoke test) and tag-triggered GitHub Release. |
 | `assets/theme/` | Bundled Ghostty themes (`b-side.conf`, `b-side-paper.conf`). |
 | `.bside/config.json` | This repo's own B-Side project config (task defaults). Tracked. |
 
