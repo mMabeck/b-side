@@ -1,18 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
-
-private struct ProjectDragPayload: Codable, Transferable {
-    let projectID: Int64
-
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .bSideProjectID)
-    }
-}
-
-private extension UTType {
-    static var bSideProjectID: UTType { UTType(exportedAs: "dev.mabeck.bside.project-id") }
-}
 
 /// Themed SwiftUI `List`, not `NSOutlineView`, over the system's Liquid Glass sidebar chrome.
 struct SidebarView: View {
@@ -85,11 +72,9 @@ struct SidebarView: View {
                                 projectRow(project, taskCount: tasks.count)
                             }
                             .tag(SidebarRowID.project(project.id ?? -1))
-                            .draggable(ProjectDragPayload(projectID: project.id ?? -1))
-                            .dropDestination(for: ProjectDragPayload.self) { items, _ in
-                                guard let dragged = items.first else { return false }
-                                return reorderProject(draggedID: dragged.projectID, ontoID: project.id)
-                            }
+                        }
+                        .onMove { source, destination in
+                            Task { try? await store.moveProjects(fromOffsets: source, toOffset: destination) }
                         }
                     }
                 }
@@ -299,15 +284,6 @@ struct SidebarView: View {
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
         }
-    }
-
-    private func reorderProject(draggedID: Int64, ontoID: Int64?) -> Bool {
-        guard let ontoID, draggedID != ontoID else { return true }
-        guard let fromIndex = store.projects.firstIndex(where: { $0.id == draggedID }),
-              let toIndex = store.projects.firstIndex(where: { $0.id == ontoID }) else { return false }
-        let destination = toIndex > fromIndex ? toIndex + 1 : toIndex
-        Task { try? await store.moveProjects(fromOffsets: IndexSet(integer: fromIndex), toOffset: destination) }
-        return true
     }
 
     private func projectRow(_ project: Project, taskCount: Int) -> some View {
