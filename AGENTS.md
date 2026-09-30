@@ -41,6 +41,13 @@ swift build
 Use the bundle, not `swift run`: the Settings scene and notifications need a
 real bundle identifier. A clean release build can take ~10 minutes.
 
+## Releasing
+
+`./scripts/release.sh patch|minor|major|X.Y.Z[-pre]` on a clean `main` bumps
+`VERSION`, commits and tags; `git push origin main vX.Y.Z` then publishes a
+GitHub Release (DMG, zip, `SHA256SUMS`). Pushing needs explicit permission.
+The tag must match `VERSION` and be on `main`. Builds are not notarized.
+
 ## Testing
 
 ```sh

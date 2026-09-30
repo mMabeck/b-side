@@ -81,25 +81,3 @@ open "dist/B-Side.app"
 
 Run it from the app bundle rather than `swift run`: the SwiftUI `Settings` scene
 and user notifications need a real bundle identifier.
-
-## Release
-
-`VERSION` holds the app version; the build number is the commit count. Cut a
-release from a clean `main`, then push the tag:
-
-```sh
-./scripts/release.sh patch        # or minor, major, or an explicit 0.3.0-beta.1
-git push origin main v0.1.1
-```
-
-The tag runs `.github/workflows/release.yml`: it rejects tags that don't match
-`VERSION` or aren't on `main`, then tests, bundles, launch-smoke-tests and
-publishes a GitHub Release with a `.dmg`, a zipped `.app` and `SHA256SUMS`. Tags with a
-suffix (`v0.3.0-beta.1`) are marked pre-release.
-
-The app is ad-hoc signed and not notarized, so a downloaded copy is quarantined
-by Gatekeeper. Clear it after installing:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/B-Side.app
-```
