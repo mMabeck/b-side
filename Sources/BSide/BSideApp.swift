@@ -33,6 +33,7 @@ struct BSideApp: App {
             ContentView(store: store)
         }
         .defaultSize(width: 1400, height: 900)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         // `.contentMinSize`, not `.contentSize`, which fights the user resizing the window.
         .windowResizability(.contentMinSize)
         .commands {
