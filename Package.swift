@@ -25,6 +25,13 @@ let package = Package(
             name: "BSide",
             dependencies: ["BSideKit"]
         ),
+        .executableTarget(
+            name: "BSideSeed",
+            dependencies: [
+                "BSideKit",
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ]
+        ),
         .target(
             name: "BSideKit",
             dependencies: [
