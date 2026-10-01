@@ -57,6 +57,13 @@ public final class ProjectsStore {
         markIdle(taskId)
     }
 
+    /// Stays unread while the task remains selected; only reselecting it or reactivating the app clears it.
+    public func toggleTaskUnread(_ taskId: Int64) {
+        if unreadTaskIDs.remove(taskId) == nil {
+            unreadTaskIDs.insert(taskId)
+        }
+    }
+
     /// A genuine busy→idle transition also marks the task unread, unless B-Side is frontmost and already showing it.
     @discardableResult
     private func markIdle(_ taskId: Int64) -> Bool {

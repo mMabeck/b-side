@@ -123,6 +123,7 @@ public enum GhosttyBridge {
     keybind = cmd+m=unbind
     keybind = cmd+shift+r=unbind
     keybind = cmd+shift+d=unbind
+    keybind = cmd+shift+u=unbind
     \(digitUnbinds)
 
     """
