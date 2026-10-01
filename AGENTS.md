@@ -38,6 +38,10 @@ swift build
 ./scripts/bundle.sh && open dist/B-Side.app
 ```
 
+`./scripts/launch-test.sh` builds the current checkout as "B-Side Test"
+(own bundle id, settings and data) and opens it beside the real app,
+replacing any older test copy.
+
 Use the bundle, not `swift run`: the Settings scene and notifications need a
 real bundle identifier. A clean release build can take ~10 minutes.
 
