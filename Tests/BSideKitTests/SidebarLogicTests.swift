@@ -64,23 +64,23 @@ struct SidebarLogicTests {
     }
 
 
-    @Test(
-        "reconciledRow leaves a current row untouched when it already represents the store selection, and only re-derives it otherwise",
-        arguments: [
-            (current: SidebarView.SidebarRowID.task(1) as SidebarView.SidebarRowID?, selectedTaskID: Int64?.some(1), selectedProjectID: Int64?.some(9), openTaskIDs: [Int64](), expected: SidebarView.SidebarRowID.task(1) as SidebarView.SidebarRowID?),
-            (current: SidebarView.SidebarRowID.task(1), selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.task(1)),
-            (current: SidebarView.SidebarRowID.activeTask(1), selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [], expected: SidebarView.SidebarRowID.activeTask(1)),
-            (current: SidebarView.SidebarRowID.project(9), selectedTaskID: nil, selectedProjectID: 9, openTaskIDs: [], expected: SidebarView.SidebarRowID.project(9)),
-            (current: nil, selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.activeTask(1)),
-            (current: nil, selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [], expected: SidebarView.SidebarRowID.task(1)),
-            (current: SidebarView.SidebarRowID.activeTask(1), selectedTaskID: nil, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.project(9)),
-            (current: SidebarView.SidebarRowID.task(2), selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1], expected: SidebarView.SidebarRowID.activeTask(1)),
-            (current: SidebarView.SidebarRowID.project(9), selectedTaskID: nil, selectedProjectID: nil, openTaskIDs: [], expected: nil),
-        ] as [(current: SidebarView.SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64], expected: SidebarView.SidebarRowID?)]
-    )
-    func reconciledRowCases(current: SidebarView.SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64], expected: SidebarView.SidebarRowID?) {
-        let result = SidebarView.reconciledRow(current: current, selectedTaskID: selectedTaskID, selectedProjectID: selectedProjectID, openTaskIDs: openTaskIDs)
-        #expect(result == expected)
+    @Test("A selected task with an open terminal maps to both its Active and project rows")
+    func selectedRowsMirrorOpenTask() {
+        typealias Row = SidebarView.SidebarRowID
+        #expect(SidebarView.selectedRows(selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [1]) == [Row.task(1), .activeTask(1)])
+        #expect(SidebarView.selectedRows(selectedTaskID: 1, selectedProjectID: 9, openTaskIDs: [2]) == [Row.task(1)])
+        #expect(SidebarView.selectedRows(selectedTaskID: nil, selectedProjectID: 9, openTaskIDs: [1]) == [Row.project(9)])
+        #expect(SidebarView.selectedRows(selectedTaskID: nil, selectedProjectID: nil, openTaskIDs: []).isEmpty)
+    }
+
+    @Test("Only a single newly added row counts as a click; mirror-row, deselect and range changes are reverted")
+    func clickedRowDetection() {
+        typealias Row = SidebarView.SidebarRowID
+        let mirrored: Set<Row> = [.task(1), .activeTask(1)]
+        #expect(SidebarView.clickedRow(from: mirrored, to: [.task(2)]) == .task(2))
+        #expect(SidebarView.clickedRow(from: mirrored, to: [.task(1)]) == nil)
+        #expect(SidebarView.clickedRow(from: mirrored, to: []) == nil)
+        #expect(SidebarView.clickedRow(from: mirrored, to: [.task(2), .task(3)]) == nil)
     }
 
 

@@ -29,12 +29,28 @@ public struct TerminalCommands: Commands {
             }
             .keyboardShortcut(TerminalCloseShortcut.restartSession)
             .disabled(!isTaskSelected || focusedStore == nil)
+
+            Button(isSelectedTaskUnread ? "Mark as Read" : "Mark as Unread") {
+                if let id = selectedTaskID {
+                    store.toggleTaskUnread(id)
+                }
+            }
+            .keyboardShortcut(TerminalCloseShortcut.toggleUnread)
+            .disabled(selectedTaskID == nil || focusedStore == nil)
         }
     }
 
     private var isTaskSelected: Bool {
-        if case .task = store.mainSelection { return true }
-        return false
+        selectedTaskID != nil
+    }
+
+    private var selectedTaskID: Int64? {
+        if case .task(let task, _) = store.mainSelection { return task.id }
+        return nil
+    }
+
+    private var isSelectedTaskUnread: Bool {
+        selectedTaskID.map(store.unreadTaskIDs.contains) ?? false
     }
 }
 
@@ -43,4 +59,6 @@ public enum TerminalCloseShortcut {
 
     /// Cmd+Shift+R, since Ghostty binds plain Cmd+R to `reload_config`.
     public static let restartSession = KeyboardShortcut("r", modifiers: [.command, .shift])
+
+    public static let toggleUnread = KeyboardShortcut("u", modifiers: [.command, .shift])
 }

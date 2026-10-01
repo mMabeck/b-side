@@ -98,13 +98,19 @@ struct ProjectsStoreSelectionTests {
     }
 
 
-    @Test("Selecting a task clears its unread flag")
+    @Test("Selecting a task clears its unread flag, whether set by going idle or manually")
     func selectingTaskClearsUnread() async throws {
         let (store, projectA, _, taskA) = try await makeStore()
         let id = try #require(taskA.id)
 
         store.setTaskBusy(id)
         store.clearTaskBusy(id)
+        #expect(store.unreadTaskIDs.contains(id))
+
+        store.selectTask(taskA, project: projectA)
+        #expect(!store.unreadTaskIDs.contains(id))
+
+        store.toggleTaskUnread(id)
         #expect(store.unreadTaskIDs.contains(id))
 
         store.selectTask(taskA, project: projectA)
