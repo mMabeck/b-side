@@ -22,7 +22,7 @@ struct SidebarSelectionTests {
         return (store, database)
     }
 
-    @Test("Selection stays put across programmatic selects, terminal opens, clicks, and activity bumps")
+    @Test("Selection highlights a task in Active and its project, and stays put across selects, terminal opens, clicks, and activity bumps")
     func selectionStaysStable() async throws {
         let (store, database) = try makeStore()
         let (project, alpha, beta): (Project, TaskRecord, TaskRecord) = try await database.dbQueue.write { db in
@@ -72,25 +72,25 @@ struct SidebarSelectionTests {
             try await Task.sleep(for: .milliseconds(50))
         }
 
-        func expectSelection(_ row: SidebarView.SidebarRowID, timeout: Duration = .seconds(2)) async throws {
+        func expectSelection(_ rows: Set<SidebarView.SidebarRowID>, timeout: Duration = .seconds(2)) async throws {
             try await settle()
             let deadline = ContinuousClock.now + timeout
             var matched = false
             var lastRows: [Int] = []
             var lastSelectedViews: [Int] = []
             while ContinuousClock.now < deadline {
-                let index = layout().firstIndex(where: { $0 == row })
+                let indices = layout().indices.filter { layout()[$0].map(rows.contains) ?? false }
                 let selectedRows = Array(table.selectedRowIndexes)
                 let selectedViews = (0..<table.numberOfRows).filter { table.rowView(atRow: $0, makeIfNecessary: false)?.isSelected == true }
                 lastRows = selectedRows
                 lastSelectedViews = selectedViews
-                if let index, selectedRows == [index], selectedViews == [index] {
+                if indices.count == rows.count, selectedRows == indices, selectedViews == indices {
                     matched = true
                     break
                 }
                 try await Task.sleep(for: .milliseconds(20))
             }
-            #expect(matched, "expected selection at \(row): selectedRows=\(lastRows) selectedViews=\(lastSelectedViews) layout=\(layout())")
+            #expect(matched, "expected selection at \(rows): selectedRows=\(lastRows) selectedViews=\(lastSelectedViews) layout=\(layout())")
         }
 
         func click(_ row: SidebarView.SidebarRowID) throws {
@@ -98,31 +98,30 @@ struct SidebarSelectionTests {
             table.selectRowIndexes([index], byExtendingSelection: false)
         }
 
+        let alphaRows: Set<SidebarView.SidebarRowID> = [.task(alpha.id!), .activeTask(alpha.id!)]
+        let betaRows: Set<SidebarView.SidebarRowID> = [.task(beta.id!), .activeTask(beta.id!)]
+
         store.selectTask(alpha, project: project)
-        try await expectSelection(.task(alpha.id!))
+        try await expectSelection([.task(alpha.id!)])
         store.noteTerminalOpened(taskID: alpha.id!)
-        try await expectSelection(.task(alpha.id!))
+        try await expectSelection(alphaRows)
 
         store.noteTerminalOpened(taskID: beta.id!)
         try await settle()
         try click(.task(beta.id!))
-        try await expectSelection(.task(beta.id!))
+        try await expectSelection(betaRows)
         store.bumpTaskActivity(alpha.id!)
-        try await expectSelection(.task(beta.id!))
+        try await expectSelection(betaRows)
         store.bumpTaskActivity(beta.id!)
-        try await expectSelection(.task(beta.id!))
+        try await expectSelection(betaRows)
 
         try click(.activeTask(beta.id!))
-        try await expectSelection(.activeTask(beta.id!))
-        store.bumpTaskActivity(alpha.id!)
-        try await expectSelection(.activeTask(beta.id!))
-        store.bumpTaskActivity(beta.id!)
-        try await expectSelection(.activeTask(beta.id!))
+        try await expectSelection(betaRows)
 
-        store.selectTask(alpha, project: project)
-        try await expectSelection(.activeTask(alpha.id!))
+        try click(.activeTask(alpha.id!))
+        try await expectSelection(alphaRows)
 
         table.deselectAll(nil)
-        try await expectSelection(.activeTask(alpha.id!))
+        try await expectSelection(alphaRows)
     }
 }

@@ -71,14 +71,17 @@ struct SidebarView: View {
                 .listStyle(.sidebar)
                 .overlayScrollers()
                 .onAppear { syncSelectionFromStore() }
-                .onChange(of: selection) { _, newValue in
-                    // The List clears selection to nil on empty-space or Cmd-clicks of the selected row; treat that as a revert.
-                    guard let newValue else {
+                .onChange(of: selection) { oldValue, newValue in
+                    // Deselecting, Cmd-clicking the selection, or clicking a task's mirror row adds nothing new; treat that as a revert.
+                    guard let clicked = Self.clickedRow(from: oldValue, to: newValue) else {
                         syncSelectionFromStore()
                         return
                     }
-                    guard !Self.matches(newValue, selectedTaskID: store.selectedTaskID, selectedProjectID: store.selectedProjectID) else { return }
-                    switch newValue {
+                    guard !Self.matches(clicked, selectedTaskID: store.selectedTaskID, selectedProjectID: store.selectedProjectID) else {
+                        syncSelectionFromStore()
+                        return
+                    }
+                    switch clicked {
                     case .task(let id), .activeTask(let id):
                         if let match = store.taskAndProject(forID: id) {
                             store.selectTask(match.task, project: match.project)
@@ -89,6 +92,7 @@ struct SidebarView: View {
                         }
                     }
                 }
+                .onChange(of: store.openTerminalTaskIDs) { syncSelectionFromStore() }
                 .onChange(of: store.selectedTaskID) { syncSelectionFromStore() }
                 .onChange(of: store.selectedProjectID) { syncSelectionFromStore() }
             }
@@ -137,7 +141,7 @@ struct SidebarView: View {
         case activeTask(Int64)
     }
 
-    @State private var selection: SidebarRowID?
+    @State private var selection: Set<SidebarRowID> = []
 
     static func matches(_ row: SidebarRowID, selectedTaskID: Int64?, selectedProjectID: Int64?) -> Bool {
         switch row {
@@ -148,27 +152,29 @@ struct SidebarView: View {
         }
     }
 
-    /// Keeps `current` if it still represents the selection: re-deriving when a terminal opens moves the highlight mid-insert.
-    static func reconciledRow(current: SidebarRowID?, selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64]) -> SidebarRowID? {
-        if let current, matches(current, selectedTaskID: selectedTaskID, selectedProjectID: selectedProjectID) {
-            return current
-        }
+    /// A selected task with an open terminal is highlighted both in Active and under its project.
+    static func selectedRows(selectedTaskID: Int64?, selectedProjectID: Int64?, openTaskIDs: [Int64]) -> Set<SidebarRowID> {
         if let selectedTaskID {
-            return openTaskIDs.contains(selectedTaskID) ? .activeTask(selectedTaskID) : .task(selectedTaskID)
+            return openTaskIDs.contains(selectedTaskID) ? [.task(selectedTaskID), .activeTask(selectedTaskID)] : [.task(selectedTaskID)]
         }
-        if let selectedProjectID {
-            return .project(selectedProjectID)
-        }
-        return nil
+        return selectedProjectID.map { [.project($0)] } ?? []
+    }
+
+    /// Ambiguous changes such as Shift-click ranges yield nil rather than guessing which row was meant.
+    static func clickedRow(from oldRows: Set<SidebarRowID>, to newRows: Set<SidebarRowID>) -> SidebarRowID? {
+        let added = newRows.subtracting(oldRows)
+        return added.count == 1 ? added.first : nil
     }
 
     private func syncSelectionFromStore() {
-        selection = Self.reconciledRow(
-            current: selection,
+        let rows = Self.selectedRows(
             selectedTaskID: store.selectedTaskID,
             selectedProjectID: store.selectedProjectID,
             openTaskIDs: store.openTerminalTaskIDs
         )
+        if selection != rows {
+            selection = rows
+        }
     }
 
     // Row ids must be unique across the whole List, not just per ForEach.
@@ -299,6 +305,7 @@ struct SidebarView: View {
         }
         .padding(.vertical, 2)
         .help(hint ?? "")
+        .contextMenu { taskContextMenu(task, project: project) }
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
         }
@@ -457,16 +464,25 @@ struct SidebarView: View {
             }
         }
         .padding(.vertical, 2)
-        .contextMenu {
-            Button("Archive") {
-                Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
-            }
-            Button("Delete…", role: .destructive) {
-                pendingDeleteTask = (task, project)
-            }
-        }
+        .contextMenu { taskContextMenu(task, project: project) }
         .task(id: task.id) {
             await store.refreshSyncStatus(for: task, project: project)
+        }
+    }
+
+    @ViewBuilder
+    private func taskContextMenu(_ task: TaskRecord, project: Project) -> some View {
+        if let id = task.id {
+            Button(store.unreadTaskIDs.contains(id) ? "Mark as Read" : "Mark as Unread") {
+                store.toggleTaskUnread(id)
+            }
+            Divider()
+        }
+        Button("Archive") {
+            Task { try? await store.archiveTask(task, project: project, removeWorktree: true) }
+        }
+        Button("Delete…", role: .destructive) {
+            pendingDeleteTask = (task, project)
         }
     }
 
