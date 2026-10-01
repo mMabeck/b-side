@@ -24,6 +24,7 @@ struct SidebarView: View {
                             // A second reorder before NSTableView's row-move animation settles composites one row's content under another's.
                             ForEach(activeTaskRows) { entry in
                                 activeTaskRow(entry.task, project: entry.project, shortcutIndex: entry.shortcutIndex)
+                                    .sidebarRowHover(isSelected: selection.contains(.activeTask(entry.taskID)), palette: theme.palette)
                                     .tag(SidebarRowID.activeTask(entry.taskID))
                             }
                             .transaction { $0.animation = nil }
@@ -51,6 +52,7 @@ struct SidebarView: View {
                                             .padding(.vertical, 6)
                                     case .task(let task):
                                         taskRow(task, project: project)
+                                            .sidebarRowHover(isSelected: selection.contains(.task(task.id ?? -1)), palette: theme.palette)
                                             .tag(SidebarRowID.task(task.id ?? -1))
                                     case .showMore(let hiddenCount, let projectID):
                                         showMoreRow(hiddenCount: hiddenCount, projectID: projectID)
@@ -60,6 +62,7 @@ struct SidebarView: View {
                                 }
                             } label: {
                                 projectRow(project, taskCount: tasks.count)
+                                    .sidebarRowHover(isSelected: selection.contains(.project(project.id ?? -1)), palette: theme.palette)
                             }
                             .tag(SidebarRowID.project(project.id ?? -1))
                         }
