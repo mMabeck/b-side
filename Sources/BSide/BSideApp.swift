@@ -33,7 +33,8 @@ struct BSideApp: App {
             ContentView(store: store)
         }
         .defaultSize(width: 1400, height: 900)
-        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        // Not `.unifiedCompact`: on macOS 26 it pushes the floating sidebar below the toolbar and shrinks its buttons.
+        .windowToolbarStyle(.unified(showsTitle: false))
         // `.contentMinSize`, not `.contentSize`, which fights the user resizing the window.
         .windowResizability(.contentMinSize)
         .commands {

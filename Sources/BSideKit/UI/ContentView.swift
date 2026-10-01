@@ -66,6 +66,8 @@ public struct ContentView: View {
                     .clipped()
             }
             .toolbar {
+                // Without the title as flexible space, trailing items collapse leftwards.
+                ToolbarSpacer(.flexible)
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         if let folder = EditorCommands.targetFolder(selection: store.mainSelection) {
